@@ -3818,6 +3818,40 @@ function _doBuildProjection() {
   // Update seluruh dashboard (stat cards, stock bars, jadwal, item kritis)
   try { updateDashStats(); } catch(e) { console.error('[build] updateDashStats CRASH:', e.message, e.stack); }
   toast('Projection: ' + projection.length + ' item, ' + urgentCount + ' urgent \u2713', 'ok');
+
+  // ─── WA BOT: Simpan snapshot hasil kalkulasi ke Firestore (key: fc_result) ───
+  // Data ini yang dibaca bot WA saat user tanya stock/DOI/kebutuhan bulan ini
+  try {
+    var _fcSnapshot = projection.map(function(p) {
+      return {
+        code:          p.productCode  || '',
+        name:          p.description  || '',
+        realName:      p.realName     || '',
+        uom:           p.uom          || '',
+        supplier:      p.supplier     || '',
+        site:          p.site         || '',
+        stockBTG:      p.stockBTG     || 0,
+        stockSNG:      p.stockSNG     || 0,
+        stockTotal:    (p.stockBTG||0) + (p.stockSNG||0),
+        doiFC:         p.doiFC        || 0,
+        doiMatcom:     p.doiMatcom    || 0,
+        reqThisMonth:  p.actualMRP    || 0,
+        reqMax3:       p.max3MRP      || 0,
+        incoming:      p.totalIncoming|| 0,
+        ospr:          p.totalOSPR    || 0,
+        coverageDate:  p.coverageDateStr || '',
+        category:      p.category     || '',
+        abc:           p.abc          || '',
+        itemType:      p.itemType     || ''
+      };
+    });
+    var _fcSnapJSON = JSON.stringify({ ts: new Date().toISOString(), items: _fcSnapshot });
+    cloudSave('fc_result', _fcSnapJSON);
+    console.log('[WA] fc_result saved to Firestore: ' + _fcSnapshot.length + ' items');
+  } catch(e) {
+    console.warn('[WA] fc_result save failed:', e.message);
+  }
+  // ─────────────────────────────────────────────────────────────────────────────
 }
 function getCutoff() {
   var d = new Date();
