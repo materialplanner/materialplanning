@@ -4193,11 +4193,22 @@ function checkNotifications() {
     var grpoCodes = {};
     STATE.grpoData.forEach(function(g){ grpoCodes[g.itemCode] = true; });
     var cmtChanged = false;
+    var _activePOKeysGrpo = {};
+    (STATE.poData||[]).forEach(function(p){ _activePOKeysGrpo[p.docNum+'_'+p.itemCode]=true; });
     Object.keys(STATE.projComments).forEach(function(code){
       var cmt = STATE.projComments[code];
       if(!cmt || cmt._manual) return; // Don't touch manual comments
       if(grpoCodes[code]) {
-        // GRPO received for this item → clear auto-comment
+        // Hanya hapus comment kalau tidak ada konfirmasi aktif untuk item ini
+        // (PO masih open di poData DAN punya confDate)
+        var hasActiveConf = Object.keys(STATE.poOverrides).some(function(k){
+          if(!_activePOKeysGrpo[k]) return false; // PO sudah tidak open
+          var us = k.indexOf('_');
+          if(us < 0 || k.slice(us+1) !== code) return false;
+          return !!(STATE.poOverrides[k].confDate);
+        });
+        if(hasActiveConf) return; // Ada konfirmasi aktif — jangan hapus comment
+        // GRPO received dan tidak ada konfirmasi aktif → clear auto-comment
         delete STATE.projComments[code];
         var p = STATE.projectionData.find(function(x){ return x.productCode === code; });
         if(p) p.comment = '';
@@ -5832,6 +5843,8 @@ function saveFeedback() {
   closeModal('modal-fb');
   renderSchedule();
   updateDashStats();
+  // Re-render projection supaya comment langsung terupdate tanpa harus pindah halaman
+  if(STATE.projectionData && STATE.projectionData.length) renderProjection();
   toast('Konfirmasi: ' + doneChks + '/' + totalChks + ' item' + (anyConfirmed ? ' ✓' : ''), anyConfirmed ? 'ok' : 'inf');
 }
 function saveProjComment(el) {
