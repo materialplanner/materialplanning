@@ -3818,40 +3818,6 @@ function _doBuildProjection() {
   // Update seluruh dashboard (stat cards, stock bars, jadwal, item kritis)
   try { updateDashStats(); } catch(e) { console.error('[build] updateDashStats CRASH:', e.message, e.stack); }
   toast('Projection: ' + projection.length + ' item, ' + urgentCount + ' urgent \u2713', 'ok');
-
-  // ─── WA BOT: Simpan snapshot hasil kalkulasi ke Firestore (key: fc_result) ───
-  // Data ini yang dibaca bot WA saat user tanya stock/DOI/kebutuhan bulan ini
-  try {
-    var _fcSnapshot = projection.map(function(p) {
-      return {
-        code:          p.productCode  || '',
-        name:          p.description  || '',
-        realName:      p.realName     || '',
-        uom:           p.uom          || '',
-        supplier:      p.supplier     || '',
-        site:          p.site         || '',
-        stockBTG:      p.stockBTG     || 0,
-        stockSNG:      p.stockSNG     || 0,
-        stockTotal:    (p.stockBTG||0) + (p.stockSNG||0),
-        doiFC:         p.doiFC        || 0,
-        doiMatcom:     p.doiMatcom    || 0,
-        reqThisMonth:  p.actualMRP    || 0,
-        reqMax3:       p.max3MRP      || 0,
-        incoming:      p.totalIncoming|| 0,
-        ospr:          p.totalOSPR    || 0,
-        coverageDate:  p.coverageDateStr || '',
-        category:      p.category     || '',
-        abc:           p.abc          || '',
-        itemType:      p.itemType     || ''
-      };
-    });
-    var _fcSnapJSON = JSON.stringify({ ts: new Date().toISOString(), items: _fcSnapshot });
-    cloudSave('fc_result', _fcSnapJSON);
-    console.log('[WA] fc_result saved to Firestore: ' + _fcSnapshot.length + ' items');
-  } catch(e) {
-    console.warn('[WA] fc_result save failed:', e.message);
-  }
-  // ─────────────────────────────────────────────────────────────────────────────
 }
 function getCutoff() {
   var d = new Date();
@@ -4698,16 +4664,7 @@ function _toggleGenDropdown() {
 function generateSchedule(typeFilter) {
   if(!_requireAdmin('generate jadwal')) return;
 
-  // Cleanup: reset isManual untuk PO yang tanggalnya sudah lewat minggu ini
-  // Supaya tidak terbaca sebagai manual forced di generate berikutnya
-  var todayISO2 = new Date().toISOString().split('T')[0];
-  Object.keys(STATE.poOverrides||{}).forEach(function(key){
-    var ovr = STATE.poOverrides[key];
-    if(ovr && ovr.isManual && ovr.date && ovr.date < todayISO2) {
-      ovr.isManual = false;
-      ovr.isAuto = true;
-    }
-  });
+  // Cleanup dipindahkan ke setelah delivMonISO dihitung (lihat Step 4)
 
   // ── Helper: format tanggal lokal sebagai YYYY-MM-DD (bukan UTC) ──────────────
   function localISO(d) {
@@ -4828,8 +4785,18 @@ function generateSchedule(typeFilter) {
   var delivMonISO = localISO(delivWeek[0]);
   var delivFriISO = localISO(delivFri);
 
+  // Cleanup: reset isManual untuk PO yang tanggalnya sebelum Senin minggu depan
+  // Pakai delivMonISO (bukan today) supaya tanggal hari ini & sisa minggu ini ikut direset
+  Object.keys(STATE.poOverrides||{}).forEach(function(key){
+    var ovr = STATE.poOverrides[key];
+    if(ovr && ovr.isManual && ovr.date && ovr.date < delivMonISO) {
+      ovr.isManual = false;
+      ovr.isAuto = true;
+    }
+  });
+
   urgentItems.forEach(function(item){
-    // Item yang manual forced → pakai manual date dari poOverrides langsung
+    // Item yang manual forced → pakai manual date dari poOverrides, clamp ke delivery week
     if(item._manualForced) {
       var manISO = null;
       STATE.poData.filter(function(p){ return p.itemCode === item.productCode; }).forEach(function(po){
@@ -4839,7 +4806,14 @@ function generateSchedule(typeFilter) {
           if(!manISO || ovr.date < manISO) manISO = ovr.date;
         }
       });
-      item._delivISO = manISO ? nextWorkday(manISO) : delivMonISO;
+      // Clamp ke delivery week — jangan biarkan tanggal di luar minggu depan
+      if(manISO) {
+        if(manISO < delivMonISO) manISO = delivMonISO;
+        else if(manISO > delivFriISO) manISO = delivFriISO;
+        item._delivISO = nextWorkday(manISO);
+      } else {
+        item._delivISO = delivMonISO;
+      }
       return;
     }
     var raw = new Date(item.coverageDate);
