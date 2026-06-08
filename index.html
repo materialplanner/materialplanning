@@ -895,6 +895,28 @@ body.light-mode .theme-toggle-knob{transform:translateX(15px);background:var(--a
       </div>
     </div>
 
+    <div class="card">
+      <div class="card-hdr"><span class="card-title">📦 Pallet PM</span><span id="pallet_pm-status" class="dot off"></span></div>
+      <div style="padding:14px">
+        <div class="fg"><label style="font-size:11px">Google Sheets URL</label><input id="pallet_pm-url" placeholder="https://docs.google.com/spreadsheets/d/..." style="width:100%;font-size:11px"></div>
+        <div class="fg"><label style="font-size:11px">Nama Tab</label><input id="pallet_pm-sheet" placeholder="Pallet PM" style="width:100%;font-size:11px"></div>
+        <button class="btn btn-sm btn-primary" onclick="loadSheetData('pallet_pm')" style="width:100%;margin-top:6px">Muat Pallet PM</button>
+        <div id="pallet_pm-info" style="margin-top:8px;font-size:11px;color:var(--muted)"></div>
+        <div id="pallet_pm-ts" style="font-size:10px;color:var(--muted);margin-top:2px"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-hdr"><span class="card-title">🛢️ Pallet RM</span><span id="pallet_rm-status" class="dot off"></span></div>
+      <div style="padding:14px">
+        <div class="fg"><label style="font-size:11px">Google Sheets URL</label><input id="pallet_rm-url" placeholder="https://docs.google.com/spreadsheets/d/..." style="width:100%;font-size:11px"></div>
+        <div class="fg"><label style="font-size:11px">Nama Tab</label><input id="pallet_rm-sheet" placeholder="Pallet RM" style="width:100%;font-size:11px"></div>
+        <button class="btn btn-sm btn-primary" onclick="loadSheetData('pallet_rm')" style="width:100%;margin-top:6px">Muat Pallet RM</button>
+        <div id="pallet_rm-info" style="margin-top:8px;font-size:11px;color:var(--muted)"></div>
+        <div id="pallet_rm-ts" style="font-size:10px;color:var(--muted);margin-top:2px"></div>
+      </div>
+    </div>
+
   </div>
   <div style="margin-top:14px;padding:10px 14px;background:var(--bg3);border-radius:var(--r);max-width:1100px;font-size:11px;color:var(--muted)">
     <strong style="color:var(--text)">Catatan:</strong> Pastikan Google Sheets sudah di-share sebagai <strong>"Anyone with the link"</strong> agar bisa dibaca. URL dan tab tersimpan di cloud (Firebase), tidak perlu input ulang di laptop lain.
@@ -1445,8 +1467,8 @@ var _lastSyncMsg = '';
 var CLOUD_KEYS = [
   'schedule','po_overrides','proj_comments','stock_history','proj_history',
   'suppliers','proj_hidden_cols','proj_snapshots',
-  'sheet_url_master','sheet_url_mrp','sheet_url_realname',
-  'sheet_tab_master','sheet_tab_mrp','sheet_tab_realname',
+  'sheet_url_master','sheet_url_mrp','sheet_url_realname','sheet_url_pallet_pm','sheet_url_pallet_rm',
+  'sheet_tab_master','sheet_tab_mrp','sheet_tab_realname','sheet_tab_pallet_pm','sheet_tab_pallet_rm',
   'sap_url','sap_user','sap_pass','fonnte','wn','workdays','last_sync','proj_highlighted',
   'sap_cache_stock','sap_cache_po','sap_cache_grpo','sap_cache_ospr',
   'admin_user','admin_pass',
@@ -1955,6 +1977,24 @@ function loadSheetData(type) {
       if(infoEl) infoEl.textContent = cnt+' item dimuat ✓';
       if(dotEl) dotEl.className='dot';
       toast('Real Name: '+cnt+' item ✓','ok');
+
+    } else if(type==='pallet_pm'){
+      STATE.palletPM = processPalletPM(rows, headers);
+      localStorage.setItem('pallet_pm', JSON.stringify(STATE.palletPM));
+      localStorage.setItem('pallet_pm_upload_ts', ts);
+      var cnt = Object.keys(STATE.palletPM).length;
+      if(infoEl) infoEl.textContent = cnt+' item dimuat ✓';
+      if(dotEl) dotEl.className='dot';
+      toast('Pallet PM: '+cnt+' item ✓','ok');
+
+    } else if(type==='pallet_rm'){
+      STATE.palletRM = processPalletRM(rows, headers);
+      localStorage.setItem('pallet_rm', JSON.stringify(STATE.palletRM));
+      localStorage.setItem('pallet_rm_upload_ts', ts);
+      var cnt = Object.keys(STATE.palletRM).length;
+      if(infoEl) infoEl.textContent = cnt+' item dimuat ✓';
+      if(dotEl) dotEl.className='dot';
+      toast('Pallet RM: '+cnt+' item ✓','ok');
     }
     if(tsEl) tsEl.textContent='Dimuat: '+ts+(sheet?' (tab: '+sheet+')':'');
   }).catch(function(e){
@@ -1965,7 +2005,7 @@ function loadSheetData(type) {
 
 function loadAllSheets(autoBuild) {
   var promises = [];
-  ['master','mrp','realname'].forEach(function(t){
+  ['master','mrp','realname','pallet_pm','pallet_rm'].forEach(function(t){
     if(localStorage.getItem('sheet_url_'+t)) promises.push(loadSheetData(t));
   });
   if(!promises.length) { toast('Belum ada URL Sheets. Buka menu Data Source terlebih dahulu.','err'); return Promise.resolve(); }
@@ -1973,14 +2013,13 @@ function loadAllSheets(autoBuild) {
     if(autoBuild && STATE.masterData && STATE.mrpData) {
       toast('Auto-build projection...', 'inf');
       buildProjection();
-      // Update dash-sub setelah build selesai
       setTimeout(function(){ if(_lastSyncMsg) document.getElementById('dash-sub').textContent = _lastSyncMsg; updateDashStats(); }, 500);
     }
   });
 }
 
 function _restoreSheetUrls() {
-  ['master','mrp','realname'].forEach(function(t){
+  ['master','mrp','realname','pallet_pm','pallet_rm'].forEach(function(t){
     var u=localStorage.getItem('sheet_url_'+t), s=localStorage.getItem('sheet_tab_'+t);
     var ue=document.getElementById(t+'-url'), se=document.getElementById(t+'-sheet');
     if(ue&&u) ue.value=u; if(se&&s) se.value=s;
@@ -2031,7 +2070,9 @@ var STATE = {
   supplierData: JSON.parse(localStorage.getItem('suppliers') || '[]'),
   poOverrides: JSON.parse(localStorage.getItem('po_overrides') || '{}'),
   projectionSnapshots: JSON.parse(localStorage.getItem('proj_snapshots') || '{}'),
-  projComments: JSON.parse(localStorage.getItem('proj_comments') || '{}')
+  projComments: JSON.parse(localStorage.getItem('proj_comments') || '{}'),
+  palletPM: JSON.parse(localStorage.getItem('pallet_pm') || 'null'),
+  palletRM: JSON.parse(localStorage.getItem('pallet_rm') || 'null')
 };
 
 // Supplier blacklist — PO dari supplier ini tidak dipakai di semua kalkulasi
@@ -3488,6 +3529,49 @@ function processRealName(rows) {
     var code = cleanSAPCode(row['Item No.'] || row['Item No'] || row['Item Code'] || row['ItemCode'] || row['SAP Code'] || row['Code'] || '');
     var name = String(row['Real Name'] || row['RealName'] || row['Item Description'] || row['Description'] || row['Name'] || '').trim();
     if(code && name) result[code] = name;
+  });
+  return result;
+}
+
+function processPalletPM(rows) {
+  var result = {};
+  rows.forEach(function(row) {
+    // Support various header names
+    var code = cleanSAPCode(
+      row['Item Number'] || row['Item No.'] || row['Item No'] ||
+      row['Item Code'] || row['ItemCode'] || ''
+    );
+    if(!code || !code.match(/^\d/)) return;
+    var pcsKarton  = parseFloat(String(row['Pcs/Karton']  || row['Pcs Karton']  || row['PcsKarton']  || '0').replace(/[,.]/g, function(m){ return m===','?'.':''; })) || 0;
+    var kartonPalet= parseFloat(String(row['Karton/Palet'] || row['Karton Palet'] || row['KartonPalet'] || '0').replace(/[,.]/g, function(m){ return m===','?'.':''; })) || 0;
+    var pcsPalet   = parseFloat(String(row['Pcs/Palet']   || row['Pcs Palet']   || row['PcsPalet']   || '0').replace(/[,.]/g, function(m){ return m===','?'.':''; })) || 0;
+    // Hitung pcsPalet dari pcsKarton × kartonPalet kalau kolom kosong
+    if(!pcsPalet && pcsKarton && kartonPalet) pcsPalet = pcsKarton * kartonPalet;
+    if(code && pcsKarton > 0 && pcsPalet > 0) {
+      result[code] = { pcsKarton: pcsKarton, kartonPalet: kartonPalet, pcsPalet: pcsPalet };
+    }
+  });
+  return result;
+}
+
+function processPalletRM(rows) {
+  var result = {};
+  rows.forEach(function(row) {
+    var code = cleanSAPCode(
+      row['ItemCode'] || row['Item Code'] || row['Item No.'] ||
+      row['Item No'] || row['Item Number'] || ''
+    );
+    if(!code || !code.match(/^\d/)) return;
+    // Support typo "kuran Kemasa" (dari screenshot) dan variasi lain
+    var ukuranKemasan = parseFloat(String(
+      row['Ukuran Kemasan'] || row['kuran Kemasa'] || row['Ukuran'] || row['Kemasan'] || '0'
+    ).replace(/[^0-9.]/g, '')) || 0;
+    var bobotPalet = parseFloat(String(
+      row['Bobot/Palet'] || row['Bobot Palet'] || row['BobotPalet'] || row['Bobot'] || '0'
+    ).replace(/[^0-9.]/g, '')) || 0;
+    if(code && ukuranKemasan > 0 && bobotPalet > 0) {
+      result[code] = { ukuranKemasan: ukuranKemasan, bobotPalet: bobotPalet };
+    }
   });
   return result;
 }
@@ -6127,7 +6211,7 @@ function exportConfigHTML() {
   var wd      = localStorage.getItem('workdays') || CFG.workdays;
 
   // 3. Embed Sheet URLs
-  var sheetKeys = ['master','mrp','realname'];
+  var sheetKeys = ['master','mrp','realname','pallet_pm','pallet_rm'];
   var sheetInits = '';
   sheetKeys.forEach(function(t) {
     var u = localStorage.getItem('sheet_url_'+t)||'';
@@ -7153,7 +7237,38 @@ function _appInit() {
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// 📅 FORECAST & PROPOSE PR  — no Firebase, session-only state
+// ─── Pallet Usage Calculator ──────────────────────────────────────────────────
+// Menghitung berapa pallet untuk ending stock tertentu.
+// PM: threshold = 2 × pcsKarton; rumus = floor((ending - threshold) / pcsPalet) + 1
+// RM: threshold = 2 × ukuranKemasan; rumus = floor((ending - threshold) / bobotPalet) + 1
+//     Jika UOM gram → ukuranKemasan & bobotPalet dibagi 1000 dulu
+function _fcCalcPallet(code, endingStock, uom) {
+  var isRM = /^3/.test(code);
+  var isPM = /^4/.test(code);
+  if(isRM && STATE.palletRM) {
+    var pd = STATE.palletRM[code];
+    if(!pd) return null;
+    var ukuran = pd.ukuranKemasan;
+    var bobot  = pd.bobotPalet;
+    // Jika UOM gram, konversi ke kg
+    var uomLow = (uom||'').toLowerCase();
+    if(uomLow === 'gr' || uomLow === 'gram' || uomLow === 'g') {
+      ukuran = ukuran / 1000;
+      bobot  = bobot  / 1000;
+    }
+    var threshold = 2 * ukuran;
+    if(endingStock < threshold) return 0;
+    return Math.floor((endingStock - threshold) / bobot) + 1;
+  }
+  if(isPM && STATE.palletPM) {
+    var pd = STATE.palletPM[code];
+    if(!pd) return null;
+    var threshold = 2 * pd.pcsKarton;
+    if(endingStock < threshold) return 0;
+    return Math.floor((endingStock - threshold) / pd.pcsPalet) + 1;
+  }
+  return null;
+}
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // FC_MONTHS dynamic — start from current month (max Des)
@@ -8043,6 +8158,26 @@ function _fcDetailRow(code, fc, master) {
     + gRow('Stock (Ending)', isFcView ? fc.stockFc : fc.stock, stockClsFn)
     + gRow('DOI (hari)',     isFcView ? fc.doiFc   : fc.doi,   doiClsFn)
     + gRow('Propose PR', fc.propose, null, true, code)
+    + (function(){
+        // PALLET USAGE — hanya tampil kalau data pallet tersedia untuk item ini
+        var masterItem = (STATE.masterData||{})[code] || {};
+        var uom = masterItem.uom || '';
+        var stockArr = isFcView ? fc.stockFc : fc.stock;
+        var palletVals = (stockArr||[]).map(function(v){
+          return _fcCalcPallet(code, v||0, uom);
+        });
+        var hasPalletData = palletVals.some(function(v){ return v !== null; });
+        if(!hasPalletData) return '';
+        var cells = palletVals.map(function(v){
+          if(v === null) return '<td style="text-align:right;padding:5px 6px;color:var(--hint)">—</td>';
+          var color = v === 0 ? 'color:var(--hint)' : 'color:var(--teal);font-weight:600';
+          return '<td style="text-align:right;padding:5px 6px;'+color+'">'+v+'</td>';
+        }).join('');
+        return '<tr style="border-top:1px solid var(--border);background:rgba(20,184,166,.04)">'
+          + '<td style="padding:5px 6px;font-size:10.5px;font-weight:700;color:var(--teal);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap">Pallet Usage</td>'
+          + cells
+          + '<td></td></tr>';
+      }())
     + '</tbody></table></div>';
 
   // Pull-forward notification (Aktual view only)
