@@ -8341,35 +8341,50 @@ function _mpsUpload(input) {
       // Also try Indonesian with exact match
       var MONTH_MAP_ALT  = { 'Apr':'Plan Apr','May':'Plan May','Jun':'Plan Jun','Jul':'Plan Jul','Aug':'Plan Aug','Sep':'Plan Sep','Oct':'Plan Oct','Nov':'Plan Nov','Dec':'Plan Dec' };
 
-      // Detect which format by checking headers
+      // Cari kolom per bulan — regex case-insensitive
+      // Cover: singkatan Inggris (Aug), singkatan Indo (Agu),
+      //        nama penuh Inggris (August), nama penuh Indo (Agustus)
+      //        urutan "Plan X" atau "X Plan", dengan/tanpa spasi
+      var MONTH_REGEX = {
+        'Apr': /plan.*(apr(il)?)|apr(il)?.*plan/i,
+        'May': /plan.*(may|mei)|may.*plan|mei.*plan/i,
+        'Jun': /plan.*(jun(e|i)?)|jun(e|i)?.*plan/i,
+        'Jul': /plan.*(jul(y|i)?)|jul(y|i)?.*plan/i,
+        'Aug': /plan.*(aug(ust)?|agu(stus)?)|aug(ust)?.*plan|agu(stus)?.*plan/i,
+        'Sep': /plan.*(sep(tember)?)|sep(tember)?.*plan/i,
+        'Oct': /plan.*(oct(ober)?|okt(ober)?)|oct(ober)?.*plan|okt(ober)?.*plan/i,
+        'Nov': /plan.*(nov(ember)?)|nov(ember)?.*plan/i,
+        'Dec': /plan.*(dec(ember)?|des(ember)?)|dec(ember)?.*plan|des(ember)?.*plan/i,
+      };
       var planIdxs = {};
-      var monthMap = MONTH_MAP_LAMA;
-      if(headers.indexOf('MayPlan') < 0) {
-        // Cek header Indonesia — tidak hanya "Plan Mei" tapi juga Agu/Okt/Des
-        var hasIndo = headers.some(function(h){ return /Plan\s+(Mei|Agu|Okt|Des)/i.test(h); });
-        if(headers.indexOf('Plan Mei') >= 0 || hasIndo) monthMap = MONTH_MAP_BARU;
-        else monthMap = MONTH_MAP_ALT;
-      }
       MRP_MONTHS.forEach(function(m) {
-        var colName = monthMap[m];
-        var idx = headers.indexOf(colName);
-        // Fallback: partial match
+        // Coba exact match dulu (lebih cepat)
+        var colLama = { 'Apr':'AprPlan','May':'MayPlan','Jun':'JunPlan','Jul':'JulPlan','Aug':'AugPlan','Sep':'SepPlan','Oct':'OctPlan','Nov':'NovPlan','Dec':'DecPlan' }[m];
+        var idx = headers.indexOf(colLama);
+        // Jika tidak ketemu, pakai regex (handles Indonesian/English/casing/spacing)
         if(idx < 0) {
-          idx = headers.findIndex(function(h){ return h.toLowerCase().indexOf(m.toLowerCase()) >= 0 && /plan/i.test(h); });
+          idx = headers.findIndex(function(h){ return MONTH_REGEX[m].test(h); });
         }
         planIdxs[m] = idx;
       });
+      // Debug: log hasil deteksi kolom ke console
+      console.log('[MPS] Headers:', headers);
+      console.log('[MPS] planIdxs:', planIdxs);
 
-      // Detect which months have any plan data
-      // Detect active months: must have column AND at least some non-zero plan
+      // Detect active months: column ada DAN ada minimal satu non-zero di seluruh data
       _mpsActiveMonths = MRP_MONTHS.filter(function(m) {
         if(planIdxs[m] < 0) return false;
-        for(var ri=hdrIdx+1; ri<Math.min(hdrIdx+50, rows.length); ri++) {
+        for(var ri=hdrIdx+1; ri<rows.length; ri++) {
           if(parseFloat(rows[ri][planIdxs[m]]) > 0) return true;
         }
         return false;
       });
+      // Fallback: kalau semua 0 tapi kolom ada, tetap include (data mungkin belum diisi)
+      if(!_mpsActiveMonths.length) {
+        _mpsActiveMonths = MRP_MONTHS.filter(function(m){ return planIdxs[m] >= 0; });
+      }
       if(!_mpsActiveMonths.length) _mpsActiveMonths = MRP_MONTHS.slice();
+      console.log('[MPS] _mpsActiveMonths:', _mpsActiveMonths);
 
       // Also find description column
       var descCol = headers.findIndex(function(h){ return /^(item\s*desc|description|deskripsi)/i.test(h); });
