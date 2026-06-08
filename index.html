@@ -8345,8 +8345,9 @@ function _mpsUpload(input) {
       var planIdxs = {};
       var monthMap = MONTH_MAP_LAMA;
       if(headers.indexOf('MayPlan') < 0) {
-        // Try new format
-        if(headers.indexOf('Plan Mei') >= 0) monthMap = MONTH_MAP_BARU;
+        // Cek header Indonesia — tidak hanya "Plan Mei" tapi juga Agu/Okt/Des
+        var hasIndo = headers.some(function(h){ return /Plan\s+(Mei|Agu|Okt|Des)/i.test(h); });
+        if(headers.indexOf('Plan Mei') >= 0 || hasIndo) monthMap = MONTH_MAP_BARU;
         else monthMap = MONTH_MAP_ALT;
       }
       MRP_MONTHS.forEach(function(m) {
