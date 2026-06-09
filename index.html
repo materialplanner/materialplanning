@@ -1472,7 +1472,7 @@ var CLOUD_KEYS = [
   'sap_url','sap_user','sap_pass','fonnte','wn','workdays','last_sync','proj_highlighted',
   'sap_cache_stock','sap_cache_po','sap_cache_grpo','sap_cache_ospr',
   'admin_user','admin_pass',
-  'master_data','mrp_data','realname_data',
+  'master_data','mrp_data','realname_data','pallet_pm','pallet_rm',
   'fc_propose','fc_ospo_ovr','fc_ospr_ovr','fc_doi2','fc_doi2_suppliers','mrp_source'
 ];
 
@@ -1741,6 +1741,12 @@ function _applyRealtimeChanges(keys) {
         case 'mrp_source':
           try { localStorage.setItem('mrp_source', val || ''); } catch(e) {}
           break;
+        case 'pallet_pm':
+          try { STATE.palletPM = JSON.parse(val || 'null'); } catch(e) {}
+          break;
+        case 'pallet_rm':
+          try { STATE.palletRM = JSON.parse(val || 'null'); } catch(e) {}
+          break;
       }
     } catch(e) { console.warn('Realtime apply error for', k, e.message); }
   });
@@ -1979,7 +1985,7 @@ function loadSheetData(type) {
       toast('Real Name: '+cnt+' item ✓','ok');
 
     } else if(type==='pallet_pm'){
-      STATE.palletPM = processPalletPM(rows, headers);
+      STATE.palletPM = processPalletPM(rows);
       localStorage.setItem('pallet_pm', JSON.stringify(STATE.palletPM));
       localStorage.setItem('pallet_pm_upload_ts', ts);
       var cnt = Object.keys(STATE.palletPM).length;
@@ -1988,7 +1994,7 @@ function loadSheetData(type) {
       toast('Pallet PM: '+cnt+' item ✓','ok');
 
     } else if(type==='pallet_rm'){
-      STATE.palletRM = processPalletRM(rows, headers);
+      STATE.palletRM = processPalletRM(rows);
       localStorage.setItem('pallet_rm', JSON.stringify(STATE.palletRM));
       localStorage.setItem('pallet_rm_upload_ts', ts);
       var cnt = Object.keys(STATE.palletRM).length;
@@ -3536,16 +3542,11 @@ function processRealName(rows) {
 function processPalletPM(rows) {
   var result = {};
   rows.forEach(function(row) {
-    // Support various header names
-    var code = cleanSAPCode(
-      row['Item Number'] || row['Item No.'] || row['Item No'] ||
-      row['Item Code'] || row['ItemCode'] || ''
-    );
+    var code = cleanSAPCode(row['Item Number'] || row['Item No.'] || row['Item No'] || row['Item Code'] || row['ItemCode'] || '');
     if(!code || !code.match(/^\d/)) return;
-    var pcsKarton  = parseFloat(String(row['Pcs/Karton']  || row['Pcs Karton']  || row['PcsKarton']  || '0').replace(/[,.]/g, function(m){ return m===','?'.':''; })) || 0;
-    var kartonPalet= parseFloat(String(row['Karton/Palet'] || row['Karton Palet'] || row['KartonPalet'] || '0').replace(/[,.]/g, function(m){ return m===','?'.':''; })) || 0;
-    var pcsPalet   = parseFloat(String(row['Pcs/Palet']   || row['Pcs Palet']   || row['PcsPalet']   || '0').replace(/[,.]/g, function(m){ return m===','?'.':''; })) || 0;
-    // Hitung pcsPalet dari pcsKarton × kartonPalet kalau kolom kosong
+    var pcsKarton   = parseFloat(String(row['Pcs/Karton']  || row['Pcs Karton']  || '0').replace(/[^0-9.]/g,'')) || 0;
+    var kartonPalet = parseFloat(String(row['Karton/Palet'] || row['Karton Palet'] || '0').replace(/[^0-9.]/g,'')) || 0;
+    var pcsPalet    = parseFloat(String(row['Pcs/Palet']   || row['Pcs Palet']   || '0').replace(/[^0-9.]/g,'')) || 0;
     if(!pcsPalet && pcsKarton && kartonPalet) pcsPalet = pcsKarton * kartonPalet;
     if(code && pcsKarton > 0 && pcsPalet > 0) {
       result[code] = { pcsKarton: pcsKarton, kartonPalet: kartonPalet, pcsPalet: pcsPalet };
@@ -3557,18 +3558,11 @@ function processPalletPM(rows) {
 function processPalletRM(rows) {
   var result = {};
   rows.forEach(function(row) {
-    var code = cleanSAPCode(
-      row['ItemCode'] || row['Item Code'] || row['Item No.'] ||
-      row['Item No'] || row['Item Number'] || ''
-    );
+    var code = cleanSAPCode(row['ItemCode'] || row['Item Code'] || row['Item No.'] || row['Item No'] || row['Item Number'] || '');
     if(!code || !code.match(/^\d/)) return;
-    // Support typo "kuran Kemasa" (dari screenshot) dan variasi lain
-    var ukuranKemasan = parseFloat(String(
-      row['Ukuran Kemasan'] || row['kuran Kemasa'] || row['Ukuran'] || row['Kemasan'] || '0'
-    ).replace(/[^0-9.]/g, '')) || 0;
-    var bobotPalet = parseFloat(String(
-      row['Bobot/Palet'] || row['Bobot Palet'] || row['BobotPalet'] || row['Bobot'] || '0'
-    ).replace(/[^0-9.]/g, '')) || 0;
+    // Support typo "kuran Kemasa" dan variasi lain
+    var ukuranKemasan = parseFloat(String(row['Ukuran Kemasan'] || row['kuran Kemasa'] || row['Kemasan/Pa'] || row['Ukuran'] || '0').replace(/[^0-9.]/g,'')) || 0;
+    var bobotPalet    = parseFloat(String(row['Bobot/Palet'] || row['Bobot Palet'] || row['BobotPalet'] || '0').replace(/[^0-9.]/g,'')) || 0;
     if(code && ukuranKemasan > 0 && bobotPalet > 0) {
       result[code] = { ukuranKemasan: ukuranKemasan, bobotPalet: bobotPalet };
     }
@@ -4277,22 +4271,11 @@ function checkNotifications() {
     var grpoCodes = {};
     STATE.grpoData.forEach(function(g){ grpoCodes[g.itemCode] = true; });
     var cmtChanged = false;
-    var _activePOKeysGrpo = {};
-    (STATE.poData||[]).forEach(function(p){ _activePOKeysGrpo[p.docNum+'_'+p.itemCode]=true; });
     Object.keys(STATE.projComments).forEach(function(code){
       var cmt = STATE.projComments[code];
       if(!cmt || cmt._manual) return; // Don't touch manual comments
       if(grpoCodes[code]) {
-        // Hanya hapus comment kalau tidak ada konfirmasi aktif untuk item ini
-        // (PO masih open di poData DAN punya confDate)
-        var hasActiveConf = Object.keys(STATE.poOverrides).some(function(k){
-          if(!_activePOKeysGrpo[k]) return false; // PO sudah tidak open
-          var us = k.indexOf('_');
-          if(us < 0 || k.slice(us+1) !== code) return false;
-          return !!(STATE.poOverrides[k].confDate);
-        });
-        if(hasActiveConf) return; // Ada konfirmasi aktif — jangan hapus comment
-        // GRPO received dan tidak ada konfirmasi aktif → clear auto-comment
+        // GRPO received for this item → clear auto-comment
         delete STATE.projComments[code];
         var p = STATE.projectionData.find(function(x){ return x.productCode === code; });
         if(p) p.comment = '';
@@ -4759,7 +4742,16 @@ function _toggleGenDropdown() {
 function generateSchedule(typeFilter) {
   if(!_requireAdmin('generate jadwal')) return;
 
-  // Cleanup dipindahkan ke setelah delivMonISO dihitung (lihat Step 4)
+  // Cleanup: reset isManual untuk PO yang tanggalnya sudah lewat minggu ini
+  // Supaya tidak terbaca sebagai manual forced di generate berikutnya
+  var todayISO2 = new Date().toISOString().split('T')[0];
+  Object.keys(STATE.poOverrides||{}).forEach(function(key){
+    var ovr = STATE.poOverrides[key];
+    if(ovr && ovr.isManual && ovr.date && ovr.date < todayISO2) {
+      ovr.isManual = false;
+      ovr.isAuto = true;
+    }
+  });
 
   // ── Helper: format tanggal lokal sebagai YYYY-MM-DD (bukan UTC) ──────────────
   function localISO(d) {
@@ -4880,18 +4872,8 @@ function generateSchedule(typeFilter) {
   var delivMonISO = localISO(delivWeek[0]);
   var delivFriISO = localISO(delivFri);
 
-  // Cleanup: reset isManual untuk PO yang tanggalnya sebelum Senin minggu depan
-  // Pakai delivMonISO (bukan today) supaya tanggal hari ini & sisa minggu ini ikut direset
-  Object.keys(STATE.poOverrides||{}).forEach(function(key){
-    var ovr = STATE.poOverrides[key];
-    if(ovr && ovr.isManual && ovr.date && ovr.date < delivMonISO) {
-      ovr.isManual = false;
-      ovr.isAuto = true;
-    }
-  });
-
   urgentItems.forEach(function(item){
-    // Item yang manual forced → pakai manual date dari poOverrides, clamp ke delivery week
+    // Item yang manual forced → pakai manual date dari poOverrides langsung
     if(item._manualForced) {
       var manISO = null;
       STATE.poData.filter(function(p){ return p.itemCode === item.productCode; }).forEach(function(po){
@@ -4901,14 +4883,7 @@ function generateSchedule(typeFilter) {
           if(!manISO || ovr.date < manISO) manISO = ovr.date;
         }
       });
-      // Clamp ke delivery week — jangan biarkan tanggal di luar minggu depan
-      if(manISO) {
-        if(manISO < delivMonISO) manISO = delivMonISO;
-        else if(manISO > delivFriISO) manISO = delivFriISO;
-        item._delivISO = nextWorkday(manISO);
-      } else {
-        item._delivISO = delivMonISO;
-      }
+      item._delivISO = manISO ? nextWorkday(manISO) : delivMonISO;
       return;
     }
     var raw = new Date(item.coverageDate);
@@ -5927,8 +5902,6 @@ function saveFeedback() {
   closeModal('modal-fb');
   renderSchedule();
   updateDashStats();
-  // Re-render projection supaya comment langsung terupdate tanpa harus pindah halaman
-  if(STATE.projectionData && STATE.projectionData.length) renderProjection();
   toast('Konfirmasi: ' + doneChks + '/' + totalChks + ' item' + (anyConfirmed ? ' ✓' : ''), anyConfirmed ? 'ok' : 'inf');
 }
 function saveProjComment(el) {
@@ -7238,10 +7211,6 @@ function _appInit() {
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ─── Pallet Usage Calculator ──────────────────────────────────────────────────
-// Menghitung berapa pallet untuk ending stock tertentu.
-// PM: threshold = 2 × pcsKarton; rumus = floor((ending - threshold) / pcsPalet) + 1
-// RM: threshold = 2 × ukuranKemasan; rumus = floor((ending - threshold) / bobotPalet) + 1
-//     Jika UOM gram → ukuranKemasan & bobotPalet dibagi 1000 dulu
 function _fcCalcPallet(code, endingStock, uom) {
   var isRM = /^3/.test(code);
   var isPM = /^4/.test(code);
@@ -7250,7 +7219,6 @@ function _fcCalcPallet(code, endingStock, uom) {
     if(!pd) return null;
     var ukuran = pd.ukuranKemasan;
     var bobot  = pd.bobotPalet;
-    // Jika UOM gram, konversi ke kg
     var uomLow = (uom||'').toLowerCase();
     if(uomLow === 'gr' || uomLow === 'gram' || uomLow === 'g') {
       ukuran = ukuran / 1000;
@@ -7269,6 +7237,8 @@ function _fcCalcPallet(code, endingStock, uom) {
   }
   return null;
 }
+
+// 📅 FORECAST & PROPOSE PR  — no Firebase, session-only state
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // FC_MONTHS dynamic — start from current month (max Des)
@@ -8159,15 +8129,11 @@ function _fcDetailRow(code, fc, master) {
     + gRow('DOI (hari)',     isFcView ? fc.doiFc   : fc.doi,   doiClsFn)
     + gRow('Propose PR', fc.propose, null, true, code)
     + (function(){
-        // PALLET USAGE — hanya tampil kalau data pallet tersedia untuk item ini
         var masterItem = (STATE.masterData||{})[code] || {};
         var uom = masterItem.uom || '';
         var stockArr = isFcView ? fc.stockFc : fc.stock;
-        var palletVals = (stockArr||[]).map(function(v){
-          return _fcCalcPallet(code, v||0, uom);
-        });
-        var hasPalletData = palletVals.some(function(v){ return v !== null; });
-        if(!hasPalletData) return '';
+        var palletVals = (stockArr||[]).map(function(v){ return _fcCalcPallet(code, v||0, uom); });
+        if(!palletVals.some(function(v){ return v !== null; })) return '';
         var cells = palletVals.map(function(v){
           if(v === null) return '<td style="text-align:right;padding:5px 6px;color:var(--hint)">—</td>';
           var color = v === 0 ? 'color:var(--hint)' : 'color:var(--teal);font-weight:600';
@@ -8175,8 +8141,7 @@ function _fcDetailRow(code, fc, master) {
         }).join('');
         return '<tr style="border-top:1px solid var(--border);background:rgba(20,184,166,.04)">'
           + '<td style="padding:5px 6px;font-size:10.5px;font-weight:700;color:var(--teal);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap">Pallet Usage</td>'
-          + cells
-          + '<td></td></tr>';
+          + cells + '<td></td></tr>';
       }())
     + '</tbody></table></div>';
 
@@ -8476,50 +8441,34 @@ function _mpsUpload(input) {
       // Also try Indonesian with exact match
       var MONTH_MAP_ALT  = { 'Apr':'Plan Apr','May':'Plan May','Jun':'Plan Jun','Jul':'Plan Jul','Aug':'Plan Aug','Sep':'Plan Sep','Oct':'Plan Oct','Nov':'Plan Nov','Dec':'Plan Dec' };
 
-      // Cari kolom per bulan — regex case-insensitive
-      // Cover: singkatan Inggris (Aug), singkatan Indo (Agu),
-      //        nama penuh Inggris (August), nama penuh Indo (Agustus)
-      //        urutan "Plan X" atau "X Plan", dengan/tanpa spasi
-      var MONTH_REGEX = {
-        'Apr': /plan.*(apr(il)?)|apr(il)?.*plan/i,
-        'May': /plan.*(may|mei)|may.*plan|mei.*plan/i,
-        'Jun': /plan.*(jun(e|i)?)|jun(e|i)?.*plan/i,
-        'Jul': /plan.*(jul(y|i)?)|jul(y|i)?.*plan/i,
-        'Aug': /plan.*(aug(ust)?|agu(stus)?)|aug(ust)?.*plan|agu(stus)?.*plan/i,
-        'Sep': /plan.*(sep(tember)?)|sep(tember)?.*plan/i,
-        'Oct': /plan.*(oct(ober)?|okt(ober)?)|oct(ober)?.*plan|okt(ober)?.*plan/i,
-        'Nov': /plan.*(nov(ember)?)|nov(ember)?.*plan/i,
-        'Dec': /plan.*(dec(ember)?|des(ember)?)|dec(ember)?.*plan|des(ember)?.*plan/i,
-      };
+      // Detect which format by checking headers
       var planIdxs = {};
+      var monthMap = MONTH_MAP_LAMA;
+      if(headers.indexOf('MayPlan') < 0) {
+        // Try new format
+        if(headers.indexOf('Plan Mei') >= 0) monthMap = MONTH_MAP_BARU;
+        else monthMap = MONTH_MAP_ALT;
+      }
       MRP_MONTHS.forEach(function(m) {
-        // Coba exact match dulu (lebih cepat)
-        var colLama = { 'Apr':'AprPlan','May':'MayPlan','Jun':'JunPlan','Jul':'JulPlan','Aug':'AugPlan','Sep':'SepPlan','Oct':'OctPlan','Nov':'NovPlan','Dec':'DecPlan' }[m];
-        var idx = headers.indexOf(colLama);
-        // Jika tidak ketemu, pakai regex (handles Indonesian/English/casing/spacing)
+        var colName = monthMap[m];
+        var idx = headers.indexOf(colName);
+        // Fallback: partial match
         if(idx < 0) {
-          idx = headers.findIndex(function(h){ return MONTH_REGEX[m].test(h); });
+          idx = headers.findIndex(function(h){ return h.toLowerCase().indexOf(m.toLowerCase()) >= 0 && /plan/i.test(h); });
         }
         planIdxs[m] = idx;
       });
-      // Debug: log hasil deteksi kolom ke console
-      console.log('[MPS] Headers:', headers);
-      console.log('[MPS] planIdxs:', planIdxs);
 
-      // Detect active months: column ada DAN ada minimal satu non-zero di seluruh data
+      // Detect which months have any plan data
+      // Detect active months: must have column AND at least some non-zero plan
       _mpsActiveMonths = MRP_MONTHS.filter(function(m) {
         if(planIdxs[m] < 0) return false;
-        for(var ri=hdrIdx+1; ri<rows.length; ri++) {
+        for(var ri=hdrIdx+1; ri<Math.min(hdrIdx+50, rows.length); ri++) {
           if(parseFloat(rows[ri][planIdxs[m]]) > 0) return true;
         }
         return false;
       });
-      // Fallback: kalau semua 0 tapi kolom ada, tetap include (data mungkin belum diisi)
-      if(!_mpsActiveMonths.length) {
-        _mpsActiveMonths = MRP_MONTHS.filter(function(m){ return planIdxs[m] >= 0; });
-      }
       if(!_mpsActiveMonths.length) _mpsActiveMonths = MRP_MONTHS.slice();
-      console.log('[MPS] _mpsActiveMonths:', _mpsActiveMonths);
 
       // Also find description column
       var descCol = headers.findIndex(function(h){ return /^(item\s*desc|description|deskripsi)/i.test(h); });
