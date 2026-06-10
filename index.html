@@ -1509,6 +1509,7 @@ var CLOUD_KEYS = [
   'master_data','mrp_data','realname_data','pallet_pm','pallet_rm',
   'wh_capacity_rm','wh_capacity_pm','update_deldate_data',
   'fc_propose','fc_ospo_ovr','fc_ospr_ovr','fc_doi2','fc_doi2_suppliers','mrp_source',
+  'fc_autopropose',
   'matcom_monthly','matcom_data','matcom_count','last_matcom_sync',
   'mps_ui_status','bom_ui_status','mrp_last_calc'
 ];
@@ -1761,7 +1762,24 @@ function _applyRealtimeChanges(keys) {
           });
           break;
         case 'fc_propose':
-          try { _fcPropose = JSON.parse(val || '{}'); localStorage.setItem('fc_propose', val); } catch(e) {}
+          try {
+            _fcPropose = JSON.parse(val || '{}');
+            localStorage.setItem('fc_propose', val);
+            // Propose PR valid → aktifkan flag
+            if(val && val !== '{}') {
+              _fcAutoPropose = true;
+              localStorage.setItem('fc_autopropose','1');
+            }
+            _ppCache = null; // reset pallet cache
+            if(document.getElementById('fc-table')) setTimeout(renderForecast, 100);
+            if(document.getElementById('pg-pallet-pos') && document.getElementById('pg-pallet-pos').classList.contains('active')) setTimeout(renderPalletPos, 150);
+          } catch(e) {}
+          break;
+        case 'fc_autopropose':
+          try {
+            _fcAutoPropose = val === '1';
+            localStorage.setItem('fc_autopropose', val||'');
+          } catch(e) {}
           break;
         case 'fc_ospo_ovr':
           try { _fcOspoOverride = JSON.parse(val || '{}'); localStorage.setItem('fc_ospo_ovr', val); } catch(e) {}
@@ -7466,6 +7484,8 @@ function _appInit() {
     _fcOsprOverride = JSON.parse(localStorage.getItem('fc_ospr_ovr')      || '{}');
     _fcDOI2         = parseInt(localStorage.getItem('fc_doi2') || '60')   || 60;
     _fcDOI2Suppliers= JSON.parse(localStorage.getItem('fc_doi2_suppliers')|| '[]');
+    // Reset pallet cache supaya direbuild dengan data terbaru
+    _ppCache = null;
     console.log('[_appInit] FC globals restored');
   } catch(e) { console.warn('[_appInit] FC globals restore fail:', e.message); }
   // Capacity globals
@@ -8682,7 +8702,7 @@ function generateProposePR() {
   setTimeout(function() {
     renderForecast(true);
     if(btn) { btn.disabled = false; btn.textContent = '⚡ Generate Propose PR'; }
-    try { localStorage.setItem('fc_propose', JSON.stringify(_fcPropose)); localStorage.setItem('fc_autopropose','1'); cloudSave('fc_propose', JSON.stringify(_fcPropose)); } catch(e){}
+    try { localStorage.setItem('fc_propose', JSON.stringify(_fcPropose)); localStorage.setItem('fc_autopropose','1'); cloudSave('fc_propose', JSON.stringify(_fcPropose)); cloudSave('fc_autopropose','1'); } catch(e){}
     var badge = document.getElementById('fc-gen-badge');
     if(badge) { badge.style.display = 'inline'; setTimeout(function(){ badge.style.display='none'; }, 5000); }
     _saveGenTimestamp('gen_ts_propose_pr', 'fc-gen-ts');
