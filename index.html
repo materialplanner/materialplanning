@@ -1498,7 +1498,8 @@ var _lastSyncMsg = '';
 // Keys yang disync ke cloud — tiap key = 1 dokumen di Firestore koleksi 'kv'
 // Ini menghindari batas 1MB per dokumen Firestore
 var CLOUD_KEYS = [
-  'schedule','po_overrides','proj_comments','stock_history','proj_history',
+  'schedule','po_overrides','proj_comments','stock_history',
+  // proj_history: disimpan lokal saja (14 snapshot terlalu besar untuk Firebase 1MB limit)
   'suppliers','proj_hidden_cols','proj_snapshots',
   'sheet_url_master','sheet_url_mrp','sheet_url_realname','sheet_url_pallet_pm','sheet_url_pallet_rm',
   'sheet_tab_master','sheet_tab_mrp','sheet_tab_realname','sheet_tab_pallet_pm','sheet_tab_pallet_rm',
@@ -1828,10 +1829,15 @@ function _applyRealtimeChanges(keys) {
         case 'mrp_data':
           try {
             STATE.mrpData = JSON.parse(val || 'null');
-            // Kalau MPS page terbuka dan IndexedDB kosong, refresh tabel
-            if(document.getElementById('pg-mps-mrp') && document.getElementById('pg-mps-mrp').classList.contains('active') && !_mrpResult) {
+            // Refresh MPS page jika terbuka (terima data baru dari laptop lain)
+            var _mrpPg = document.getElementById('pg-mps-mrp');
+            if(_mrpPg && _mrpPg.classList.contains('active')) {
+              _mrpResult = null; // reset supaya _mrpFallbackFromFirebase bisa rebuild
               _mrpFallbackFromFirebase();
             }
+            // Refresh Forecast & Projection jika terbuka
+            if(document.getElementById('fc-table')) { setTimeout(renderForecast, 100); }
+            if(document.getElementById('proj-tbody')||document.getElementById('proj-table')) { setTimeout(function(){buildProjection();renderProjection();}, 100); }
           } catch(e) {} break;
         case 'update_deldate_data':
           try { STATE.updateDelDateData = JSON.parse(val || '{}'); if(document.getElementById('pg-po')&&document.getElementById('pg-po').classList.contains('active')) renderPO(); } catch(e) {}
@@ -3375,9 +3381,8 @@ function cleanupProjHistory() {
   while(keys.length > 14) { delete STATE.projectionHistory[keys.shift()]; keys = Object.keys(STATE.projectionHistory).sort(); }
   var after = Object.keys(STATE.projectionHistory).length;
   try { localStorage.setItem('proj_history', JSON.stringify(STATE.projectionHistory)); } catch(e) {}
-  // Push ke Firestore
-  cloudSave('proj_history', JSON.stringify(STATE.projectionHistory));
-  toast('History dipangkas: ' + before + ' → ' + after + ' hari. Tersimpan ke cloud ✓', 'ok');
+  // proj_history tidak di-cloudSave (>1MB Firestore limit) — cukup lokal
+  toast('History dipangkas: ' + before + ' → ' + after + ' hari. Tersimpan lokal ✓', 'ok');
 }
 
 function _poReqDateDropdown() {
