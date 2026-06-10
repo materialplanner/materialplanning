@@ -9648,14 +9648,11 @@ function _mrpApplyToState(result) {
       var fcKey = FC_MONTHS[fcIdx];
       mrpData[code].months[fcKey] = result[code][mn] != null ? Math.round(result[code][mn] * 1000) / 1000 : 0;
     });
-    // max3MRP: max nilai bulanan — dipakai buildProjection untuk hitung coverage
-    // Tanpa ini, MRP MAX di Projection Stock = 0 setelah Terapkan
-    var vals = Object.values(mrpData[code].months).filter(function(v){ return v > 0; });
-    mrpData[code].max3MRP = vals.length > 0 ? Math.max.apply(null, vals) : 0;
-    // actualMRP: kebutuhan bulan berjalan
-    var fcIdxNow = FC_MONTH_NUMS.indexOf(snapMon);
-    var fcKeyNow = fcIdxNow >= 0 ? FC_MONTHS[fcIdxNow] : null;
-    mrpData[code].actualMRP = fcKeyNow ? (mrpData[code].months[fcKeyNow] || 0) : 0;
+    // max3MRP: ambil dari GSheet yang sudah ada di STATE.mrpData
+    // JANGAN recalculate — GSheet punya formula sendiri (bisa include Apr/May/historical)
+    var existing = (STATE.mrpData || {})[code] || {};
+    mrpData[code].max3MRP  = existing.max3MRP  || 0;
+    mrpData[code].actualMRP = existing.actualMRP || 0;
   });
   STATE.mrpData = mrpData;
   localStorage.setItem('mrp_data', JSON.stringify(mrpData));
