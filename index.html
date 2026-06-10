@@ -7376,6 +7376,12 @@ function _ppRenderBar(bd) {
   s.push('</svg>'); return s.join('');
 }
 
+function _ppReloadAndRender() {
+  Promise.all([loadSheetData('pallet_pm'), loadSheetData('pallet_rm')]).then(function(){
+    _ppCache = null; renderPalletPos();
+  });
+}
+
 function renderPalletPos() {
   var el=document.getElementById('pp-content'); if(!el) return;
   if(!STATE.palletPM){var r=localStorage.getItem('pallet_pm');if(r)try{STATE.palletPM=JSON.parse(r);}catch(e){}}
@@ -7392,7 +7398,7 @@ function renderPalletPos() {
     el.innerHTML='<div class="empty"><div class="empty-ico">?</div><h3>Tidak ada item yang cocok</h3>'
       +'<p>Pallet data: PM='+pmKeys+', RM='+rmKeys+' item</p>'
       +'<p>Klik tombol di bawah untuk re-parse kode item dari GSheet</p>'
-      +'<button class="btn btn-primary btn-sm" onclick="Promise.all([loadSheetData('pallet_pm'),loadSheetData('pallet_rm')]).then(function(){_ppCache=null;renderPalletPos();})" style="margin-top:8px">Muat Ulang Pallet PM + RM</button>'
+      +'<button class="btn btn-primary btn-sm" onclick="_ppReloadAndRender()" style="margin-top:8px">Muat Ulang Pallet PM + RM</button>'
       +'</div>'; return;
   }
   var alertHtml='';
