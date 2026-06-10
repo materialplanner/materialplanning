@@ -7443,6 +7443,13 @@ function _appInit() {
   STATE.projectionSnapshots = JSON.parse(localStorage.getItem('proj_snapshots')|| '{}');
   STATE.projComments     = JSON.parse(localStorage.getItem('proj_comments')   || '{}');
   STATE.matcomMonthly    = JSON.parse(localStorage.getItem('matcom_monthly')   || 'null');
+  // Pallet & Update DelDate — perlu di-read ulang setelah cloudLoad mengisi localStorage
+  STATE.palletPM         = JSON.parse(localStorage.getItem('pallet_pm')       || 'null');
+  STATE.palletRM         = JSON.parse(localStorage.getItem('pallet_rm')       || 'null');
+  STATE.updateDelDateData= JSON.parse(localStorage.getItem('update_deldate_data') || '{}');
+  // Global capacity vars juga perlu di-read ulang
+  _whCapacityRM = parseInt(localStorage.getItem('wh_capacity_rm') || '0') || 0;
+  _whCapacityPM = parseInt(localStorage.getItem('wh_capacity_pm') || '0') || 0;
   console.log('[_appInit] STATE restored');
   } catch(e) { console.error('[_appInit] STATE restore FAIL:', e.message); }
 
