@@ -9636,19 +9636,26 @@ function _mrpTerapkan() {
 // ── Apply MRP to STATE (local, instant) ──────────────────────────────────────
 function _mrpApplyToState(result) {
   var mrpData = {};
+  var snapMon = new Date().getMonth() + 1; // bulan berjalan (1-12)
   Object.keys(result).forEach(function(code) {
     var m = (STATE.masterData||{})[code] || {};
     mrpData[code] = { desc: m.desc || code, months: {} };
-    // Map MRP months to FC_MONTHS by month NUMBER (not index)
-    // MRP_MONTHS: Apr=4,May=5,...Dec=12; FC_MONTH_NUMS: [5,6,...12] if start May
     var MRP_MONTH_NUMS = {Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12};
     MRP_MONTHS.forEach(function(mn) {
       var moNum = MRP_MONTH_NUMS[mn];
       var fcIdx = FC_MONTH_NUMS.indexOf(moNum);
-      if(fcIdx < 0) return; // bulan ini tidak ada di FC_MONTHS (e.g. Apr saat start Mei)
+      if(fcIdx < 0) return;
       var fcKey = FC_MONTHS[fcIdx];
       mrpData[code].months[fcKey] = result[code][mn] != null ? Math.round(result[code][mn] * 1000) / 1000 : 0;
     });
+    // max3MRP: max nilai bulanan — dipakai buildProjection untuk hitung coverage
+    // Tanpa ini, MRP MAX di Projection Stock = 0 setelah Terapkan
+    var vals = Object.values(mrpData[code].months).filter(function(v){ return v > 0; });
+    mrpData[code].max3MRP = vals.length > 0 ? Math.max.apply(null, vals) : 0;
+    // actualMRP: kebutuhan bulan berjalan
+    var fcIdxNow = FC_MONTH_NUMS.indexOf(snapMon);
+    var fcKeyNow = fcIdxNow >= 0 ? FC_MONTHS[fcIdxNow] : null;
+    mrpData[code].actualMRP = fcKeyNow ? (mrpData[code].months[fcKeyNow] || 0) : 0;
   });
   STATE.mrpData = mrpData;
   localStorage.setItem('mrp_data', JSON.stringify(mrpData));
