@@ -623,6 +623,9 @@ body.light-mode .theme-toggle-knob{transform:translateX(15px);background:var(--a
     <div class="ph-r">
       <button class="btn" onclick="loadPO()">↺ Refresh SAP</button>
       <button class="btn btn-sm btn-amber" onclick="savePOChanges()">💾 Simpan</button>
+      <button class="btn btn-sm" onclick="generateUDD()" style="background:var(--teal);color:#fff" title="Hitung Update Delivery Date dari forecast untuk semua PO">📅 Generate UDD</button>
+      <button class="btn btn-sm" onclick="exportPOExcel()" style="background:#22c55e;color:#fff">⬇ Export XLSX</button>
+      <button class="btn btn-sm" onclick="exportPOGSheet()" style="background:#4285f4;color:#fff">⬆ GSheet</button>
       <button class="btn btn-sm btn-red" onclick="resetPOOverrides()">🗑 Reset Semua</button>
     </div>
   </div>
@@ -1501,7 +1504,7 @@ var CLOUD_KEYS = [
   'sap_cache_stock','sap_cache_po','sap_cache_grpo','sap_cache_ospr',
   'admin_user','admin_pass',
   'master_data','mrp_data','realname_data','pallet_pm','pallet_rm',
-  'wh_capacity_rm','wh_capacity_pm',
+  'wh_capacity_rm','wh_capacity_pm','udd_data',
   'fc_propose','fc_ospo_ovr','fc_ospr_ovr','fc_doi2','fc_doi2_suppliers','mrp_source'
 ];
 
@@ -1774,6 +1777,9 @@ function _applyRealtimeChanges(keys) {
         case 'pallet_rm': try { STATE.palletRM = JSON.parse(val || 'null'); } catch(e) {} break;
         case 'wh_capacity_rm': _whCapacityRM = parseInt(val)||0; break;
         case 'wh_capacity_pm': _whCapacityPM = parseInt(val)||0; break;
+        case 'udd_data':
+          try { STATE.uddData = JSON.parse(val || '{}'); if(document.getElementById('pg-po')&&document.getElementById('pg-po').classList.contains('active')) renderPO(); } catch(e) {}
+          break;
       }
     } catch(e) { console.warn('Realtime apply error for', k, e.message); }
   });
@@ -2108,7 +2114,8 @@ var STATE = {
   projectionSnapshots: JSON.parse(localStorage.getItem('proj_snapshots') || '{}'),
   projComments: JSON.parse(localStorage.getItem('proj_comments') || '{}'),
   palletPM: JSON.parse(localStorage.getItem('pallet_pm') || 'null'),
-  palletRM: JSON.parse(localStorage.getItem('pallet_rm') || 'null')
+  palletRM: JSON.parse(localStorage.getItem('pallet_rm') || 'null'),
+  uddData:  JSON.parse(localStorage.getItem('udd_data')  || '{}')
 };
 
 var _whCapacityRM = parseInt(localStorage.getItem('wh_capacity_rm') || '0') || 0;
@@ -2704,6 +2711,169 @@ function _dateToSortISO(d) {
 var _poShowAll = false;
 var _PO_LIMIT = 300;
 
+// ─── Update Delivery Date (UDD) ──────────────────────────────────────────────
+function generateUDD() {
+  if(!STATE.poData || !STATE.poData.length) { toast('Load PO dulu dari SAP', 'err'); return; }
+  if(!STATE.mrpData) { toast('Load Master Data & MRP terlebih dahulu', 'err'); return; }
+  if(!FC_MONTHS || !FC_MONTHS.length) { toast('Buka halaman Forecast sekali untuk inisialisasi bulan', 'err'); return; }
+
+  toast('Menghitung UDD dari forecast…', 'inf');
+  var ospoIdx; try { ospoIdx = _buildOSPOIndex(); } catch(e) { ospoIdx = {}; }
+  var today = new Date(); today.setHours(0,0,0,0);
+  var todayISO = today.toISOString().split('T')[0];
+  var curYear  = today.getFullYear();
+
+  // Group POs by itemCode, sorted FIFO (prReqDate ASC, docNum ASC)
+  var byItem = {};
+  STATE.poData.forEach(function(p) {
+    var code = p.itemCode;
+    if(!byItem[code]) byItem[code] = [];
+    byItem[code].push(p);
+  });
+  Object.keys(byItem).forEach(function(code) {
+    byItem[code].sort(function(a,b){
+      var da = _dateToSortISO(a.prReqDate), db = _dateToSortISO(b.prReqDate);
+      if(da !== db) return da.localeCompare(db);
+      return String(a.docNum).localeCompare(String(b.docNum));
+    });
+  });
+
+  var newUDD = {};
+
+  Object.keys(byItem).forEach(function(code) {
+    var pos = byItem[code];
+    var fc;
+    try { fc = _calcForecast(code, ospoIdx); } catch(e) { return; }
+
+    var doiFc     = fc.doiFc  || [];
+    var targetDOI = _fcGetDOIForItem ? _fcGetDOIForItem(code) : 30;
+
+    // Kumpulkan bulan yang butuh delivery (DOI di bawah target)
+    var urgentMonths = [];
+    for(var i = 0; i < doiFc.length; i++) {
+      var doi = doiFc[i];
+      if(doi !== undefined && doi !== null && doi < targetDOI) {
+        // Konversi ke date: tgl 1 bulan FC_MONTH_NUMS[i] tahun sekarang
+        var mn = window.FC_MONTH_NUMS ? FC_MONTH_NUMS[i] : (today.getMonth() + 1 + i);
+        var yr = curYear;
+        // Kalau bulan sudah lewat dalam tahun ini → tahun depan (edge case)
+        if(mn < today.getMonth() + 1) yr = curYear + 1;
+        var iso;
+        if(i === 0) {
+          // Bulan pertama sudah urgent → hari ini
+          iso = todayISO;
+        } else {
+          iso = yr + '-' + String(mn).padStart(2,'0') + '-01';
+        }
+        urgentMonths.push(iso);
+      }
+    }
+
+    // FIFO: assign PO ke urgent month
+    pos.forEach(function(p, idx) {
+      var key = p.docNum + '_' + p.itemCode;
+      if(idx < urgentMonths.length) {
+        newUDD[key] = urgentMonths[idx];
+      } else {
+        newUDD[key] = '2027-01-01'; // tidak ada bulan urgent
+      }
+    });
+  });
+
+  STATE.uddData = newUDD;
+  localStorage.setItem('udd_data', JSON.stringify(newUDD));
+  cloudSave('udd_data', JSON.stringify(newUDD));
+  renderPO();
+  toast('UDD di-generate: ' + Object.keys(newUDD).length + ' PO ✓', 'ok');
+}
+
+function exportPOExcel() {
+  if(typeof XLSX === 'undefined') { toast('XLSX library tidak tersedia', 'err'); return; }
+  var headers = ['Doc Num','Supplier','Item Code','Item Name','Site','Open Qty','UOM',
+                 'PR Req Date','Tgl Request Kirim','Qty Konfirm','Tgl Konfirmasi','Notes','UDD'];
+  var rows = STATE.poData.map(function(p) {
+    var key = p.docNum + '_' + p.itemCode;
+    var ovr = STATE.poOverrides[key] || {};
+    var uddRaw = ovr.date || (STATE.uddData && STATE.uddData[key]) || '';
+    var uddDisp = uddRaw ? (uddRaw.indexOf('-')>0 ? uddRaw.split('-').reverse().join('/') : uddRaw) : '';
+    return [
+      p.docNum, p.supplierName||'', p.itemCode||'', p.itemName||'', p.site||'',
+      p.openQty||0, p.uom||'', p.prReqDate||'',
+      ovr.date ? ovr.date.split('-').reverse().join('/') : '',
+      ovr.confQty||'',
+      ovr.confDate ? ovr.confDate.split('-').reverse().join('/') : '',
+      ovr.notes||'', uddDisp
+    ];
+  });
+  var ws = XLSX.utils.aoa_to_sheet([headers].concat(rows));
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'List PO');
+  var wbout = XLSX.write(wb, { bookType:'xlsx', type:'array' });
+  var blob = new Blob([wbout], { type:'application/octet-stream' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a'); a.href=url;
+  a.download = 'list_po_udd_' + new Date().toISOString().split('T')[0] + '.xlsx';
+  a.click(); URL.revokeObjectURL(url);
+  toast('Export Excel selesai ✓', 'ok');
+}
+
+function exportPOGSheet() {
+  var url = localStorage.getItem('udd_gsheet_url') || '';
+  var token = localStorage.getItem('udd_gsheet_token') || '';
+  // Tampilkan input modal
+  var modal = document.createElement('div');
+  modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center';
+  modal.innerHTML='<div style="background:var(--bg2);border-radius:10px;padding:24px;width:420px;max-width:94vw;box-shadow:0 8px 32px rgba(0,0,0,.3)">'
+    +'<h3 style="margin:0 0 16px;font-size:15px">Export ke Google Sheets</h3>'
+    +'<div class="fg"><label style="font-size:11px">Apps Script URL (doGet)</label>'
+    +'<input id="udd-gs-url" type="text" value="'+url+'" placeholder="https://script.google.com/macros/s/..." style="width:100%;font-size:12px"></div>'
+    +'<div class="fg"><label style="font-size:11px">Token</label>'
+    +'<input id="udd-gs-tok" type="text" value="'+token+'" placeholder="token" style="width:100%;font-size:12px"></div>'
+    +'<div style="font-size:11px;color:var(--muted);margin-bottom:12px">Script harus menerima POST dengan payload <code>{token, rows, headers}</code> dan menulis ke sheet "List PO UDD".</div>'
+    +'<div style="display:flex;gap:8px;justify-content:flex-end">'
+    +'<button class="btn" onclick="this.closest(\'div[style*=fixed]\').remove()">Batal</button>'
+    +'<button class="btn btn-primary" onclick="_doExportPOGSheet()">Export</button>'
+    +'</div></div>';
+  document.body.appendChild(modal);
+}
+
+function _doExportPOGSheet() {
+  var url   = (document.getElementById('udd-gs-url')||{}).value || '';
+  var token = (document.getElementById('udd-gs-tok')||{}).value || '';
+  if(!url) { toast('Masukkan Apps Script URL', 'err'); return; }
+  localStorage.setItem('udd_gsheet_url',   url.trim());
+  localStorage.setItem('udd_gsheet_token', token.trim());
+  document.querySelector('div[style*="position:fixed"][style*="z-index:9999"]')?.remove();
+
+  var headers = ['Doc Num','Supplier','Item Code','Item Name','Site','Open Qty','UOM',
+                 'PR Req Date','Tgl Request Kirim','Qty Konfirm','Tgl Konfirmasi','Notes','UDD'];
+  var rows = STATE.poData.map(function(p) {
+    var key = p.docNum + '_' + p.itemCode;
+    var ovr = STATE.poOverrides[key] || {};
+    var uddRaw = ovr.date || (STATE.uddData && STATE.uddData[key]) || '';
+    var uddDisp = uddRaw ? (uddRaw.indexOf('-')>0 ? uddRaw.split('-').reverse().join('/') : uddRaw) : '';
+    return [
+      p.docNum, p.supplierName||'', p.itemCode||'', p.itemName||'', p.site||'',
+      p.openQty||0, p.uom||'', p.prReqDate||'',
+      ovr.date ? ovr.date.split('-').reverse().join('/') : '',
+      ovr.confQty||'',
+      ovr.confDate ? ovr.confDate.split('-').reverse().join('/') : '',
+      ovr.notes||'', uddDisp
+    ];
+  });
+
+  toast('Mengirim ke GSheet…', 'inf');
+  fetch(url, {
+    method: 'POST',
+    body: JSON.stringify({ token: token, headers: headers, rows: rows }),
+    headers: { 'Content-Type': 'text/plain' }
+  }).then(function(r){ return r.json(); })
+    .then(function(d){
+      if(d.ok) toast('GSheet diupdate: ' + (d.updated||rows.length) + ' baris ✓', 'ok');
+      else toast('GSheet gagal: ' + (d.msg||'error'), 'err');
+    }).catch(function(e){ toast('GSheet gagal: ' + e.message, 'err'); });
+}
+
 function renderPO() {
   var srch = (document.getElementById('srch-po')||{value:''}).value.toLowerCase();
   var site = (document.getElementById('f-po-site')||{value:''}).value;
@@ -2807,6 +2977,12 @@ function renderPO() {
          + '</td>';
     // Tgl Update — read-only
     row += '<td class="mono tgl-update" style="font-size:10.5px;color:var(--muted);text-align:center">' + (confUpd||'—') + '</td>';
+    // UDD (Update Delivery Date) — dari generate, priority: request kirim > generated
+    var uddRaw = ovr.date || (STATE.uddData && STATE.uddData[key]) || '';
+    var uddDisp = uddRaw ? (uddRaw.indexOf('-')>0 ? uddRaw.split('-').reverse().join('/') : uddRaw) : '—';
+    var uddStyle = ovr.date ? 'color:var(--teal)' : (STATE.uddData && STATE.uddData[key] ? 'color:var(--text)' : 'color:var(--hint)');
+    var uddTitle = ovr.date ? 'Dari Tgl Request Kirim' : (STATE.uddData && STATE.uddData[key] ? 'Generated dari forecast' : 'Belum di-generate');
+    row += '<td class="mono" style="font-size:10.5px;text-align:center;' + uddStyle + '" title="' + uddTitle + '">' + uddDisp + '</td>';
     // Notes — editable
     row += '<td>'
          + '<input type="text" value="' + notes + '" data-key="' + key + '" onchange="setPOField(this,&quot;notes&quot;)" placeholder="' + (_isAdmin?'Notes...':'🔒') + '"'
@@ -2835,6 +3011,7 @@ function renderPO() {
     + '<th></th>'  // Qty Konfirm
     + '<th><input class="th-filter" id="hf-conf"  oninput="_poDeb()" placeholder="tgl..." value="' + hfConf  + '"></th>'
     + '<th></th>'  // Tgl Update
+    + '<th></th>'  // UDD
     + '<th><input class="th-filter" id="hf-notes" oninput="_poDeb()" placeholder="filter..." value="' + hfNotes + '"></th>'
     + '</tr>';
 
@@ -2842,11 +3019,11 @@ function renderPO() {
     '<div class="card"><div class="tbl-wrap"><table id="po-tbl" style="table-layout:fixed;width:100%">'
     + '<colgroup><col style="width:90px"><col style="width:150px"><col style="width:100px"><col style="width:170px"><col style="width:75px">'
     + '<col style="width:80px"><col style="width:50px"><col style="width:95px"><col style="width:125px">'
-    + '<col style="width:80px"><col style="width:120px"><col style="width:85px"><col style="width:150px"></colgroup>'
+    + '<col style="width:80px"><col style="width:120px"><col style="width:85px"><col style="width:110px"><col style="width:150px"></colgroup>'
     + '<thead>'
     + '<tr><th>Doc Num<div class="col-resize" data-col="0"></div></th><th>Supplier<div class="col-resize" data-col="1"></div></th><th>Item Code<div class="col-resize" data-col="2"></div></th><th>Item Name<div class="col-resize" data-col="3"></div></th><th>Site<div class="col-resize" data-col="4"></div></th>'
     + '<th>Open Qty<div class="col-resize" data-col="5"></div></th><th>UOM<div class="col-resize" data-col="6"></div></th><th>PR Req Date<div class="col-resize" data-col="7"></div></th><th>Tgl Request Kirim<div class="col-resize" data-col="8"></div></th>'
-    + '<th>Qty Konfirm<div class="col-resize" data-col="9"></div></th><th>Tgl Konfirmasi<div class="col-resize" data-col="10"></div></th><th>Tgl Update<div class="col-resize" data-col="11"></div></th><th>Notes</th></tr>'
+    + '<th>Qty Konfirm<div class="col-resize" data-col="9"></div></th><th>Tgl Konfirmasi<div class="col-resize" data-col="10"></div></th><th>Tgl Update<div class="col-resize" data-col="11"></div></th><th title="Update Delivery Date: kapan PO ini harus datang berdasarkan forecast">UDD<div class="col-resize" data-col="12"></div></th><th>Notes</th></tr>'
     + frow
     + '</thead>'
     + '<tbody>' + rows + '</tbody></table></div></div>'
