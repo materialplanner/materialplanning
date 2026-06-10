@@ -7677,7 +7677,9 @@ function _ppBuildData() {
 
     var fc;
     try { fc = _calcForecast(code, ospoIdx); } catch(e) { return; }
-    var stockArr  = fc.stock || new Array(nM).fill(0);
+    // Gunakan fc.stockFc (Forecast view) — konsisten dengan tampilan Forecast UI
+    // fc.stock (Aktual/pull-forward) bisa beda antar device karena _fcOspoOverride
+    var stockArr  = fc.stockFc || fc.stock || new Array(nM).fill(0);
     var palletArr = stockArr.map(function(v){ return _fcCalcPallet(code, v||0, uom); });
     // Akumulasi pallet totals
     palletArr.forEach(function(p,i){ if(p!==null && totals[iType]) totals[iType][i]+=p; });
