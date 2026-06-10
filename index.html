@@ -7447,7 +7447,18 @@ function _appInit() {
   STATE.palletPM         = JSON.parse(localStorage.getItem('pallet_pm')       || 'null');
   STATE.palletRM         = JSON.parse(localStorage.getItem('pallet_rm')       || 'null');
   STATE.updateDelDateData= JSON.parse(localStorage.getItem('update_deldate_data') || '{}');
-  // Global capacity vars juga perlu di-read ulang
+  // Global FC variables — diinisialisasi di script load SEBELUM cloudLoad
+  // Harus di-re-read di sini supaya dapat nilai Firebase yang benar
+  try {
+    _fcPropose      = JSON.parse(localStorage.getItem('fc_propose')       || '{}');
+    _fcAutoPropose  = localStorage.getItem('fc_autopropose') === '1';
+    _fcOspoOverride = JSON.parse(localStorage.getItem('fc_ospo_ovr')      || '{}');
+    _fcOsprOverride = JSON.parse(localStorage.getItem('fc_ospr_ovr')      || '{}');
+    _fcDOI2         = parseInt(localStorage.getItem('fc_doi2') || '60')   || 60;
+    _fcDOI2Suppliers= JSON.parse(localStorage.getItem('fc_doi2_suppliers')|| '[]');
+    console.log('[_appInit] FC globals restored');
+  } catch(e) { console.warn('[_appInit] FC globals restore fail:', e.message); }
+  // Capacity globals
   _whCapacityRM = parseInt(localStorage.getItem('wh_capacity_rm') || '0') || 0;
   _whCapacityPM = parseInt(localStorage.getItem('wh_capacity_pm') || '0') || 0;
   console.log('[_appInit] STATE restored');
