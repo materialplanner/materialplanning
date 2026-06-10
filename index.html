@@ -7271,7 +7271,7 @@ function _ppSetView(mode) {
     var b = document.getElementById('pp-btn-'+m);
     if(b){ b.style.background=m===mode?'var(--teal)':'transparent'; b.style.color=m===mode?'#fff':'var(--muted)'; }
   });
-  _ppCache = null; renderPalletPos();
+  renderPalletPos(); // ← TIDAK reset cache — data tidak berubah, hanya tampilan
 }
 function _ppSetFilter(type) {
   _ppFilterType = type;
@@ -7280,14 +7280,14 @@ function _ppSetFilter(type) {
     var active = t.toLowerCase()===type.toLowerCase();
     if(b){ b.style.background=active?'var(--accent)':'transparent'; b.style.color=active?'#fff':'var(--muted)'; }
   });
-  _ppCache = null; renderPalletPos();
+  renderPalletPos(); // ← TIDAK reset cache
 }
 function _ppSaveCapacity() {
   _whCapacityRM = parseInt(document.getElementById('pp-cap-rm').value)||0;
   _whCapacityPM = parseInt(document.getElementById('pp-cap-pm').value)||0;
   localStorage.setItem('wh_capacity_rm', _whCapacityRM);
   localStorage.setItem('wh_capacity_pm', _whCapacityPM);
-  _ppCache = null; renderPalletPos();
+  renderPalletPos(); // ← TIDAK reset cache, kapasitas hanya mempengaruhi warna/garis
   toast('Kapasitas tersimpan ✓', 'ok');
 }
 
@@ -7297,11 +7297,13 @@ function _ppBuildData() {
   if(!STATE.palletRM){var r=localStorage.getItem('pallet_rm');if(r)try{STATE.palletRM=JSON.parse(r);}catch(e){}}
 
   var months = FC_MONTHS, nM = months.length;
-  var totals = { RM: new Array(nM).fill(0), PM: new Array(nM).fill(0), FG: new Array(nM).fill(0) };
+  // totals = jumlah PALLET per tipe per bulan
+  var totals      = { RM: new Array(nM).fill(0), PM: new Array(nM).fill(0), FG: new Array(nM).fill(0) };
+  // stockTotals = jumlah ENDING STOCK (qty) per tipe per bulan
+  var stockTotals = { RM: new Array(nM).fill(0), PM: new Array(nM).fill(0), FG: new Array(nM).fill(0) };
   var items = [];
   var masterRef = STATE.masterData || {};
 
-  // Gunakan _calcForecast + _buildOSPOIndex — sama persis seperti forecast page
   var ospoIdx;
   try { ospoIdx = _buildOSPOIndex(); } catch(e) { ospoIdx = {}; }
 
@@ -7316,13 +7318,16 @@ function _ppBuildData() {
 
     var fc;
     try { fc = _calcForecast(code, ospoIdx); } catch(e) { return; }
-    var stockArr = fc.stock || new Array(nM).fill(0);
+    var stockArr  = fc.stock || new Array(nM).fill(0);
     var palletArr = stockArr.map(function(v){ return _fcCalcPallet(code, v||0, uom); });
-    palletArr.forEach(function(p,i){ if(p!==null&&totals[iType]) totals[iType][i]+=p; });
+    // Akumulasi pallet totals
+    palletArr.forEach(function(p,i){ if(p!==null && totals[iType]) totals[iType][i]+=p; });
+    // Akumulasi stock totals (angka mentah, UOM masing-masing item)
+    stockArr.forEach(function(v,i){ if(stockTotals[iType]) stockTotals[iType][i]+=(v||0); });
     items.push({ code:code, desc:master.desc||'', type:iType, uom:uom, stock:stockArr, pallets:palletArr });
   });
 
-  _ppCache = { months:months, totals:totals, items:items };
+  _ppCache = { months:months, totals:totals, stockTotals:stockTotals, items:items };
   return _ppCache;
 }
 
@@ -7475,9 +7480,12 @@ function renderPalletPos() {
   var pmKeys=STATE.palletPM?Object.keys(STATE.palletPM).length:0;
   var rmKeys=STATE.palletRM?Object.keys(STATE.palletRM).length:0;
   if(!pmKeys&&!rmKeys){el.innerHTML='<div class="empty"><div class="empty-ico">🛢</div><h3>Data Pallet belum dimuat</h3><p>Buka Data Source → Muat Pallet PM / RM</p></div>';return;}
-  _ppCache=null;
-  var d=_ppBuildData(), months=d.months, totRM=d.totals.RM, totPM=d.totals.PM, totFG=d.totals.FG;
-  var isPallet=_ppViewMode==='pallet', m0=0, nM=months.length;
+
+  // Cache: tidak di-reset di sini — hanya di-reset saat data pallet berubah (loadSheetData)
+  var d = _ppBuildData();
+  var months=d.months, nM=months.length;
+  var isPallet=_ppViewMode==='pallet', m0=0;
+
   if(!d.items.length){
     el.innerHTML='<div class="empty"><div class="empty-ico">?</div><h3>Tidak ada item yang cocok</h3>'
       +'<p>Pallet data: PM='+pmKeys+', RM='+rmKeys+' item</p>'
@@ -7485,46 +7493,70 @@ function renderPalletPos() {
       +'</div>'; return;
   }
 
-  // ── Filtered totals (untuk charts & KPI ikut filter tipe) ────────────────
+  // ── Pilih sumber data: pallet counts ATAU qty ending stock ────────────────
+  var srcTotals = isPallet ? d.totals : d.stockTotals;
+
+  // ── Filtered totals (charts & KPI ikut filter tipe) ───────────────────────
   var zero = new Array(nM).fill(0);
-  var dispRM = (_ppFilterType==='all'||_ppFilterType==='RM') ? totRM : zero;
-  var dispPM = (_ppFilterType==='all'||_ppFilterType==='PM') ? totPM : zero;
-  var dispFG = (_ppFilterType==='all'||_ppFilterType==='FG') ? totFG : zero;
+  var dispRM = (_ppFilterType==='all'||_ppFilterType==='RM') ? srcTotals.RM : zero;
+  var dispPM = (_ppFilterType==='all'||_ppFilterType==='PM') ? srcTotals.PM : zero;
+  var dispFG = (_ppFilterType==='all'||_ppFilterType==='FG') ? srcTotals.FG : zero;
   var dispTotal = months.map(function(_,i){ return dispRM[i]+dispPM[i]+dispFG[i]; });
 
-  // ── Alerts ───────────────────────────────────────────────────────────────
+  // ── Alerts (hanya di mode pallet) ─────────────────────────────────────────
   var alertHtml='';
   if(isPallet){
-    var overR=months.filter(function(m,i){return _whCapacityRM>0&&dispRM[i]>_whCapacityRM;});
-    var overP=months.filter(function(m,i){return _whCapacityPM>0&&dispPM[i]>_whCapacityPM;});
+    var overR=months.filter(function(m,i){return _whCapacityRM>0&&(d.totals.RM[i]||0)>_whCapacityRM;});
+    var overP=months.filter(function(m,i){return _whCapacityPM>0&&(d.totals.PM[i]||0)>_whCapacityPM;});
     if(overR.length) alertHtml+='<div style="background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.3);border-radius:6px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px"><span>⚠️</span><div><strong style="color:var(--red)">Gudang RM Melebihi Kapasitas ('+_whCapacityRM+' pallet)</strong><div style="font-size:11px;color:var(--muted)">Bulan: '+overR.join(', ')+'</div></div></div>';
     if(overP.length) alertHtml+='<div style="background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.3);border-radius:6px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px"><span>⚠️</span><div><strong style="color:var(--red)">Gudang PM Melebihi Kapasitas ('+_whCapacityPM+' pallet)</strong><div style="font-size:11px;color:var(--muted)">Bulan: '+overP.join(', ')+'</div></div></div>';
   }
 
-  // ── KPI (ikut filter) ────────────────────────────────────────────────────
+  // ── KPI ───────────────────────────────────────────────────────────────────
   var filtItems = d.items.filter(function(it){return _ppFilterType==='all'||it.type===_ppFilterType;});
   var kpi='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">';
   var kF=function(lbl,val,sub,col){return '<div class="card" style="padding:12px 14px"><div style="font-size:10px;text-transform:uppercase;color:var(--muted);letter-spacing:.06em">'+lbl+'</div><div style="font-size:22px;font-weight:700;color:'+(col||'var(--text)')+';margin:4px 0">'+val+'</div><div style="font-size:10px;color:var(--muted)">'+sub+'</div></div>';};
-  kpi+=kF('Total '+(_ppFilterType==='all'?'Semua':_ppFilterType)+' '+months[m0], n_id(dispTotal[m0]), filtItems.filter(function(i){return(i.pallets[m0]||0)>0;}).length+' item berisi', 'var(--text)');
-  kpi+=kF('RM '+months[m0], n_id(dispRM[m0]), _whCapacityRM>0?Math.round(dispRM[m0]/_whCapacityRM*100)+'% kapasitas':d.items.filter(function(i){return i.type==='RM'&&(i.pallets[m0]||0)>0;}).length+' item', '#0ea5e9');
-  kpi+=kF('PM '+months[m0], n_id(dispPM[m0]), _whCapacityPM>0?Math.round(dispPM[m0]/_whCapacityPM*100)+'% kapasitas':d.items.filter(function(i){return i.type==='PM'&&(i.pallets[m0]||0)>0;}).length+' item', '#8b5cf6');
-  kpi+=kF('Item', n_id(filtItems.length), 'RM: '+filtItems.filter(function(i){return i.type==='RM';}).length+' | PM: '+filtItems.filter(function(i){return i.type==='PM';}).length, 'var(--green)');
+  var unitLabel = isPallet ? 'pallet' : 'qty';
+  var rmCap = isPallet && _whCapacityRM>0 ? Math.round((d.totals.RM[m0]||0)/_whCapacityRM*100)+'% kapasitas' : d.items.filter(function(i){return i.type==='RM'&&(i.pallets[m0]||0)>0;}).length+' item berisi';
+  var pmCap = isPallet && _whCapacityPM>0 ? Math.round((d.totals.PM[m0]||0)/_whCapacityPM*100)+'% kapasitas' : d.items.filter(function(i){return i.type==='PM'&&(i.pallets[m0]||0)>0;}).length+' item berisi';
+  kpi+=kF((_ppFilterType==='all'?'Total':_ppFilterType)+' '+months[m0]+' ('+unitLabel+')', n_id(Math.round(dispTotal[m0])), filtItems.filter(function(i){return(isPallet?(i.pallets[m0]||0):(i.stock[m0]||0))>0;}).length+' item berisi', 'var(--text)');
+  kpi+=kF('RM '+months[m0], n_id(Math.round(dispRM[m0])), rmCap, _PP_COLORS.RM.replace('FD','99').replace('BD','99'));
+  kpi+=kF('PM '+months[m0], n_id(Math.round(dispPM[m0])), pmCap, _PP_COLORS.PM.replace('FD','99').replace('BD','99'));
+  kpi+=kF('Item dengan data', n_id(filtItems.length), 'RM: '+filtItems.filter(function(i){return i.type==='RM';}).length+' | PM: '+filtItems.filter(function(i){return i.type==='PM';}).length, 'var(--green)');
   kpi+='</div>';
 
-  // ── Charts (ikut filter) ─────────────────────────────────────────────────
-  var pieData=[
-    {label:'RM', value:dispRM[m0], color:_PP_COLORS.RM},
-    {label:'PM', value:dispPM[m0], color:_PP_COLORS.PM},
-    {label:'FG', value:dispFG[m0], color:_PP_COLORS.FG}
-  ].filter(function(p){return p.value>0;});
+  // ── Pie chart ─────────────────────────────────────────────────────────────
+  var pieData;
+  if(_ppFilterType==='all') {
+    // Distribusi RM/PM/FG
+    pieData = [
+      {label:'RM', value:Math.round(dispRM[m0]), color:_PP_COLORS.RM},
+      {label:'PM', value:Math.round(dispPM[m0]), color:_PP_COLORS.PM},
+      {label:'FG', value:Math.round(dispFG[m0]), color:_PP_COLORS.FG}
+    ].filter(function(p){return p.value>0;});
+  } else {
+    // Top 5 item untuk tipe yang dipilih
+    var _pastelN=['#93C5FD','#C4B5FD','#6EE7B7','#FDE68A','#FCA5A5','#A5F3FC'];
+    var topN = filtItems
+      .map(function(it){ return {label:it.code, desc:it.desc, value:Math.round(isPallet?(it.pallets[m0]||0):(it.stock[m0]||0))}; })
+      .filter(function(x){return x.value>0;})
+      .sort(function(a,b){return b.value-a.value;})
+      .slice(0,5);
+    var topSum = topN.reduce(function(s,x){return s+x.value;},0);
+    var totalSum = filtItems.reduce(function(s,it){return s+Math.round(isPallet?(it.pallets[m0]||0):(it.stock[m0]||0));},0);
+    pieData = topN.map(function(x,i){return {label:x.label, sublabel:x.desc.substring(0,16), value:x.value, color:_pastelN[i]};});
+    if(totalSum-topSum>0) pieData.push({label:'Lainnya', value:totalSum-topSum, color:'rgba(156,163,175,0.4)'});
+  }
+
+  // ── Bar chart ─────────────────────────────────────────────────────────────
   var barSeries=[
     {label:'RM', values:dispRM, color:_PP_COLORS.RM},
     {label:'PM', values:dispPM, color:_PP_COLORS.PM},
     {label:'FG', values:dispFG, color:_PP_COLORS.FG}
   ];
-  var charts='<div style="display:grid;grid-template-columns:280px 1fr;gap:12px;margin-bottom:14px">'
-    +'<div class="card"><div class="card-hdr"><span class="card-title">Distribusi '+months[m0]+(_ppFilterType!=='all'?' ('+_ppFilterType+'only)':'')+'</span></div><div style="padding:12px 8px">'+_ppRenderPie(pieData)+'</div></div>'
-    +'<div class="card"><div class="card-hdr"><span class="card-title">Trend Bulanan — '+(isPallet?'Jumlah Pallet':'Qty Ending Stock')+(_ppFilterType!=='all'?' · '+_ppFilterType+' only':'')+'</span></div><div style="padding:12px 8px">'+_ppRenderBar({months:months,series:barSeries,capRM:isPallet?_whCapacityRM:0,capPM:isPallet?_whCapacityPM:0,isQty:!isPallet,grouped:(_ppFilterType==='all'&&isPallet)})+'</div></div>'
+  var charts='<div style="display:grid;grid-template-columns:300px 1fr;gap:12px;margin-bottom:14px">'
+    +'<div class="card"><div class="card-hdr"><span class="card-title">'+(_ppFilterType==='all'?'Distribusi tipe':_ppFilterType+' — Top item')+' · '+months[m0]+'</span></div><div style="padding:12px 8px">'+_ppRenderPie(pieData)+'</div></div>'
+    +'<div class="card"><div class="card-hdr"><span class="card-title">Trend Bulanan — '+(isPallet?'Jumlah Pallet':'Qty Ending Stock')+(_ppFilterType!=='all'?' · '+_ppFilterType:'')+'</span></div><div style="padding:12px 8px">'+_ppRenderBar({months:months,series:barSeries,capRM:isPallet?_whCapacityRM:0,capPM:isPallet?_whCapacityPM:0,isQty:!isPallet,grouped:(_ppFilterType==='all')})+'</div></div>'
     +'</div>';
 
   // ── Kapasitas ─────────────────────────────────────────────────────────────
@@ -7535,7 +7567,7 @@ function renderPalletPos() {
     +'<button class="btn btn-primary btn-sm" onclick="_ppSaveCapacity()" style="height:34px">💾 Simpan & Sync</button>'
     +'</div></div>';
 
-  // ── Rekap table (RM/PM/FG/Total per bulan) ───────────────────────────────
+  // ── Rekap table ───────────────────────────────────────────────────────────
   var mhdr = months.map(function(m){return '<th style="padding:7px 10px;text-align:right;font-size:10px;text-transform:uppercase;color:var(--muted);white-space:nowrap">'+m.slice(0,3).toUpperCase()+'</th>';}).join('');
   var mkF = function(label, vals, color, cap) {
     var cells = vals.map(function(v,i){
@@ -7545,9 +7577,10 @@ function renderPalletPos() {
     return '<tr style="border-top:1px solid var(--border)"><td style="padding:6px 10px;font-size:11px;font-weight:700;color:'+color+'">'+label+'</td>'+cells+'</tr>';
   };
   var rekapRows = '';
-  if(_ppFilterType==='all'||_ppFilterType==='RM') rekapRows += mkF('RM', isPallet?dispRM:months.map(function(_,i){return dispRM[i];}), _PP_COLORS.RM, _whCapacityRM);
-  if(_ppFilterType==='all'||_ppFilterType==='PM') rekapRows += mkF('PM', isPallet?dispPM:months.map(function(_,i){return dispPM[i];}), _PP_COLORS.PM, _whCapacityPM);
-  if(_ppFilterType==='all'||_ppFilterType==='FG') rekapRows += mkF('FG', isPallet?dispFG:months.map(function(_,i){return dispFG[i];}), _PP_COLORS.FG, 0);
+  // dispRM/PM/FG sudah pakai sumber yang benar (pallet atau stock) berdasarkan isPallet
+  if(_ppFilterType==='all'||_ppFilterType==='RM') rekapRows += mkF('RM', dispRM, _PP_COLORS.RM, _whCapacityRM);
+  if(_ppFilterType==='all'||_ppFilterType==='PM') rekapRows += mkF('PM', dispPM, _PP_COLORS.PM, _whCapacityPM);
+  if(_ppFilterType==='all'||_ppFilterType==='FG') rekapRows += mkF('FG', dispFG, _PP_COLORS.FG, 0);
   if(_ppFilterType==='all') rekapRows += mkF('TOTAL', dispTotal, 'var(--text)', 0);
   var rekap='<div class="card" style="margin-bottom:14px"><div class="card-hdr"><span class="card-title">Rekap Total '+(isPallet?'Pallet':'Qty Ending Stock')+'</span></div>'
     +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
