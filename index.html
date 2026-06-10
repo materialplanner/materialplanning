@@ -1773,11 +1773,9 @@ function _applyRealtimeChanges(keys) {
           try { STATE.palletRM = JSON.parse(val || 'null'); } catch(e) {}
           break;
         case 'wh_capacity_rm':
-          _whCapacityRM = parseInt(val)||0;
-          break;
+          _whCapacityRM = parseInt(val)||0; break;
         case 'wh_capacity_pm':
-          _whCapacityPM = parseInt(val)||0;
-          break;
+          _whCapacityPM = parseInt(val)||0; break;
       }
     } catch(e) { console.warn('Realtime apply error for', k, e.message); }
   });
@@ -7271,44 +7269,63 @@ function _ppSetView(mode) {
     var b = document.getElementById('pp-btn-'+m);
     if(b){ b.style.background=m===mode?'var(--teal)':'transparent'; b.style.color=m===mode?'#fff':'var(--muted)'; }
   });
-  renderPalletPos();
+  _ppCache = null; renderPalletPos();
 }
 function _ppSetFilter(type) {
   _ppFilterType = type;
   ['all','rm','pm','fg'].forEach(function(t){
-    var id = 'pp-f-'+t, b = document.getElementById(id);
-    var active = t===type||t.toUpperCase()===type;
+    var b = document.getElementById('pp-f-'+t);
+    var active = t.toLowerCase()===type.toLowerCase();
     if(b){ b.style.background=active?'var(--accent)':'transparent'; b.style.color=active?'#fff':'var(--muted)'; }
   });
-  renderPalletPos();
+  _ppCache = null; renderPalletPos();
 }
 function _ppSaveCapacity() {
   _whCapacityRM = parseInt(document.getElementById('pp-cap-rm').value)||0;
   _whCapacityPM = parseInt(document.getElementById('pp-cap-pm').value)||0;
   localStorage.setItem('wh_capacity_rm', _whCapacityRM);
   localStorage.setItem('wh_capacity_pm', _whCapacityPM);
-  _ppCache = null;
-  renderPalletPos();
+  _ppCache = null; renderPalletPos();
   toast('Kapasitas tersimpan ✓', 'ok');
 }
+
 function _ppBuildData() {
   if(_ppCache) return _ppCache;
+  // ── FIX: re-read from localStorage in case cloudLoad ran after STATE init ──
+  if(!STATE.palletPM) { var raw=localStorage.getItem('pallet_pm'); if(raw) try{STATE.palletPM=JSON.parse(raw);}catch(e){} }
+  if(!STATE.palletRM) { var raw=localStorage.getItem('pallet_rm'); if(raw) try{STATE.palletRM=JSON.parse(raw);}catch(e){} }
+
   var months = FC_MONTHS, nM = months.length;
   var totals = { RM: new Array(nM).fill(0), PM: new Array(nM).fill(0), FG: new Array(nM).fill(0) };
   var items = [];
-  Object.keys(STATE.masterData||{}).forEach(function(code) {
-    if((!STATE.palletPM||!STATE.palletPM[code]) && (!STATE.palletRM||!STATE.palletRM[code])) return;
-    var master = STATE.masterData[code]||{}, uom = master.uom||'';
+  var masterRef = STATE.masterData || {};
+
+  // Iterate from PALLET data side (fix: avoids masterData key format mismatch)
+  var allPalletCodes = {};
+  if(STATE.palletPM) Object.keys(STATE.palletPM).forEach(function(c){ allPalletCodes[c]=true; });
+  if(STATE.palletRM) Object.keys(STATE.palletRM).forEach(function(c){ allPalletCodes[c]=true; });
+
+  console.log('[PalletPos] palletPM keys:', STATE.palletPM ? Object.keys(STATE.palletPM).length : 0,
+              '| palletRM keys:', STATE.palletRM ? Object.keys(STATE.palletRM).length : 0,
+              '| masterData keys:', Object.keys(masterRef).length,
+              '| allPalletCodes:', Object.keys(allPalletCodes).length);
+
+  Object.keys(allPalletCodes).forEach(function(code) {
+    var master = masterRef[code];
+    if(!master) return; // code not in masterData
+    var uom = master.uom || '';
     var iType = /^3/.test(code)?'RM':/^4/.test(code)?'PM':'FG';
     var fc; try{ fc=calcForecast(code); }catch(e){ return; }
-    var stockArr = fc.stock||new Array(nM).fill(0);
+    var stockArr = fc.stock || new Array(nM).fill(0);
     var palletArr = stockArr.map(function(v){ return _fcCalcPallet(code, v||0, uom); });
     palletArr.forEach(function(p,i){ if(p!==null&&totals[iType]) totals[iType][i]+=p; });
     items.push({ code:code, desc:master.desc||'', type:iType, uom:uom, stock:stockArr, pallets:palletArr });
   });
+
   _ppCache = { months:months, totals:totals, items:items };
   return _ppCache;
 }
+
 function _ppRenderPie(data) {
   var total = data.reduce(function(s,d){return s+d.value;},0);
   if(!total) return '<div style="text-align:center;color:var(--hint);padding:40px 0">Tidak ada data</div>';
@@ -7333,9 +7350,11 @@ function _ppRenderPie(data) {
   s.push('<text x="'+cx+'" y="'+(cy+9)+'" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="700">'+n_id(total)+'</text>');
   s.push('</svg>'); return s.join('');
 }
+
 function _ppRenderBar(bd) {
-  var months=bd.months,series=bd.series.filter(function(s){return s.values.some(function(v){return v>0;});}),W=660,H=220,pL=48,pB=32,pT=14,pR=16;
-  var cW=W-pL-pR,cH=H-pT-pB,nM=months.length,bW=Math.max(4,Math.floor(cW/nM)-4);
+  var months=bd.months, series=bd.series.filter(function(s){return s.values.some(function(v){return v>0;});}),
+      W=660,H=220,pL=48,pB=32,pT=14,pR=16,cW=W-pL-pR,cH=H-pT-pB,nM=months.length;
+  var bW=Math.max(4,Math.floor(cW/nM)-4);
   var stacked=months.map(function(_,i){return series.reduce(function(s,sr){return s+sr.values[i];},0);});
   var maxVal=Math.max.apply(null,stacked.concat([bd.capRM||0,bd.capPM||0]))*1.1||1;
   var yS=function(v){return pT+cH-(v/maxVal)*cH;},xP=function(i){return pL+(i/nM)*cW+2;};
@@ -7351,27 +7370,33 @@ function _ppRenderBar(bd) {
     s.push('<text x="'+(x+bW/2).toFixed(0)+'" y="'+(H-pB+14)+'" text-anchor="middle" fill="var(--muted)" font-size="9">'+months[i].slice(0,3).toUpperCase()+'</text>');
     var tot=stacked[i]; if(tot>0) s.push('<text x="'+(x+bW/2).toFixed(0)+'" y="'+(yS(tot)-3).toFixed(0)+'" text-anchor="middle" fill="var(--text)" font-size="8">'+tot+'</text>');
   });
-  if(bd.capRM>0){var y=yS(bd.capRM).toFixed(0); s.push('<line x1="'+pL+'" y1="'+y+'" x2="'+(W-pR)+'" y2="'+y+'" stroke="#0ea5e9" stroke-width="1.5" stroke-dasharray="5,3"/>'); s.push('<text x="'+(W-pR-2)+'" y="'+(parseFloat(y)-3)+'" text-anchor="end" fill="#0ea5e9" font-size="9">Cap RM</text>');}
-  if(bd.capPM>0){var y=yS(bd.capPM).toFixed(0); s.push('<line x1="'+pL+'" y1="'+y+'" x2="'+(W-pR)+'" y2="'+y+'" stroke="#8b5cf6" stroke-width="1.5" stroke-dasharray="5,3"/>'); s.push('<text x="'+(W-pR-2)+'" y="'+(parseFloat(y)-3)+'" text-anchor="end" fill="#8b5cf6" font-size="9">Cap PM</text>');}
-  // Legend — clarify qty mode
-  var lx=pL, legendSuffix = bd.isQty?' (Qty Ending Stock)':'';
-  series.forEach(function(sr){
-    s.push('<rect x="'+lx+'" y="'+(H-11)+'" width="10" height="10" rx="2" fill="'+sr.color+'"/>');
-    s.push('<text x="'+(lx+13)+'" y="'+(H-3)+'" fill="var(--muted)" font-size="9">'+sr.label+legendSuffix+'</text>');
-    lx+=55+(bd.isQty?60:0);
-  });
+  if(bd.capRM>0){var y=yS(bd.capRM).toFixed(0);s.push('<line x1="'+pL+'" y1="'+y+'" x2="'+(W-pR)+'" y2="'+y+'" stroke="#0ea5e9" stroke-width="1.5" stroke-dasharray="5,3"/>');s.push('<text x="'+(W-pR-2)+'" y="'+(parseFloat(y)-3)+'" text-anchor="end" fill="#0ea5e9" font-size="9">Cap RM</text>');}
+  if(bd.capPM>0){var y=yS(bd.capPM).toFixed(0);s.push('<line x1="'+pL+'" y1="'+y+'" x2="'+(W-pR)+'" y2="'+y+'" stroke="#8b5cf6" stroke-width="1.5" stroke-dasharray="5,3"/>');s.push('<text x="'+(W-pR-2)+'" y="'+(parseFloat(y)-3)+'" text-anchor="end" fill="#8b5cf6" font-size="9">Cap PM</text>');}
+  var lx=pL, suf=bd.isQty?' (Qty Ending Stock)':'';
+  series.forEach(function(sr){ s.push('<rect x="'+lx+'" y="'+(H-11)+'" width="10" height="10" rx="2" fill="'+sr.color+'"/>'); s.push('<text x="'+(lx+13)+'" y="'+(H-3)+'" fill="var(--muted)" font-size="9">'+sr.label+suf+'</text>'); lx+=55+(bd.isQty?70:0); });
   s.push('</svg>'); return s.join('');
 }
+
 function renderPalletPos() {
-  var el=document.getElementById('pp-content'); if(!el)return;
+  var el=document.getElementById('pp-content'); if(!el) return;
+  // Re-read from localStorage (fix for cloudLoad async race condition)
+  if(!STATE.palletPM){var r=localStorage.getItem('pallet_pm');if(r)try{STATE.palletPM=JSON.parse(r);}catch(e){}}
+  if(!STATE.palletRM){var r=localStorage.getItem('pallet_rm');if(r)try{STATE.palletRM=JSON.parse(r);}catch(e){}}
   if(!STATE.masterData){el.innerHTML='<div class="empty"><div class="empty-ico">📦</div><h3>Muat Master Data terlebih dahulu</h3></div>';return;}
   if(!FC_MONTHS||!FC_MONTHS.length){el.innerHTML='<div class="empty"><div class="empty-ico">📅</div><h3>Buka halaman Forecast sekali untuk inisialisasi bulan</h3></div>';return;}
-  var hasPalletData = (STATE.palletPM&&Object.keys(STATE.palletPM).length>0)||(STATE.palletRM&&Object.keys(STATE.palletRM).length>0);
-  if(!hasPalletData){el.innerHTML='<div class="empty"><div class="empty-ico">🛢️</div><h3>Data Pallet belum dimuat</h3><p>Buka <strong>Data Source</strong> → klik <strong>Muat Pallet PM</strong> dan/atau <strong>Muat Pallet RM</strong></p></div>';return;}
+  var pmKeys=STATE.palletPM?Object.keys(STATE.palletPM).length:0, rmKeys=STATE.palletRM?Object.keys(STATE.palletRM).length:0;
+  if(!pmKeys&&!rmKeys){el.innerHTML='<div class="empty"><div class="empty-ico">🛢️</div><h3>Data Pallet belum dimuat</h3><p>Buka <strong>Data Source</strong> → klik <strong>Muat Pallet PM</strong> dan/atau <strong>Muat Pallet RM</strong></p></div>';return;}
   _ppCache=null;
   var d=_ppBuildData(), months=d.months, totRM=d.totals.RM, totPM=d.totals.PM, totFG=d.totals.FG;
   var isPallet=_ppViewMode==='pallet', m0=0;
-  if(!d.items.length){el.innerHTML='<div class="empty"><div class="empty-ico">🔍</div><h3>Tidak ada item yang cocok dengan data pallet</h3><p>Pastikan kode item di sheet Pallet PM/RM sesuai dengan kode di Master Data, lalu muat ulang.</p></div>';return;}
+  if(!d.items.length){
+    el.innerHTML='<div class="empty"><div class="empty-ico">🔍</div><h3>Tidak ada item yang cocok</h3>'
+      +'<p>Data pallet dimuat: PM='+pmKeys+' item, RM='+rmKeys+' item</p>'
+      +'<p>Pastikan kode item di sheet Pallet PM/RM sama persis dengan kode di Master Data, lalu klik <strong>Muat Pallet PM/RM</strong> ulang dari Data Source.</p>'
+      +'<button class="btn btn-primary btn-sm" onclick="showPage(\'upload\',document.querySelectorAll(\'.ni\')[10])" style="margin-top:8px">Buka Data Source</button>'
+      +'</div>';
+    return;
+  }
   // Alerts
   var alertHtml='';
   if(isPallet){
@@ -7383,26 +7408,23 @@ function renderPalletPos() {
   // KPI
   var kpi='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">';
   var kF=function(lbl,val,sub,col){return '<div class="card" style="padding:12px 14px"><div style="font-size:10px;text-transform:uppercase;color:var(--muted);letter-spacing:.06em">'+lbl+'</div><div style="font-size:22px;font-weight:700;color:'+(col||'var(--text)')+';margin:4px 0">'+val+'</div><div style="font-size:10px;color:var(--muted)">'+sub+'</div></div>';};
-  kpi+=kF('Total Pallet '+months[m0], n_id(totRM[m0]+totPM[m0]+totFG[m0]), d.items.filter(function(i){return(i.pallets[m0]||0)>0;}).length+' item berisi', 'var(--text)');
-  kpi+=kF('RM '+months[m0], n_id(totRM[m0]), (_whCapacityRM>0?Math.round(totRM[m0]/_whCapacityRM*100)+'% kapasitas':d.items.filter(function(i){return i.type==='RM'&&(i.pallets[m0]||0)>0;}).length+' item'), '#0ea5e9');
-  kpi+=kF('PM '+months[m0], n_id(totPM[m0]), (_whCapacityPM>0?Math.round(totPM[m0]/_whCapacityPM*100)+'% kapasitas':d.items.filter(function(i){return i.type==='PM'&&(i.pallets[m0]||0)>0;}).length+' item'), '#8b5cf6');
-  kpi+=kF('Item Pallet Data', n_id(d.items.length), 'RM: '+d.items.filter(function(i){return i.type==='RM';}).length+' | PM: '+d.items.filter(function(i){return i.type==='PM';}).length, 'var(--green)');
+  kpi+=kF('Total Pallet '+months[m0],n_id(totRM[m0]+totPM[m0]+totFG[m0]),d.items.filter(function(i){return(i.pallets[m0]||0)>0;}).length+' item berisi','var(--text)');
+  kpi+=kF('RM '+months[m0],n_id(totRM[m0]),_whCapacityRM>0?Math.round(totRM[m0]/_whCapacityRM*100)+'% kapasitas':d.items.filter(function(i){return i.type==='RM'&&(i.pallets[m0]||0)>0;}).length+' item','#0ea5e9');
+  kpi+=kF('PM '+months[m0],n_id(totPM[m0]),_whCapacityPM>0?Math.round(totPM[m0]/_whCapacityPM*100)+'% kapasitas':d.items.filter(function(i){return i.type==='PM'&&(i.pallets[m0]||0)>0;}).length+' item','#8b5cf6');
+  kpi+=kF('Item Pallet Data',n_id(d.items.length),'RM: '+d.items.filter(function(i){return i.type==='RM';}).length+' | PM: '+d.items.filter(function(i){return i.type==='PM';}).length,'var(--green)');
   kpi+='</div>';
-  // Charts
   var pieData=[{label:'RM',value:totRM[m0],color:'#0ea5e9'},{label:'PM',value:totPM[m0],color:'#8b5cf6'},{label:'FG',value:totFG[m0],color:'#10b981'}].filter(function(p){return p.value>0;});
   var barSeries=[{label:'RM',values:totRM,color:'#0ea5e9'},{label:'PM',values:totPM,color:'#8b5cf6'},{label:'FG',values:totFG,color:'#10b981'}];
   var charts='<div style="display:grid;grid-template-columns:280px 1fr;gap:12px;margin-bottom:14px">'
     +'<div class="card"><div class="card-hdr"><span class="card-title">Distribusi '+months[m0]+'</span></div><div style="padding:12px 8px">'+_ppRenderPie(pieData)+'</div></div>'
     +'<div class="card"><div class="card-hdr"><span class="card-title">Trend Bulanan — '+(isPallet?'Jumlah Pallet':'Qty Ending Stock')+'</span></div><div style="padding:12px 8px">'+_ppRenderBar({months:months,series:barSeries,capRM:isPallet?_whCapacityRM:0,capPM:isPallet?_whCapacityPM:0,isQty:!isPallet})+'</div></div>'
     +'</div>';
-  // Capacity
   var cap='<div class="card" style="margin-bottom:14px"><div class="card-hdr"><span class="card-title">⚙ Kapasitas Gudang</span></div>'
     +'<div style="padding:12px;display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap">'
     +'<div><label style="font-size:11px;display:block;margin-bottom:4px;color:var(--muted)">Max Pallet Gudang RM</label><input id="pp-cap-rm" type="number" value="'+(_whCapacityRM||'')+'" placeholder="cth: 500" style="width:130px;padding:6px 8px;font-size:13px;border:1px solid var(--border);border-radius:var(--r);background:var(--bg3);color:var(--text)"></div>'
     +'<div><label style="font-size:11px;display:block;margin-bottom:4px;color:var(--muted)">Max Pallet Gudang PM</label><input id="pp-cap-pm" type="number" value="'+(_whCapacityPM||'')+'" placeholder="cth: 300" style="width:130px;padding:6px 8px;font-size:13px;border:1px solid var(--border);border-radius:var(--r);background:var(--bg3);color:var(--text)"></div>'
     +'<button class="btn btn-primary btn-sm" onclick="_ppSaveCapacity()" style="height:34px">💾 Simpan & Sync</button>'
     +'</div></div>';
-  // Table
   var filtered=d.items.filter(function(it){return _ppFilterType==='all'||it.type===_ppFilterType;});
   filtered.sort(function(a,b){return (a.type<b.type?-1:a.type>b.type?1:0)||a.code.localeCompare(b.code);});
   var tcols='<th style="padding:7px 10px;text-align:left;font-size:10px;text-transform:uppercase;color:var(--muted);white-space:nowrap">Kode</th>'
@@ -7414,8 +7436,7 @@ function renderPalletPos() {
     var arr=isPallet?it.pallets:it.stock, tc=it.type==='RM'?'#0ea5e9':it.type==='PM'?'#8b5cf6':'#10b981';
     var cells=arr.map(function(v){
       if(v===null||v===undefined) return '<td style="padding:6px 10px;text-align:right;color:var(--hint)">—</td>';
-      var disp=isPallet?(v>0?'<strong>'+v+'</strong>':'<span style="color:var(--hint)">0</span>'):n_id(Math.round(v));
-      return '<td style="padding:6px 10px;text-align:right;font-family:var(--mono);font-size:11px">'+disp+'</td>';
+      return '<td style="padding:6px 10px;text-align:right;font-family:var(--mono);font-size:11px">'+(isPallet?(v>0?'<strong>'+v+'</strong>':'<span style="color:var(--hint)">0</span>'):n_id(Math.round(v)))+'</td>';
     }).join('');
     return '<tr style="border-top:1px solid var(--border)"><td style="padding:6px 10px;font-family:var(--mono);font-size:11px;white-space:nowrap">'+it.code+'</td><td style="padding:6px 10px;font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)">'+it.desc+'</td><td style="padding:6px 10px;text-align:center"><span style="font-size:10px;font-weight:700;color:'+tc+'">'+it.type+'</span></td><td style="padding:6px 10px;text-align:center;font-size:10px;color:var(--muted)">'+it.uom+'</td>'+cells+'</tr>';
   }).join('');
@@ -8316,15 +8337,12 @@ function _fcDetailRow(code, fc, master) {
     + gRow('DOI (hari)',     isFcView ? fc.doiFc   : fc.doi,   doiClsFn)
     + gRow('Propose PR', fc.propose, null, true, code)
     + (function(){
-        var master = (STATE.masterData||{})[code]||{}, uom = master.uom||'';
-        var stockArr = isFcView ? fc.stockFc : fc.stock;
-        var pv = (stockArr||[]).map(function(v){ return _fcCalcPallet(code, v||0, uom); });
-        if(!pv.some(function(v){ return v!==null; })) return '';
-        var cells = pv.map(function(v){
-          if(v===null) return '<td style="text-align:right;padding:5px 6px;color:var(--hint)">—</td>';
-          return '<td style="text-align:right;padding:5px 6px;'+(v>0?'color:var(--teal);font-weight:600':'color:var(--hint)')+'">'+v+'</td>';
-        }).join('');
-        return '<tr style="border-top:1px solid var(--border);background:rgba(20,184,166,.04)"><td style="padding:5px 6px;font-size:10.5px;font-weight:700;color:var(--teal);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap">Pallet Usage</td>'+cells+'<td></td></tr>';
+        var master=(STATE.masterData||{})[code]||{}, uom=master.uom||'';
+        var pv=(isFcView?fc.stockFc:fc.stock||[]).map(function(v){return _fcCalcPallet(code,v||0,uom);});
+        if(!pv.some(function(v){return v!==null;})) return '';
+        return '<tr style="border-top:1px solid var(--border);background:rgba(20,184,166,.04)"><td style="padding:5px 6px;font-size:10.5px;font-weight:700;color:var(--teal);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap">Pallet Usage</td>'
+          +pv.map(function(v){if(v===null)return '<td style="text-align:right;padding:5px 6px;color:var(--hint)">—</td>';return '<td style="text-align:right;padding:5px 6px;'+(v>0?'color:var(--teal);font-weight:600':'color:var(--hint)')+'">'+v+'</td>';}).join('')
+          +'<td></td></tr>';
       }())
     + '</tbody></table></div>';
 
