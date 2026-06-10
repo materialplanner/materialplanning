@@ -1507,7 +1507,9 @@ var CLOUD_KEYS = [
   'admin_user','admin_pass',
   'master_data','mrp_data','realname_data','pallet_pm','pallet_rm',
   'wh_capacity_rm','wh_capacity_pm','update_deldate_data',
-  'fc_propose','fc_ospo_ovr','fc_ospr_ovr','fc_doi2','fc_doi2_suppliers','mrp_source'
+  'fc_propose','fc_ospo_ovr','fc_ospr_ovr','fc_doi2','fc_doi2_suppliers','mrp_source',
+  'matcom_monthly','matcom_data','matcom_count','last_matcom_sync',
+  'mps_ui_status','bom_ui_status','mrp_last_calc'
 ];
 
 // ── Sync indicator di header ──────────────────────────────────────────────────
@@ -1779,6 +1781,30 @@ function _applyRealtimeChanges(keys) {
         case 'pallet_rm': try { STATE.palletRM = JSON.parse(val || 'null'); } catch(e) {} break;
         case 'wh_capacity_rm': _whCapacityRM = parseInt(val)||0; break;
         case 'wh_capacity_pm': _whCapacityPM = parseInt(val)||0; break;
+        case 'matcom_monthly':
+          try {
+            STATE.matcomMonthly = JSON.parse(val || 'null');
+            localStorage.setItem('matcom_monthly', val||'null');
+            // Update badge jika ada
+            var _mcnt2 = localStorage.getItem('matcom_count');
+            var _mbadge2 = document.getElementById('fc-matcom-badge');
+            if(_mbadge2 && STATE.matcomMonthly && _mcnt2) {
+              var _mts2 = localStorage.getItem('last_matcom_sync') || '';
+              _mbadge2.textContent = '\u2713 '+_mcnt2+' item'+(_mts2?' \xb7 '+_mts2:'');
+              _mbadge2.style.display = 'inline';
+            }
+          } catch(e) {}
+          break;
+        case 'matcom_count':
+          try { localStorage.setItem('matcom_count', val||''); } catch(e) {} break;
+        case 'last_matcom_sync':
+          try { localStorage.setItem('last_matcom_sync', val||''); } catch(e) {} break;
+        case 'mps_ui_status':
+          try { localStorage.setItem('mps_ui_status', val||''); } catch(e) {} break;
+        case 'bom_ui_status':
+          try { localStorage.setItem('bom_ui_status', val||''); } catch(e) {} break;
+        case 'mrp_last_calc':
+          try { localStorage.setItem('mrp_last_calc', val||''); } catch(e) {} break;
         case 'update_deldate_data':
           try { STATE.updateDelDateData = JSON.parse(val || '{}'); if(document.getElementById('pg-po')&&document.getElementById('pg-po').classList.contains('active')) renderPO(); } catch(e) {}
           break;
@@ -2519,13 +2545,16 @@ async function loadMatcomSAP() {
     // Store as matcomMonthly: { itemCode: { 4: qty, 5: qty, ... } }
     STATE.matcomMonthly = byItem;
     localStorage.setItem('matcom_monthly', JSON.stringify(byItem));
+    cloudSave('matcom_monthly', JSON.stringify(byItem));
     var cnt = Object.keys(byItem).length;
     var matcomSyncTime = new Date().toLocaleString('id-ID',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
     localStorage.setItem('last_matcom_sync', matcomSyncTime);
+    cloudSave('last_matcom_sync', matcomSyncTime);
     // Show badge
     var badge = document.getElementById('fc-matcom-badge');
     if(badge) { badge.textContent = '✓ '+cnt+' item · '+matcomSyncTime; badge.style.display='inline'; }
     localStorage.setItem('matcom_count', cnt);
+    cloudSave('matcom_count', String(cnt));
     toast('Matcom ' + cnt + ' item ✓', 'ok');
     if(_mbtn) { _mbtn.disabled = false; _mbtn.textContent = '↺ Sync Matcom'; }
     _setSyncItem('matcom', 'ok');
@@ -9580,6 +9609,8 @@ function _mrpApplyToState(result) {
   });
   STATE.mrpData = mrpData;
   localStorage.setItem('mrp_data', JSON.stringify(mrpData));
+  // Auto-sync ke Firebase supaya laptop lain langsung update
+  cloudSave('mrp_data', JSON.stringify(mrpData));
   localStorage.setItem('mrp_source', 'mps'); // flag: jangan overwrite dari GSheet
   cloudSave('mrp_source', 'mps');
   // Refresh forecast & projection if currently open
@@ -9831,7 +9862,10 @@ function _mrpIdbLoad() {
         _bomData = e.target.result.data;
         var ts   = e.target.result.ts ? new Date(e.target.result.ts).toLocaleDateString('id-ID') : '';
         var el   = document.getElementById('bom-status');
-        if(el) { el.textContent = '✓ BOM tersimpan: ' + _bomData.length + ' baris (' + ts + ')'; el.style.color='var(--green)'; }
+        var bomStatusText = '✓ BOM tersimpan: ' + _bomData.length + ' baris (' + ts + ')';
+        if(el) { el.textContent = bomStatusText; el.style.color='var(--green)'; }
+        localStorage.setItem('bom_ui_status', bomStatusText);
+        cloudSave('bom_ui_status', bomStatusText);
         _mrpCheckReady();
         _mrpUpdateDetailStatus();
       }
@@ -9847,7 +9881,10 @@ function _mrpIdbLoad() {
           var ts3  = e3.target.result.ts ? new Date(e3.target.result.ts).toLocaleDateString('id-ID') : '';
           var cnt  = Object.keys(_mpsData).length;
           var el3  = document.getElementById('mps-status');
-          if(el3) { el3.textContent = '✓ MPS tersimpan: ' + cnt + ' FG (' + ts3 + ')'; el3.style.color='var(--green)'; }
+          var mpsStatusText = '✓ MPS tersimpan: ' + cnt + ' FG (' + ts3 + ')';
+          if(el3) { el3.textContent = mpsStatusText; el3.style.color='var(--green)'; }
+          localStorage.setItem('mps_ui_status', mpsStatusText);
+          cloudSave('mps_ui_status', mpsStatusText);
           _mrpCheckReady();
         }
       };
@@ -9871,9 +9908,52 @@ function _mrpIdbLoad() {
         var sw2 = document.getElementById('mrp-search-wrap');
         if(sw2) sw2.style.display = 'block';
         _mrpUpdateDetailStatus();
+      } else {
+        // IndexedDB kosong → fallback dari Firebase (STATE.mrpData)
+        _mrpFallbackFromFirebase();
       }
     };
   });
+}
+
+// Fallback: tampilkan tabel MRP dari STATE.mrpData (Firebase) kalau IndexedDB kosong
+function _mrpFallbackFromFirebase() {
+  if(!STATE.mrpData || !Object.keys(STATE.mrpData).length) return;
+
+  // Tampilkan status dari Firebase
+  var mpsStatus = localStorage.getItem('mps_ui_status') || '';
+  var bomStatus = localStorage.getItem('bom_ui_status') || '';
+  var mpsEl = document.getElementById('mps-status');
+  var bomEl = document.getElementById('bom-status');
+  if(mpsEl && mpsStatus) { mpsEl.textContent = mpsStatus + ' (dari Firebase)'; mpsEl.style.color='var(--teal)'; }
+  if(bomEl && bomStatus) { bomEl.textContent = bomStatus + ' (dari Firebase)'; bomEl.style.color='var(--teal)'; }
+
+  // Rebuild _mrpResult dari STATE.mrpData untuk tampilan tabel
+  // STATE.mrpData: { code: { months: { "Juni":132, "Juli":137, ... } } }
+  // _mrpResult format: { code: { Jun:132, Jul:137, ... } }
+  var MO_MAP = {'Januari':'Jan','Februari':'Feb','Maret':'Mar','April':'Apr',
+    'Mei':'May','Juni':'Jun','Juli':'Jul','Agustus':'Aug',
+    'September':'Sep','Oktober':'Oct','November':'Nov','Desember':'Dec'};
+  var rebuilt = {};
+  Object.keys(STATE.mrpData).forEach(function(code) {
+    rebuilt[code] = {};
+    var months = STATE.mrpData[code].months || {};
+    Object.keys(months).forEach(function(fcKey) {
+      var mrpKey = MO_MAP[fcKey];
+      if(mrpKey) rebuilt[code][mrpKey] = months[fcKey];
+    });
+  });
+  _mrpResult = rebuilt;
+
+  var _savedTs = localStorage.getItem('mrp_last_calc') || '';
+  var _tsLbl = document.getElementById('mrp-last-calc-label');
+  if(_tsLbl) _tsLbl.textContent = '· Terakhir: ' + (_savedTs || 'dari Firebase');
+  var saveBtn = document.getElementById('btn-save-mrp');    if(saveBtn) saveBtn.disabled = false;
+  var tepBtn  = document.getElementById('btn-terapkan-mrp');if(tepBtn)  tepBtn.disabled  = false;
+  _mrpShowResult();
+  var sw2 = document.getElementById('mrp-search-wrap');
+  if(sw2) sw2.style.display = 'block';
+  toast('MRP dimuat dari Firebase \u2713', 'ok');
 }
 
 // ─── Supplier Performance ─────────────────────────────────────────────────────
