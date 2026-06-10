@@ -1129,6 +1129,10 @@ body.light-mode .theme-toggle-knob{transform:translateX(15px);background:var(--a
     <div class="ph-l"><h2>🏗 Pallet Position</h2><p>Proyeksi posisi pallet per bulan berdasarkan ending stock</p></div>
     <div class="ph-r" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <div style="display:flex;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
+        <button id="pp-btn-proj"  onclick="_ppSetTimeMode('proj')"  style="padding:6px 14px;font-size:11px;font-weight:600;border:none;cursor:pointer;background:var(--accent);color:#fff;font-family:var(--font)">📅 Proyeksi</button>
+        <button id="pp-btn-today" onclick="_ppSetTimeMode('today')" style="padding:6px 14px;font-size:11px;font-weight:600;border:none;cursor:pointer;background:transparent;color:var(--muted);font-family:var(--font)">📍 Hari Ini</button>
+      </div>
+      <div style="display:flex;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
         <button id="pp-btn-pallet" onclick="_ppSetView('pallet')" style="padding:6px 14px;font-size:11px;font-weight:600;border:none;cursor:pointer;background:var(--teal);color:#fff;font-family:var(--font)">🏗 Pallet</button>
         <button id="pp-btn-qty"    onclick="_ppSetView('qty')"    style="padding:6px 14px;font-size:11px;font-weight:600;border:none;cursor:pointer;background:transparent;color:var(--muted);font-family:var(--font)">📦 Qty</button>
       </div>
@@ -7263,7 +7267,16 @@ function _fcCalcPallet(code, endingStock, uom) {
   return null;
 }
 
-var _ppViewMode = 'pallet', _ppFilterType = 'all', _ppCache = null;
+var _ppViewMode = 'pallet', _ppFilterType = 'all', _ppCache = null, _ppTimeMode = 'proj';
+
+function _ppSetTimeMode(mode) {
+  _ppTimeMode = mode;
+  ['proj','today'].forEach(function(m){
+    var b = document.getElementById('pp-btn-'+m);
+    if(b){ b.style.background=m===mode?'var(--accent)':'transparent'; b.style.color=m===mode?'#fff':'var(--muted)'; }
+  });
+  renderPalletPos();
+}
 
 function _ppSetView(mode) {
   _ppViewMode = mode;
@@ -7323,7 +7336,7 @@ function _ppBuildData() {
     // Akumulasi pallet totals
     palletArr.forEach(function(p,i){ if(p!==null && totals[iType]) totals[iType][i]+=p; });
     // Akumulasi stock totals (angka mentah, UOM masing-masing item)
-    stockArr.forEach(function(v,i){ if(stockTotals[iType]) stockTotals[iType][i]+=(v||0); });
+    stockArr.forEach(function(v,i){ if(stockTotals[iType]) stockTotals[iType][i] = Math.round(stockTotals[iType][i] + (v||0)); });
     items.push({ code:code, desc:master.desc||'', type:iType, uom:uom, stock:stockArr, pallets:palletArr });
   });
 
@@ -7410,7 +7423,7 @@ function _ppRenderBar(bd) {
         var bx = slotX + si*(bW+bGap) + Math.floor((slotW - activeSeries.length*(bW+bGap))/2);
         var by = yS(v);
         s.push('<rect x="'+bx.toFixed(0)+'" y="'+by.toFixed(0)+'" width="'+bW+'" height="'+h.toFixed(0)+'" fill="'+sr.color+'" rx="2" opacity="0.9"/>');
-        if(v>0&&h>14) s.push('<text x="'+(bx+bW/2).toFixed(0)+'" y="'+(by-3).toFixed(0)+'" text-anchor="middle" fill="var(--muted)" font-size="7" font-family="inherit">'+v+'</text>');
+        if(v>0&&h>14) s.push('<text x="'+(bx+bW/2).toFixed(0)+'" y="'+(by-3).toFixed(0)+'" text-anchor="middle" fill="var(--muted)" font-size="7" font-family="inherit">'+n_id(Math.round(v))+'</text>');
       });
     } else {
       var baseY = pT+cH;
@@ -7420,7 +7433,7 @@ function _ppRenderBar(bd) {
         var bx = slotX + Math.floor((slotW-bW)/2);
         s.push('<rect x="'+bx.toFixed(0)+'" y="'+baseY.toFixed(0)+'" width="'+bW+'" height="'+h.toFixed(0)+'" fill="'+sr.color+'" rx="2" opacity="0.9"/>');
       });
-      var tot=vals[i]; if(tot>0) s.push('<text x="'+(slotX+slotW/2).toFixed(0)+'" y="'+(yS(tot)-3).toFixed(0)+'" text-anchor="middle" fill="var(--muted)" font-size="8" font-family="inherit">'+tot+'</text>');
+      var tot=vals[i]; if(tot>0) s.push('<text x="'+(slotX+slotW/2).toFixed(0)+'" y="'+(yS(tot)-3).toFixed(0)+'" text-anchor="middle" fill="var(--muted)" font-size="8" font-family="inherit">'+n_id(Math.round(tot))+'</text>');
     }
     // X label
     s.push('<text x="'+(slotX+slotW/2).toFixed(0)+'" y="'+(H-pB+14)+'" text-anchor="middle" fill="var(--muted)" font-size="9" font-family="inherit">'+months[i].slice(0,3).toUpperCase()+'</text>');
@@ -7446,6 +7459,145 @@ function _ppRenderBar(bd) {
     lx+=55+(bd.isQty?30:0);
   });
   s.push('</svg>'); return s.join('');
+}
+
+function _ppBuildTodayData() {
+  if(!STATE.palletPM){var r=localStorage.getItem('pallet_pm');if(r)try{STATE.palletPM=JSON.parse(r);}catch(e){}}
+  if(!STATE.palletRM){var r=localStorage.getItem('pallet_rm');if(r)try{STATE.palletRM=JSON.parse(r);}catch(e){}}
+  var masterRef = STATE.masterData || {};
+  var stockRef  = STATE.stockData  || {};
+  var items = [];
+  var totPallet = { RM:0, PM:0, FG:0 };
+  var totStock  = { RM:0, PM:0, FG:0 };
+
+  Object.keys(masterRef).forEach(function(code) {
+    var master = masterRef[code]; if(!master) return;
+    var uom   = master.uom || '';
+    var iType = /^3/.test(code)?'RM':/^4/.test(code)?'PM':'FG';
+    var hasPM = (iType==='PM'||iType==='FG') && STATE.palletPM && STATE.palletPM[code];
+    var hasRM = iType==='RM'  && STATE.palletRM && STATE.palletRM[code];
+    if(!hasPM && !hasRM) return;
+
+    var sd  = stockRef[code] || {};
+    var soh = (sd.btg||0) + (sd.sng||0); // total SOH hari ini
+    var p   = _fcCalcPallet(code, soh, uom);
+
+    totStock[iType]  += Math.round(soh);
+    if(p !== null) totPallet[iType] += p;
+    items.push({ code:code, desc:master.desc||'', type:iType, uom:uom, soh:Math.round(soh), pallet: p===null?0:(p||0) });
+  });
+
+  return { items:items, totPallet:totPallet, totStock:totStock };
+}
+
+function _ppRenderHBar(items, valueKey, maxItems) {
+  // Horizontal bar chart: ranking item by value
+  var top = items.slice().sort(function(a,b){return b[valueKey]-a[valueKey];}).slice(0,maxItems||15);
+  if(!top.length) return '<div style="color:var(--hint);padding:20px;text-align:center">Tidak ada data</div>';
+  var maxVal = top[0][valueKey] || 1;
+  var rowH = 22, padL = 90, padR = 60, W = 580, H = top.length * rowH + 16;
+  var barW = W - padL - padR;
+  var s = ['<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-height:'+(H+4)+'px">'];
+  top.forEach(function(it, i) {
+    var y   = i * rowH + 8;
+    var tc  = it.type==='RM'?_PP_COLORS.RM:it.type==='PM'?_PP_COLORS.PM:_PP_COLORS.FG;
+    var w   = Math.max(2, Math.round((it[valueKey]/maxVal)*barW));
+    var lbl = it.code + (it.desc ? ' · '+it.desc.substring(0,14) : '');
+    // Label kiri
+    s.push('<text x="'+(padL-5)+'" y="'+(y+12)+'" text-anchor="end" fill="var(--muted)" font-size="9" font-family="inherit">'+lbl+'</text>');
+    // Bar
+    s.push('<rect x="'+padL+'" y="'+(y+1)+'" width="'+w+'" height="'+(rowH-4)+'" fill="'+tc+'" rx="2" opacity="0.85"/>');
+    // Value kanan
+    s.push('<text x="'+(padL+w+5)+'" y="'+(y+12)+'" fill="var(--text)" font-size="9" font-weight="600" font-family="inherit">'+n_id(it[valueKey])+'</text>');
+  });
+  s.push('</svg>');
+  return s.join('');
+}
+
+function _ppRenderTodayView(el, isPallet, filterType) {
+  var d = _ppBuildTodayData();
+  var filtItems = d.items.filter(function(it){ return filterType==='all'||it.type===filterType; });
+  if(!filtItems.length){
+    el.innerHTML='<div class="empty"><div class="empty-ico">📋</div><h3>Tidak ada data hari ini</h3><p>Pastikan sudah Sync SAP untuk mengambil stock terkini</p></div>'; return;
+  }
+  var valueKey = isPallet ? 'pallet' : 'soh';
+  var unitLabel = isPallet ? 'pallet' : 'qty SOH';
+
+  // KPI
+  var totRM = filtItems.filter(function(i){return i.type==='RM';}).reduce(function(s,i){return s+i[valueKey];},0);
+  var totPM = filtItems.filter(function(i){return i.type==='PM';}).reduce(function(s,i){return s+i[valueKey];},0);
+  var totFG = filtItems.filter(function(i){return i.type==='FG';}).reduce(function(s,i){return s+i[valueKey];},0);
+  var totAll = totRM+totPM+totFG;
+  var kF = function(lbl,val,sub,col){return '<div class="card" style="padding:12px 14px"><div style="font-size:10px;text-transform:uppercase;color:var(--muted);letter-spacing:.06em">'+lbl+'</div><div style="font-size:22px;font-weight:700;color:'+(col||'var(--text)')+';margin:4px 0">'+n_id(val)+'</div><div style="font-size:10px;color:var(--muted)">'+sub+'</div></div>';};
+  var rmCapStr = isPallet&&_whCapacityRM>0 ? Math.round(totRM/_whCapacityRM*100)+'% kapasitas' : filtItems.filter(function(i){return i.type==='RM';}).length+' item';
+  var pmCapStr = isPallet&&_whCapacityPM>0 ? Math.round(totPM/_whCapacityPM*100)+'% kapasitas' : filtItems.filter(function(i){return i.type==='PM';}).length+' item';
+  var today = new Date(); var todayStr = today.getDate()+'/'+(today.getMonth()+1)+'/'+today.getFullYear();
+  var kpi = '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">'
+    +kF('Total Hari Ini', totAll, filtItems.filter(function(i){return i[valueKey]>0;}).length+' item · '+todayStr, 'var(--text)')
+    +kF('RM', totRM, rmCapStr, _PP_COLORS.RM.replace('FD','aa'))
+    +kF('PM', totPM, pmCapStr, _PP_COLORS.PM.replace('FD','aa'))
+    +kF('Item dengan data', n_id(filtItems.length), 'RM: '+d.items.filter(function(i){return i.type==='RM';}).length+' | PM: '+d.items.filter(function(i){return i.type==='PM';}).length, 'var(--green)')
+    +'</div>';
+
+  // Alerts
+  var alertHtml='';
+  if(isPallet){
+    if(_whCapacityRM>0&&totRM>_whCapacityRM) alertHtml+='<div style="background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.3);border-radius:6px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px"><span>⚠️</span><div><strong style="color:var(--red)">Gudang RM Melebihi Kapasitas Hari Ini</strong><div style="font-size:11px;color:var(--muted)">'+n_id(totRM)+' / '+n_id(_whCapacityRM)+' pallet ('+Math.round(totRM/_whCapacityRM*100)+'%)</div></div></div>';
+    if(_whCapacityPM>0&&totPM>_whCapacityPM) alertHtml+='<div style="background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.3);border-radius:6px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px"><span>⚠️</span><div><strong style="color:var(--red)">Gudang PM Melebihi Kapasitas Hari Ini</strong><div style="font-size:11px;color:var(--muted)">'+n_id(totPM)+' / '+n_id(_whCapacityPM)+' pallet ('+Math.round(totPM/_whCapacityPM*100)+'%)</div></div></div>';
+  }
+
+  // Pie (distribusi tipe) + Horizontal bar (ranking item)
+  var topForPie = filtItems.filter(function(i){return i[valueKey]>0;});
+  var pieDataToday = filterType==='all'
+    ? [{label:'RM',value:totRM,color:_PP_COLORS.RM},{label:'PM',value:totPM,color:_PP_COLORS.PM},{label:'FG',value:totFG,color:_PP_COLORS.FG}].filter(function(p){return p.value>0;})
+    : (function(){
+        var _pc=['#93C5FD','#C4B5FD','#6EE7B7','#FDE68A','#FCA5A5'];
+        var top5=topForPie.sort(function(a,b){return b[valueKey]-a[valueKey];}).slice(0,5);
+        var pieD=top5.map(function(it,i){return{label:it.code,value:it[valueKey],color:_pc[i]};});
+        var rest=topForPie.reduce(function(s,i){return s+i[valueKey];},0)-top5.reduce(function(s,i){return s+i[valueKey];},0);
+        if(rest>0) pieD.push({label:'Lainnya',value:rest,color:'rgba(156,163,175,0.4)'});
+        return pieD;
+      })();
+
+  var charts = '<div style="display:grid;grid-template-columns:300px 1fr;gap:12px;margin-bottom:14px">'
+    +'<div class="card"><div class="card-hdr"><span class="card-title">'+(filterType==='all'?'Distribusi tipe':filterType+' — Top item')+' · Hari Ini</span></div><div style="padding:12px 8px">'+_ppRenderPie(pieDataToday)+'</div></div>'
+    +'<div class="card"><div class="card-hdr"><span class="card-title">Ranking Item — '+(isPallet?'Pallet':'Stock')+'  Hari Ini (Top 15)</span></div>'
+    +'<div style="padding:8px 12px;overflow-y:auto;max-height:260px">'+_ppRenderHBar(filtItems, valueKey, 15)+'</div></div>'
+    +'</div>';
+
+  // Tabel
+  var sorted = filtItems.slice().sort(function(a,b){return b[valueKey]-a[valueKey];});
+  var trows = sorted.map(function(it){
+    var tc = it.type==='RM'?_PP_COLORS.RM.replace('FD','aa'):it.type==='PM'?_PP_COLORS.PM.replace('FD','aa'):_PP_COLORS.FG.replace('B7','80');
+    var capOver = isPallet && ((it.type==='RM'&&_whCapacityRM>0&&it.pallet>_whCapacityRM*0.1)||(it.type==='PM'&&_whCapacityPM>0&&it.pallet>_whCapacityPM*0.1));
+    return '<tr data-code="'+it.code+'" data-desc="'+(it.desc||'').toLowerCase()+'" style="border-top:1px solid var(--border)">'
+      +'<td style="padding:6px 10px;font-family:var(--mono);font-size:11px;white-space:nowrap">'+it.code+'</td>'
+      +'<td style="padding:6px 10px;font-size:11px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)">'+it.desc+'</td>'
+      +'<td style="padding:6px 10px;text-align:center"><span style="font-size:10px;font-weight:700;color:'+tc+'">'+it.type+'</span></td>'
+      +'<td style="padding:6px 10px;text-align:center;font-size:10px;color:var(--muted)">'+it.uom+'</td>'
+      +'<td style="padding:6px 10px;text-align:right;font-family:var(--mono);font-size:11px">'+n_id(it.soh)+'</td>'
+      +'<td style="padding:6px 10px;text-align:right;font-family:var(--mono);font-size:11px;'+(capOver?'color:var(--red);font-weight:700':'font-weight:600')+'">'+it.pallet+'</td>'
+      +'</tr>';
+  }).join('');
+  var tblHead = '<th style="padding:7px 10px;text-align:left;font-size:10px;text-transform:uppercase;color:var(--muted);white-space:nowrap">Kode</th>'
+    +'<th style="padding:7px 10px;text-align:left;font-size:10px;text-transform:uppercase;color:var(--muted)">Deskripsi</th>'
+    +'<th style="padding:7px 10px;text-align:center;font-size:10px;text-transform:uppercase;color:var(--muted)">Tipe</th>'
+    +'<th style="padding:7px 10px;text-align:center;font-size:10px;text-transform:uppercase;color:var(--muted)">UOM</th>'
+    +'<th style="padding:7px 10px;text-align:right;font-size:10px;text-transform:uppercase;color:var(--muted)">SOH Hari Ini</th>'
+    +'<th style="padding:7px 10px;text-align:right;font-size:10px;text-transform:uppercase;color:var(--muted)">Pallet</th>';
+  var tbl = '<div class="card"><div class="card-hdr"><span class="card-title">Detail — Hari Ini</span>'
+    +'<span style="font-size:11px;color:var(--muted)">'+sorted.length+' item | '+unitLabel+'</span></div>'
+    +'<div style="padding:8px 12px;border-bottom:1px solid var(--border)">'
+    +'<input id="pp-search-input" type="text" placeholder="🔍 Cari kode / nama..." oninput="_ppFilterTable(this.value)" value="'+(_ppSearch||'')+'" '
+    +'style="width:100%;max-width:320px;padding:6px 10px;font-size:12px;border:1px solid var(--border);border-radius:var(--r);background:var(--bg3);color:var(--text);font-family:var(--font)">'
+    +'</div>'
+    +'<div style="overflow-x:auto;max-height:480px;overflow-y:auto">'
+    +'<table id="pp-detail-table" style="width:100%;border-collapse:collapse;font-size:12px">'
+    +'<thead style="position:sticky;top:0;z-index:1;background:var(--bg3)"><tr>'+tblHead+'</tr></thead>'
+    +'<tbody>'+trows+'</tbody></table></div></div>';
+
+  el.innerHTML = alertHtml + kpi + charts + tbl;
+  if(_ppSearch) _ppFilterTable(_ppSearch);
 }
 
 function _ppReloadAndRender() {
@@ -7480,6 +7632,12 @@ function renderPalletPos() {
   var pmKeys=STATE.palletPM?Object.keys(STATE.palletPM).length:0;
   var rmKeys=STATE.palletRM?Object.keys(STATE.palletRM).length:0;
   if(!pmKeys&&!rmKeys){el.innerHTML='<div class="empty"><div class="empty-ico">🛢</div><h3>Data Pallet belum dimuat</h3><p>Buka Data Source → Muat Pallet PM / RM</p></div>';return;}
+
+  // ── Branch: Hari Ini vs Proyeksi ──────────────────────────────────────────
+  if(_ppTimeMode === 'today') {
+    _ppRenderTodayView(el, _ppViewMode==='pallet', _ppFilterType);
+    return;
+  }
 
   // Cache: tidak di-reset di sini — hanya di-reset saat data pallet berubah (loadSheetData)
   var d = _ppBuildData();
