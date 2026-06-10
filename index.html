@@ -7447,6 +7447,16 @@ function _appInit() {
   STATE.palletPM         = JSON.parse(localStorage.getItem('pallet_pm')       || 'null');
   STATE.palletRM         = JSON.parse(localStorage.getItem('pallet_rm')       || 'null');
   STATE.updateDelDateData= JSON.parse(localStorage.getItem('update_deldate_data') || '{}');
+  // Build supplier cache untuk DOI per item (import vs domestik)
+  // Tanpa ini, _fcGetDOIForItem salah kalau Forecast belum dibuka dulu
+  if(STATE.masterData) {
+    _fcSupplierByItemCache = {};
+    Object.keys(STATE.masterData).forEach(function(c){
+      if((STATE.masterData[c]||{}).supplier) _fcSupplierByItemCache[c] = STATE.masterData[c].supplier;
+    });
+    (STATE.ospoData||[]).forEach(function(o){ if(o.itemCode&&o.supplierName&&!_fcSupplierByItemCache[o.itemCode]) _fcSupplierByItemCache[o.itemCode]=o.supplierName; });
+    (STATE.poData||[]).forEach(function(p){ if(p.itemCode&&p.supplierName&&!_fcSupplierByItemCache[p.itemCode]) _fcSupplierByItemCache[p.itemCode]=p.supplierName; });
+  }
   // Global FC variables — diinisialisasi di script load SEBELUM cloudLoad
   // Harus di-re-read di sini supaya dapat nilai Firebase yang benar
   try {
@@ -7665,6 +7675,13 @@ function _ppBuildData() {
 
   var ospoIdx;
   try { ospoIdx = _buildOSPOIndex(); } catch(e) { ospoIdx = {}; }
+
+  // Pastikan supplier cache ter-build sebelum _calcForecast
+  if(!Object.keys(_fcSupplierByItemCache||{}).length && STATE.masterData) {
+    _fcSupplierByItemCache = {};
+    Object.keys(STATE.masterData).forEach(function(c){ if((STATE.masterData[c]||{}).supplier) _fcSupplierByItemCache[c]=STATE.masterData[c].supplier; });
+    (STATE.ospoData||[]).forEach(function(o){ if(o.itemCode&&o.supplierName&&!_fcSupplierByItemCache[o.itemCode]) _fcSupplierByItemCache[o.itemCode]=o.supplierName; });
+  }
 
   Object.keys(masterRef).forEach(function(code) {
     var master = masterRef[code]; if(!master) return;
