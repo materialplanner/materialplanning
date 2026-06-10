@@ -1785,13 +1785,21 @@ function _applyRealtimeChanges(keys) {
           try {
             STATE.matcomMonthly = JSON.parse(val || 'null');
             localStorage.setItem('matcom_monthly', val||'null');
-            // Update badge jika ada
+            // Update badge
             var _mcnt2 = localStorage.getItem('matcom_count');
             var _mbadge2 = document.getElementById('fc-matcom-badge');
             if(_mbadge2 && STATE.matcomMonthly && _mcnt2) {
               var _mts2 = localStorage.getItem('last_matcom_sync') || '';
               _mbadge2.textContent = '\u2713 '+_mcnt2+' item'+(_mts2?' \xb7 '+_mts2:'');
               _mbadge2.style.display = 'inline';
+            }
+            // Update info bar langsung — tidak perlu full re-render
+            var _fcInfoEl = document.getElementById('fc-table-info');
+            if(_fcInfoEl && STATE.matcomMonthly) {
+              var _infoHtml = _fcInfoEl.innerHTML;
+              var _matcomNew = ' &nbsp;\xb7&nbsp; Matcom: <b>'+Object.keys(STATE.matcomMonthly).length+' item</b>';
+              _fcInfoEl.innerHTML = _infoHtml.replace(/&nbsp;\xb7&nbsp;.*?Matcom.*?<\/span>/, '&nbsp;\xb7&nbsp; Matcom: <b>'+Object.keys(STATE.matcomMonthly).length+' item</b></span>')
+                .replace(/<span style="color:var\(--amber\)">Matcom belum dimuat<\/span>/, 'Matcom: <b>'+Object.keys(STATE.matcomMonthly).length+' item</b>');
             }
           } catch(e) {}
           break;
@@ -1800,11 +1808,31 @@ function _applyRealtimeChanges(keys) {
         case 'last_matcom_sync':
           try { localStorage.setItem('last_matcom_sync', val||''); } catch(e) {} break;
         case 'mps_ui_status':
-          try { localStorage.setItem('mps_ui_status', val||''); } catch(e) {} break;
+          try {
+            localStorage.setItem('mps_ui_status', val||'');
+            var _mpsStatusEl = document.getElementById('mps-status');
+            if(_mpsStatusEl && val) { _mpsStatusEl.textContent = val + ' \u2605Firebase'; _mpsStatusEl.style.color='var(--teal)'; }
+          } catch(e) {} break;
         case 'bom_ui_status':
-          try { localStorage.setItem('bom_ui_status', val||''); } catch(e) {} break;
+          try {
+            localStorage.setItem('bom_ui_status', val||'');
+            var _bomStatusEl = document.getElementById('bom-status');
+            if(_bomStatusEl && val) { _bomStatusEl.textContent = val + ' \u2605Firebase'; _bomStatusEl.style.color='var(--teal)'; }
+          } catch(e) {} break;
         case 'mrp_last_calc':
-          try { localStorage.setItem('mrp_last_calc', val||''); } catch(e) {} break;
+          try {
+            localStorage.setItem('mrp_last_calc', val||'');
+            var _tsLbl2 = document.getElementById('mrp-last-calc-label');
+            if(_tsLbl2 && val) _tsLbl2.textContent = '\xb7 Terakhir: ' + val;
+          } catch(e) {} break;
+        case 'mrp_data':
+          try {
+            STATE.mrpData = JSON.parse(val || 'null');
+            // Kalau MPS page terbuka dan IndexedDB kosong, refresh tabel
+            if(document.getElementById('pg-mps-mrp') && document.getElementById('pg-mps-mrp').classList.contains('active') && !_mrpResult) {
+              _mrpFallbackFromFirebase();
+            }
+          } catch(e) {} break;
         case 'update_deldate_data':
           try { STATE.updateDelDateData = JSON.parse(val || '{}'); if(document.getElementById('pg-po')&&document.getElementById('pg-po').classList.contains('active')) renderPO(); } catch(e) {}
           break;
@@ -8684,6 +8712,11 @@ function renderForecast(isGenerate) {
 
   var info = document.getElementById('fc-table-info');
   var syncTs = localStorage.getItem('last_sync') || '';
+  // Re-read matcomMonthly dari localStorage — handle kasus cloudLoad async setelah STATE init
+  if(!STATE.matcomMonthly) {
+    var _mcRaw = localStorage.getItem('matcom_monthly');
+    if(_mcRaw && _mcRaw !== 'null') try { STATE.matcomMonthly = JSON.parse(_mcRaw); } catch(e) {}
+  }
   var snapLabel = syncTs ? 'SOH Live, sync: <b>' + syncTs + '</b>' : 'SOH Live (belum disync)';
   var matcomTs  = STATE.matcomMonthly ? ' &nbsp;·&nbsp; Matcom: <b>'+Object.keys(STATE.matcomMonthly).length+' item</b>' : ' &nbsp;·&nbsp; <span style="color:var(--amber)">Matcom belum dimuat</span>';
   if(info) info.innerHTML = '<span>Menampilkan <b>'+allItems.length+'</b> item &nbsp;·&nbsp; ' + snapLabel + matcomTs + '</span>'
@@ -9920,13 +9953,19 @@ function _mrpIdbLoad() {
 function _mrpFallbackFromFirebase() {
   if(!STATE.mrpData || !Object.keys(STATE.mrpData).length) return;
 
-  // Tampilkan status dari Firebase
+  // Tampilkan status dari Firebase — bisa dari localStorage (setelah cloudLoad) atau realtime
   var mpsStatus = localStorage.getItem('mps_ui_status') || '';
   var bomStatus = localStorage.getItem('bom_ui_status') || '';
   var mpsEl = document.getElementById('mps-status');
   var bomEl = document.getElementById('bom-status');
-  if(mpsEl && mpsStatus) { mpsEl.textContent = mpsStatus + ' (dari Firebase)'; mpsEl.style.color='var(--teal)'; }
-  if(bomEl && bomStatus) { bomEl.textContent = bomStatus + ' (dari Firebase)'; bomEl.style.color='var(--teal)'; }
+  if(mpsEl) {
+    if(mpsStatus) { mpsEl.textContent = mpsStatus + ' \u2605Firebase'; mpsEl.style.color='var(--teal)'; }
+    else { mpsEl.textContent = 'Data dari Firebase (file tidak di-upload lokal)'; mpsEl.style.color='var(--muted)'; }
+  }
+  if(bomEl) {
+    if(bomStatus) { bomEl.textContent = bomStatus + ' \u2605Firebase'; bomEl.style.color='var(--teal)'; }
+    else { bomEl.textContent = 'Data dari Firebase (file tidak di-upload lokal)'; bomEl.style.color='var(--muted)'; }
+  }
 
   // Rebuild _mrpResult dari STATE.mrpData untuk tampilan tabel
   // STATE.mrpData: { code: { months: { "Juni":132, "Juli":137, ... } } }
