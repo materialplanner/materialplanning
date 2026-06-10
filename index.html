@@ -9629,8 +9629,6 @@ function _mrpKpi(label, val, sub) {
 function _mrpTerapkan() {
   if(!_mrpResult) { toast('Hitung MRP dulu','err'); return; }
   _mrpApplyToState(_mrpResult);
-  toast('MRP diterapkan ke Forecast & Projection ✓', 'ok');
-  // Update button style to show applied
   var btn = document.getElementById('btn-terapkan-mrp');
   if(btn) { btn.textContent = '✓ MRP Diterapkan'; btn.style.background='var(--green)'; btn.style.borderColor='var(--green)'; }
 }
@@ -9658,9 +9656,15 @@ function _mrpApplyToState(result) {
   cloudSave('mrp_data', JSON.stringify(mrpData));
   localStorage.setItem('mrp_source', 'mps'); // flag: jangan overwrite dari GSheet
   cloudSave('mrp_source', 'mps');
-  // Refresh forecast & projection if currently open
+  // Refresh forecast & projection — selalu rebuild, tidak peduli halaman aktif
   if(document.getElementById('fc-table')) renderForecast();
-  if(document.getElementById('proj-tbody') || document.getElementById('proj-table')) { buildProjection(); renderProjection(); }
+  setTimeout(function() {
+    if(STATE.masterData) {
+      buildProjection();
+      if(document.getElementById('proj-tbody') || document.getElementById('proj-table')) renderProjection();
+    }
+  }, 200);
+  toast('MRP diterapkan + Projection direbuild ✓', 'ok');
 }
 
 // ── Save to Firebase (hasil MRP saja, bukan BOM) ──────────────────────────────
