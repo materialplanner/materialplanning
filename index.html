@@ -347,7 +347,7 @@ body.light-mode .theme-toggle-knob{transform:translateX(15px);background:var(--a
   <div class="ni" data-label="Projection Stock" onclick="showPage('projection',this)"><span class="ni-ico">📦</span><span class="nav-label">Projection Stock</span><span class="nb" id="nb-urgent" style="display:none">0</span></div>
   <div class="ni" data-label="Forecast & Propose PR" onclick="showPage('forecast',this)"><span class="ni-ico">🔮</span><span class="nav-label">Forecast & Propose PR</span></div>
   <div class="ni" data-label="MPS → MRP" onclick="showPage('mps-mrp',this)"><span class="ni-ico">⚙</span><span class="nav-label">MPS → MRP</span></div>
-  <div class="ni" data-label="Pallet Position" onclick="showPage('pallet-pos',this)"><span class="ni-ico">🏗️</span><span class="nav-label">Pallet Position</span></div>
+  <div class="ni" data-label="Pallet Position" onclick="showPage('pallet-pos',this)"><span class="ni-ico">🏗</span><span class="nav-label">Pallet Position</span></div>
   <div class="nav-section">Delivery</div>
   <div class="ni" data-label="List Pengiriman (PO)" onclick="showPage('po',this)"><span class="ni-ico">📋</span><span class="nav-label">List Pengiriman (PO)</span></div>
   <div class="ni" data-label="Jadwal Pengiriman" onclick="showPage('schedule',this)"><span class="ni-ico">🚛</span><span class="nav-label">Jadwal Pengiriman</span></div>
@@ -908,7 +908,7 @@ body.light-mode .theme-toggle-knob{transform:translateX(15px);background:var(--a
     </div>
 
     <div class="card">
-      <div class="card-hdr"><span class="card-title">🛢️ Pallet RM</span><span id="pallet_rm-status" class="dot off"></span></div>
+      <div class="card-hdr"><span class="card-title">🛢 Pallet RM</span><span id="pallet_rm-status" class="dot off"></span></div>
       <div style="padding:14px">
         <div class="fg"><label style="font-size:11px">Google Sheets URL</label><input id="pallet_rm-url" placeholder="https://docs.google.com/spreadsheets/d/..." style="width:100%;font-size:11px"></div>
         <div class="fg"><label style="font-size:11px">Nama Tab</label><input id="pallet_rm-sheet" placeholder="Pallet RM" style="width:100%;font-size:11px"></div>
@@ -1126,7 +1126,7 @@ body.light-mode .theme-toggle-knob{transform:translateX(15px);background:var(--a
 <div class="page" id="pg-pallet-pos">
 <div class="page-inner">
   <div class="ph">
-    <div class="ph-l"><h2>🏗️ Pallet Position</h2><p>Proyeksi posisi pallet per bulan berdasarkan ending stock</p></div>
+    <div class="ph-l"><h2>🏗 Pallet Position</h2><p>Proyeksi posisi pallet per bulan berdasarkan ending stock</p></div>
     <div class="ph-r" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <div style="display:flex;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
         <button id="pp-btn-pallet" onclick="_ppSetView('pallet')" style="padding:6px 14px;font-size:11px;font-weight:600;border:none;cursor:pointer;background:var(--teal);color:#fff;font-family:var(--font)">🏗 Pallet</button>
@@ -1766,12 +1766,8 @@ function _applyRealtimeChanges(keys) {
         case 'mrp_source':
           try { localStorage.setItem('mrp_source', val || ''); } catch(e) {}
           break;
-        case 'pallet_pm':
-          try { STATE.palletPM = JSON.parse(val || 'null'); } catch(e) {}
-          break;
-        case 'pallet_rm':
-          try { STATE.palletRM = JSON.parse(val || 'null'); } catch(e) {}
-          break;
+        case 'pallet_pm': try { STATE.palletPM = JSON.parse(val || 'null'); } catch(e) {} break;
+        case 'pallet_rm': try { STATE.palletRM = JSON.parse(val || 'null'); } catch(e) {} break;
         case 'wh_capacity_rm': _whCapacityRM = parseInt(val)||0; break;
         case 'wh_capacity_pm': _whCapacityPM = parseInt(val)||0; break;
       }
@@ -3575,11 +3571,10 @@ function processRealName(rows) {
   return result;
 }
 
-// Helper: bersihkan kode item dari format angka GSheets (koma ribuan, desimal)
+// Bersihkan kode pallet dari format angka GSheets (koma ribuan / desimal)
 function _cleanPalletCode(v) {
-  var s = String(v == null ? '' : v).trim();
-  s = s.replace(/,/g, '');                        // hapus separator ribuan
-  if(/^\d+\.\d*$/.test(s)) s = String(Math.round(parseFloat(s))); // "4000020092.0" → "4000020092"
+  var s = String(v == null ? '' : v).trim().replace(/,/g, '');
+  if(/^\d+\.\d*$/.test(s)) s = String(Math.round(parseFloat(s)));
   return cleanSAPCode(s);
 }
 
@@ -3592,7 +3587,7 @@ function processPalletPM(rows) {
     var kartonPalet = parseFloat(String(row['Karton/Palet'] || row['Karton Palet'] || '0').replace(/[^0-9.]/g,'')) || 0;
     var pcsPalet    = parseFloat(String(row['Pcs/Palet']   || row['Pcs Palet']   || '0').replace(/[^0-9.]/g,'')) || 0;
     if(!pcsPalet && pcsKarton && kartonPalet) pcsPalet = pcsKarton * kartonPalet;
-    if(code && pcsKarton > 0 && pcsPalet > 0) result[code] = { pcsKarton: pcsKarton, kartonPalet: kartonPalet, pcsPalet: pcsPalet };
+    if(code && pcsKarton > 0 && pcsPalet > 0) result[code] = { pcsKarton:pcsKarton, kartonPalet:kartonPalet, pcsPalet:pcsPalet };
   });
   return result;
 }
@@ -3604,7 +3599,7 @@ function processPalletRM(rows) {
     if(!code || !code.match(/^\d/)) return;
     var ukuranKemasan = parseFloat(String(row['Ukuran Kemasan'] || row['kuran Kemasa'] || row['Kemasan/Pa'] || row['Ukuran'] || '0').replace(/[^0-9.]/g,'')) || 0;
     var bobotPalet    = parseFloat(String(row['Bobot/Palet']   || row['Bobot Palet'] || row['BobotPalet'] || '0').replace(/[^0-9.]/g,'')) || 0;
-    if(code && ukuranKemasan > 0 && bobotPalet > 0) result[code] = { ukuranKemasan: ukuranKemasan, bobotPalet: bobotPalet };
+    if(code && ukuranKemasan > 0 && bobotPalet > 0) result[code] = { ukuranKemasan:ukuranKemasan, bobotPalet:bobotPalet };
   });
   return result;
 }
@@ -7249,7 +7244,7 @@ function _appInit() {
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// ─── Pallet Calculator + Pallet Position ─────────────────────────────────────
+// ─── Pallet Calculator + Pallet Position ─────────────────────────────────────────────
 function _fcCalcPallet(code, endingStock, uom) {
   var isRM = /^3/.test(code), isPM = /^4/.test(code);
   if(isRM && STATE.palletRM) {
@@ -7293,13 +7288,11 @@ function _ppSaveCapacity() {
   localStorage.setItem('wh_capacity_rm', _whCapacityRM);
   localStorage.setItem('wh_capacity_pm', _whCapacityPM);
   _ppCache = null; renderPalletPos();
-  toast('Kapasitas tersimpan \u2713', 'ok');
+  toast('Kapasitas tersimpan ✓', 'ok');
 }
 
-// Ambil data sama persis seperti forecast page — iterasi masterData, pakai calcForecast
 function _ppBuildData() {
   if(_ppCache) return _ppCache;
-  // Re-read from localStorage (fix cloudLoad async race condition)
   if(!STATE.palletPM){var r=localStorage.getItem('pallet_pm');if(r)try{STATE.palletPM=JSON.parse(r);}catch(e){}}
   if(!STATE.palletRM){var r=localStorage.getItem('pallet_rm');if(r)try{STATE.palletRM=JSON.parse(r);}catch(e){}}
 
@@ -7308,20 +7301,21 @@ function _ppBuildData() {
   var items = [];
   var masterRef = STATE.masterData || {};
 
-  // Iterasi masterData (sama seperti forecast) — bukan dari pallet codes
-  // Ini menghindari code format mismatch antara pallet sheet dan masterData
+  // Gunakan _calcForecast + _buildOSPOIndex — sama persis seperti forecast page
+  var ospoIdx;
+  try { ospoIdx = _buildOSPOIndex(); } catch(e) { ospoIdx = {}; }
+
   Object.keys(masterRef).forEach(function(code) {
-    var master = masterRef[code];
-    if(!master) return;
+    var master = masterRef[code]; if(!master) return;
     var uom = master.uom || '';
     var iType = /^3/.test(code)?'RM':/^4/.test(code)?'PM':'FG';
 
-    // Cek apakah item ini punya data pallet (same check as _fcCalcPallet)
-    var hasPM = (iType==='PM' || iType==='FG') && STATE.palletPM && STATE.palletPM[code];
+    var hasPM = (iType==='PM'||iType==='FG') && STATE.palletPM && STATE.palletPM[code];
     var hasRM = iType==='RM' && STATE.palletRM && STATE.palletRM[code];
     if(!hasPM && !hasRM) return;
 
-    var fc; try{ fc=calcForecast(code); }catch(e){ return; }
+    var fc;
+    try { fc = _calcForecast(code, ospoIdx); } catch(e) { return; }
     var stockArr = fc.stock || new Array(nM).fill(0);
     var palletArr = stockArr.map(function(v){ return _fcCalcPallet(code, v||0, uom); });
     palletArr.forEach(function(p,i){ if(p!==null&&totals[iType]) totals[iType][i]+=p; });
@@ -7339,10 +7333,9 @@ function _ppRenderPie(data) {
   var s=['<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:'+W+'px">'];
   data.forEach(function(d){
     if(!d.value)return;
-    var sw=(d.value/total)*2*Math.PI;
-    var x1=cx+r*Math.cos(angle),y1=cy+r*Math.sin(angle);
+    var sw=(d.value/total)*2*Math.PI, x1=cx+r*Math.cos(angle), y1=cy+r*Math.sin(angle);
     angle+=sw;
-    var x2=cx+r*Math.cos(angle),y2=cy+r*Math.sin(angle);
+    var x2=cx+r*Math.cos(angle), y2=cy+r*Math.sin(angle);
     s.push('<path d="M'+cx+','+cy+' L'+x1.toFixed(1)+','+y1.toFixed(1)+' A'+r+','+r+' 0 '+(sw>Math.PI?1:0)+',1 '+x2.toFixed(1)+','+y2.toFixed(1)+' Z" fill="'+d.color+'" stroke="var(--bg)" stroke-width="2"/>');
   });
   var ly=20;
@@ -7358,7 +7351,7 @@ function _ppRenderPie(data) {
 }
 
 function _ppRenderBar(bd) {
-  var months=bd.months,series=bd.series.filter(function(s){return s.values.some(function(v){return v>0;});}),
+  var months=bd.months, series=bd.series.filter(function(s){return s.values.some(function(v){return v>0;});}),
       W=660,H=220,pL=48,pB=32,pT=14,pR=16,cW=W-pL-pR,cH=H-pT-pB,nM=months.length;
   var bW=Math.max(4,Math.floor(cW/nM)-4);
   var stacked=months.map(function(_,i){return series.reduce(function(s,sr){return s+sr.values[i];},0);});
@@ -7379,7 +7372,7 @@ function _ppRenderBar(bd) {
   if(bd.capRM>0){var y=yS(bd.capRM).toFixed(0);s.push('<line x1="'+pL+'" y1="'+y+'" x2="'+(W-pR)+'" y2="'+y+'" stroke="#0ea5e9" stroke-width="1.5" stroke-dasharray="5,3"/>');s.push('<text x="'+(W-pR-2)+'" y="'+(parseFloat(y)-3)+'" text-anchor="end" fill="#0ea5e9" font-size="9">Cap RM</text>');}
   if(bd.capPM>0){var y=yS(bd.capPM).toFixed(0);s.push('<line x1="'+pL+'" y1="'+y+'" x2="'+(W-pR)+'" y2="'+y+'" stroke="#8b5cf6" stroke-width="1.5" stroke-dasharray="5,3"/>');s.push('<text x="'+(W-pR-2)+'" y="'+(parseFloat(y)-3)+'" text-anchor="end" fill="#8b5cf6" font-size="9">Cap PM</text>');}
   var lx=pL, suf=bd.isQty?' (Qty Ending Stock)':'';
-  series.forEach(function(sr){ s.push('<rect x="'+lx+'" y="'+(H-11)+'" width="10" height="10" rx="2" fill="'+sr.color+'"/>'); s.push('<text x="'+(lx+13)+'" y="'+(H-3)+'" fill="var(--muted)" font-size="9">'+sr.label+suf+'</text>'); lx+=55+(bd.isQty?70:0); });
+  series.forEach(function(sr){s.push('<rect x="'+lx+'" y="'+(H-11)+'" width="10" height="10" rx="2" fill="'+sr.color+'"/>');s.push('<text x="'+(lx+13)+'" y="'+(H-3)+'" fill="var(--muted)" font-size="9">'+sr.label+suf+'</text>');lx+=55+(bd.isQty?70:0);});
   s.push('</svg>'); return s.join('');
 }
 
@@ -7387,27 +7380,27 @@ function renderPalletPos() {
   var el=document.getElementById('pp-content'); if(!el) return;
   if(!STATE.palletPM){var r=localStorage.getItem('pallet_pm');if(r)try{STATE.palletPM=JSON.parse(r);}catch(e){}}
   if(!STATE.palletRM){var r=localStorage.getItem('pallet_rm');if(r)try{STATE.palletRM=JSON.parse(r);}catch(e){}}
-  if(!STATE.masterData){el.innerHTML='<div class="empty"><div class="empty-ico">\U0001f4e6</div><h3>Muat Master Data terlebih dahulu</h3></div>';return;}
-  if(!FC_MONTHS||!FC_MONTHS.length){el.innerHTML='<div class="empty"><div class="empty-ico">\U0001f4c5</div><h3>Buka halaman Forecast sekali untuk inisialisasi bulan</h3></div>';return;}
-  var pmKeys=STATE.palletPM?Object.keys(STATE.palletPM).length:0, rmKeys=STATE.palletRM?Object.keys(STATE.palletRM).length:0;
-  if(!pmKeys&&!rmKeys){el.innerHTML='<div class="empty"><div class="empty-ico">\U0001f6e2\ufe0f</div><h3>Data Pallet belum dimuat</h3><p>Buka <strong>Data Source</strong> \u2192 klik <strong>Muat Pallet PM</strong> dan/atau <strong>Muat Pallet RM</strong></p></div>';return;}
+  if(!STATE.masterData){el.innerHTML='<div class="empty"><div class="empty-ico">📦</div><h3>Muat Master Data terlebih dahulu</h3></div>';return;}
+  if(!FC_MONTHS||!FC_MONTHS.length){el.innerHTML='<div class="empty"><div class="empty-ico">📅</div><h3>Buka halaman Forecast sekali untuk inisialisasi bulan</h3></div>';return;}
+  var pmKeys=STATE.palletPM?Object.keys(STATE.palletPM).length:0;
+  var rmKeys=STATE.palletRM?Object.keys(STATE.palletRM).length:0;
+  if(!pmKeys&&!rmKeys){el.innerHTML='<div class="empty"><div class="empty-ico">🛢</div><h3>Data Pallet belum dimuat</h3><p>Buka Data Source → Muat Pallet PM / RM</p></div>';return;}
   _ppCache=null;
   var d=_ppBuildData(), months=d.months, totRM=d.totals.RM, totPM=d.totals.PM, totFG=d.totals.FG;
   var isPallet=_ppViewMode==='pallet', m0=0;
   if(!d.items.length){
-    el.innerHTML='<div class="empty"><div class="empty-ico">\U0001f50d</div><h3>Tidak ada item pallet yang cocok dengan Master Data</h3>'
-      +'<p style="font-size:12px;color:var(--muted)">Data pallet dimuat: PM='+pmKeys+' item, RM='+rmKeys+' item</p>'
-      +'<p style="font-size:12px;color:var(--muted)">Kemungkinan kode item di sheet pallet diformat sebagai angka (dengan koma/desimal). Klik <strong>Muat ulang Pallet PM/RM</strong> dari Data Source untuk re-parse dengan format yang benar.</p>'
-      +'<button class="btn btn-primary btn-sm" onclick="loadSheetData(\'pallet_pm\').then(function(){loadSheetData(\'pallet_rm\').then(renderPalletPos)})" style="margin-top:8px">Muat Ulang Pallet PM + RM</button>'
-      +'</div>';
-    return;
+    el.innerHTML='<div class="empty"><div class="empty-ico">?</div><h3>Tidak ada item yang cocok</h3>'
+      +'<p>Pallet data: PM='+pmKeys+', RM='+rmKeys+' item</p>'
+      +'<p>Klik tombol di bawah untuk re-parse kode item dari GSheet</p>'
+      +'<button class="btn btn-primary btn-sm" onclick="Promise.all([loadSheetData('pallet_pm'),loadSheetData('pallet_rm')]).then(function(){_ppCache=null;renderPalletPos();})" style="margin-top:8px">Muat Ulang Pallet PM + RM</button>'
+      +'</div>'; return;
   }
   var alertHtml='';
   if(isPallet){
     var overR=months.filter(function(m,i){return _whCapacityRM>0&&totRM[i]>_whCapacityRM;});
     var overP=months.filter(function(m,i){return _whCapacityPM>0&&totPM[i]>_whCapacityPM;});
-    if(overR.length) alertHtml+='<div style="background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.3);border-radius:6px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px"><span style="font-size:18px">\u26a0\ufe0f</span><div><strong style="color:var(--red)">Gudang RM Melebihi Kapasitas ('+_whCapacityRM+' pallet)</strong><div style="font-size:11px;color:var(--muted);margin-top:2px">Bulan: '+overR.join(', ')+'</div></div></div>';
-    if(overP.length) alertHtml+='<div style="background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.3);border-radius:6px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px"><span style="font-size:18px">\u26a0\ufe0f</span><div><strong style="color:var(--red)">Gudang PM Melebihi Kapasitas ('+_whCapacityPM+' pallet)</strong><div style="font-size:11px;color:var(--muted);margin-top:2px">Bulan: '+overP.join(', ')+'</div></div></div>';
+    if(overR.length) alertHtml+='<div style="background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.3);border-radius:6px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px"><span style="font-size:18px">⚠️</span><div><strong style="color:var(--red)">Gudang RM Melebihi Kapasitas ('+_whCapacityRM+' pallet)</strong><div style="font-size:11px;color:var(--muted);margin-top:2px">Bulan: '+overR.join(', ')+'</div></div></div>';
+    if(overP.length) alertHtml+='<div style="background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.3);border-radius:6px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px"><span style="font-size:18px">⚠️</span><div><strong style="color:var(--red)">Gudang PM Melebihi Kapasitas ('+_whCapacityPM+' pallet)</strong><div style="font-size:11px;color:var(--muted);margin-top:2px">Bulan: '+overP.join(', ')+'</div></div></div>';
   }
   var kpi='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">';
   var kF=function(lbl,val,sub,col){return '<div class="card" style="padding:12px 14px"><div style="font-size:10px;text-transform:uppercase;color:var(--muted);letter-spacing:.06em">'+lbl+'</div><div style="font-size:22px;font-weight:700;color:'+(col||'var(--text)')+';margin:4px 0">'+val+'</div><div style="font-size:10px;color:var(--muted)">'+sub+'</div></div>';};
@@ -7420,13 +7413,13 @@ function renderPalletPos() {
   var barSeries=[{label:'RM',values:totRM,color:'#0ea5e9'},{label:'PM',values:totPM,color:'#8b5cf6'},{label:'FG',values:totFG,color:'#10b981'}];
   var charts='<div style="display:grid;grid-template-columns:280px 1fr;gap:12px;margin-bottom:14px">'
     +'<div class="card"><div class="card-hdr"><span class="card-title">Distribusi '+months[m0]+'</span></div><div style="padding:12px 8px">'+_ppRenderPie(pieData)+'</div></div>'
-    +'<div class="card"><div class="card-hdr"><span class="card-title">Trend Bulanan \u2014 '+(isPallet?'Jumlah Pallet':'Qty Ending Stock')+'</span></div><div style="padding:12px 8px">'+_ppRenderBar({months:months,series:barSeries,capRM:isPallet?_whCapacityRM:0,capPM:isPallet?_whCapacityPM:0,isQty:!isPallet})+'</div></div>'
+    +'<div class="card"><div class="card-hdr"><span class="card-title">Trend Bulanan — '+(isPallet?'Jumlah Pallet':'Qty Ending Stock')+'</span></div><div style="padding:12px 8px">'+_ppRenderBar({months:months,series:barSeries,capRM:isPallet?_whCapacityRM:0,capPM:isPallet?_whCapacityPM:0,isQty:!isPallet})+'</div></div>'
     +'</div>';
-  var cap='<div class="card" style="margin-bottom:14px"><div class="card-hdr"><span class="card-title">\u2699 Kapasitas Gudang</span></div>'
+  var cap='<div class="card" style="margin-bottom:14px"><div class="card-hdr"><span class="card-title">⚙ Kapasitas Gudang</span></div>'
     +'<div style="padding:12px;display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap">'
     +'<div><label style="font-size:11px;display:block;margin-bottom:4px;color:var(--muted)">Max Pallet Gudang RM</label><input id="pp-cap-rm" type="number" value="'+(_whCapacityRM||'')+'" placeholder="cth: 500" style="width:130px;padding:6px 8px;font-size:13px;border:1px solid var(--border);border-radius:var(--r);background:var(--bg3);color:var(--text)"></div>'
     +'<div><label style="font-size:11px;display:block;margin-bottom:4px;color:var(--muted)">Max Pallet Gudang PM</label><input id="pp-cap-pm" type="number" value="'+(_whCapacityPM||'')+'" placeholder="cth: 300" style="width:130px;padding:6px 8px;font-size:13px;border:1px solid var(--border);border-radius:var(--r);background:var(--bg3);color:var(--text)"></div>'
-    +'<button class="btn btn-primary btn-sm" onclick="_ppSaveCapacity()" style="height:34px">\U0001f4be Simpan & Sync</button>'
+    +'<button class="btn btn-primary btn-sm" onclick="_ppSaveCapacity()" style="height:34px">💾 Simpan & Sync</button>'
     +'</div></div>';
   var filtered=d.items.filter(function(it){return _ppFilterType==='all'||it.type===_ppFilterType;});
   filtered.sort(function(a,b){return (a.type<b.type?-1:a.type>b.type?1:0)||a.code.localeCompare(b.code);});
@@ -7438,7 +7431,7 @@ function renderPalletPos() {
   var trows=filtered.map(function(it){
     var arr=isPallet?it.pallets:it.stock, tc=it.type==='RM'?'#0ea5e9':it.type==='PM'?'#8b5cf6':'#10b981';
     var cells=arr.map(function(v){
-      if(v===null||v===undefined) return '<td style="padding:6px 10px;text-align:right;color:var(--hint)">\u2014</td>';
+      if(v===null||v===undefined) return '<td style="padding:6px 10px;text-align:right;color:var(--hint)">—</td>';
       return '<td style="padding:6px 10px;text-align:right;font-family:var(--mono);font-size:11px">'+(isPallet?(v>0?'<strong>'+v+'</strong>':'<span style="color:var(--hint)">0</span>'):n_id(Math.round(v)))+'</td>';
     }).join('');
     return '<tr style="border-top:1px solid var(--border)"><td style="padding:6px 10px;font-family:var(--mono);font-size:11px;white-space:nowrap">'+it.code+'</td><td style="padding:6px 10px;font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)">'+it.desc+'</td><td style="padding:6px 10px;text-align:center"><span style="font-size:10px;font-weight:700;color:'+tc+'">'+it.type+'</span></td><td style="padding:6px 10px;text-align:center;font-size:10px;color:var(--muted)">'+it.uom+'</td>'+cells+'</tr>';
