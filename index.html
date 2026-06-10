@@ -2719,7 +2719,11 @@ function generateUpdateDelDate() {
 
   toast('Menghitung Update DelDate…', 'inf');
   var today = new Date(); today.setHours(0,0,0,0);
-  var todayISO = today.toISOString().split('T')[0];
+  // PENTING: pakai komponen lokal, bukan toISOString() yang return UTC
+  // (toISOString di UTC+7: midnight lokal June 10 = June 9 UTC → bug tanggal lampau)
+  var todayISO = today.getFullYear() + '-'
+    + String(today.getMonth()+1).padStart(2,'0') + '-'
+    + String(today.getDate()).padStart(2,'0');
   var curYear  = today.getFullYear();
 
   // Group POs FIFO per item
@@ -2752,10 +2756,12 @@ function generateUpdateDelDate() {
     var sd = (STATE.stockData||{})[code]||{};
     var soh = ((sd.btg||0)+(sd.sng||0)) * gF;
 
-    // Requirement per bulan dari MRP (bukan forecast, biar konsisten)
-    var mrp = (STATE.mrpData||{})[code]||{};
-    var reqArr  = FC_MONTHS.map(function(m){ return ((mrp.months&&mrp.months[m]!=null)?mrp.months[m]:0)*gF; });
-    var daysArr = FC_DAYS   || FC_MONTHS.map(function(){ return 30; });
+    // Pakai raw MRP requirement (tanpa kurangi matcom) — konsisten dengan pembagi 30 hari penuh
+    var mrp    = (STATE.mrpData||{})[code]||{};
+    var reqArr = FC_MONTHS.map(function(m) {
+      return ((mrp.months&&mrp.months[m]!=null)?mrp.months[m]:0) * gF;
+    });
+    var daysArr = FC_DAYS || FC_MONTHS.map(function(){ return 30; });
 
     // Running state — TIDAK di-reset antar PO supaya FIFO konsisten
     var virtualStock  = soh;
@@ -3033,7 +3039,7 @@ function renderPO() {
     var uddDisp = uddRaw ? (uddRaw.indexOf('-')>0 ? uddRaw.split('-').reverse().join('/') : uddRaw) : '—';
     var uddStyle = ovr.date ? 'color:var(--teal)' : (STATE.updateDelDateData && STATE.updateDelDateData[key] ? 'color:var(--text)' : 'color:var(--hint)');
     var uddTitle = ovr.date ? 'Dari Tgl Request Kirim' : (STATE.updateDelDateData && STATE.updateDelDateData[key] ? 'Generated dari forecast' : 'Belum di-generate');
-    row += '<td class="mono" style="font-size:10.5px;text-align:center;' + uddStyle + '" title="' + uddTitle + '">' + uddDisp + '</td>';
+    row += '<td class="mono update-deldate-cell" style="font-size:10.5px;text-align:center;' + uddStyle + '" title="' + uddTitle + '">' + uddDisp + '</td>';
     // Notes — editable
     row += '<td>'
          + '<input type="text" value="' + notes + '" data-key="' + key + '" onchange="setPOField(this,&quot;notes&quot;)" placeholder="' + (_isAdmin?'Notes...':'🔒') + '"'
@@ -3218,13 +3224,31 @@ function setPODate(el, isManual) {
   if(!_requireAdmin('edit tanggal')) return;
   var key = el.getAttribute('data-key');
   if(!STATE.poOverrides[key]) STATE.poOverrides[key] = {};
-  STATE.poOverrides[key].date = el.value;
+  STATE.poOverrides[key].date    = el.value;
   STATE.poOverrides[key].isManual = isManual;
-  STATE.poOverrides[key].isAuto = false;
-  STATE.poOverrides[key].confUpd = new Date().toISOString().split('T')[0];
+  STATE.poOverrides[key].isAuto   = false;
+  STATE.poOverrides[key].confUpd  = new Date().toISOString().split('T')[0];
   el.style.color = isManual ? 'var(--amber)' : 'var(--text)';
   localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
   cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
+  // Update DelDate ikut Tgl Request Kirim secara otomatis
+  if(el.value) {
+    if(!STATE.updateDelDateData) STATE.updateDelDateData = {};
+    STATE.updateDelDateData[key] = el.value;
+    localStorage.setItem('update_deldate_data', JSON.stringify(STATE.updateDelDateData));
+    cloudSave('update_deldate_data', JSON.stringify(STATE.updateDelDateData));
+    // Update DOM langsung tanpa full re-render
+    var row = el.closest('tr');
+    if(row) {
+      var uddCell = row.querySelector('td.update-deldate-cell');
+      if(uddCell) {
+        var disp = el.value.indexOf('-')>0 ? el.value.split('-').reverse().join('/') : el.value;
+        uddCell.textContent = disp;
+        uddCell.style.color = 'var(--teal)';
+        uddCell.title = 'Dari Tgl Request Kirim';
+      }
+    }
+  }
   // Update TGL UPDATE di DOM
   var row = el.closest('tr');
   if(row) { var upd = row.querySelector('td.tgl-update'); if(upd) upd.textContent = STATE.poOverrides[key].confUpd; }
