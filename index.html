@@ -1130,7 +1130,7 @@ body.light-mode .theme-toggle-knob{transform:translateX(15px);background:var(--a
     <div class="ph-r" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <div style="display:flex;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
         <button id="pp-btn-pallet" onclick="_ppSetView('pallet')" style="padding:6px 14px;font-size:11px;font-weight:600;border:none;cursor:pointer;background:var(--teal);color:#fff;font-family:var(--font)">🏗 Pallet</button>
-        <button id="pp-btn-qty" onclick="_ppSetView('qty')" style="padding:6px 14px;font-size:11px;font-weight:600;border:none;cursor:pointer;background:transparent;color:var(--muted);font-family:var(--font)">📦 Qty Ending</button>
+        <button id="pp-btn-qty"    onclick="_ppSetView('qty')"    style="padding:6px 14px;font-size:11px;font-weight:600;border:none;cursor:pointer;background:transparent;color:var(--muted);font-family:var(--font)">📦 Qty</button>
       </div>
       <div style="display:flex;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
         <button id="pp-f-all" onclick="_ppSetFilter('all')" style="padding:6px 12px;font-size:11px;font-weight:600;border:none;cursor:pointer;background:var(--accent);color:#fff;font-family:var(--font)">All</button>
@@ -1143,6 +1143,8 @@ body.light-mode .theme-toggle-knob{transform:translateX(15px);background:var(--a
   <div id="pp-content"></div>
 </div>
 </div>
+
+<div class="page" id="pg-settings">
 <div class="page-inner">
   <div class="ph"><div class="ph-l"><h2>Settings</h2><p>Konfigurasi koneksi SAP, WA, dan Firebase (cloud sync)</p></div></div>
   <div style="max-width:560px;display:flex;flex-direction:column;gap:14px">
@@ -2020,6 +2022,7 @@ function loadSheetData(type) {
       var cnt = Object.keys(STATE.palletPM).length;
       if(infoEl) infoEl.textContent = cnt+' item dimuat ✓';
       if(dotEl) dotEl.className='dot';
+      _ppCache = null;
       toast('Pallet PM: '+cnt+' item ✓','ok');
 
     } else if(type==='pallet_rm'){
@@ -2029,6 +2032,7 @@ function loadSheetData(type) {
       var cnt = Object.keys(STATE.palletRM).length;
       if(infoEl) infoEl.textContent = cnt+' item dimuat ✓';
       if(dotEl) dotEl.className='dot';
+      _ppCache = null;
       toast('Pallet RM: '+cnt+' item ✓','ok');
     }
     if(tsEl) tsEl.textContent='Dimuat: '+ts+(sheet?' (tab: '+sheet+')':'');
@@ -2110,6 +2114,9 @@ var STATE = {
   palletRM: JSON.parse(localStorage.getItem('pallet_rm') || 'null')
 };
 
+var _whCapacityRM = parseInt(localStorage.getItem('wh_capacity_rm') || '0') || 0;
+var _whCapacityPM = parseInt(localStorage.getItem('wh_capacity_pm') || '0') || 0;
+
 // Supplier blacklist — PO dari supplier ini tidak dipakai di semua kalkulasi
 var _SUPPLIER_BLACKLIST = ['hk holistar limited','hk holistar'];
 function _filterPOBlacklist(arr) {
@@ -2150,7 +2157,9 @@ function showPage(name, el) {
   if(ov) ov.classList.remove('open');
   document.querySelectorAll('.page').forEach(function(p){p.classList.remove('active')});
   document.querySelectorAll('.ni').forEach(function(n){n.classList.remove('active')});
-  document.getElementById('pg-'+name).classList.add('active');
+  var pgEl = document.getElementById('pg-'+name);
+  if(!pgEl) { console.error('[showPage] Page not found: pg-'+name); return; }
+  pgEl.classList.add('active');
   if(el) el.classList.add('active');
   var handlers = {
     dashboard: function(){updateDashStats();setTimeout(_matchDashColumns,100)},
@@ -3578,9 +3587,7 @@ function processPalletPM(rows) {
     var kartonPalet = parseFloat(String(row['Karton/Palet'] || row['Karton Palet'] || '0').replace(/[^0-9.]/g,'')) || 0;
     var pcsPalet    = parseFloat(String(row['Pcs/Palet']   || row['Pcs Palet']   || '0').replace(/[^0-9.]/g,'')) || 0;
     if(!pcsPalet && pcsKarton && kartonPalet) pcsPalet = pcsKarton * kartonPalet;
-    if(code && pcsKarton > 0 && pcsPalet > 0) {
-      result[code] = { pcsKarton: pcsKarton, kartonPalet: kartonPalet, pcsPalet: pcsPalet };
-    }
+    if(code && pcsKarton > 0 && pcsPalet > 0) result[code] = { pcsKarton: pcsKarton, kartonPalet: kartonPalet, pcsPalet: pcsPalet };
   });
   return result;
 }
@@ -3590,12 +3597,9 @@ function processPalletRM(rows) {
   rows.forEach(function(row) {
     var code = cleanSAPCode(row['ItemCode'] || row['Item Code'] || row['Item No.'] || row['Item No'] || row['Item Number'] || '');
     if(!code || !code.match(/^\d/)) return;
-    // Support typo "kuran Kemasa" dan variasi lain
     var ukuranKemasan = parseFloat(String(row['Ukuran Kemasan'] || row['kuran Kemasa'] || row['Kemasan/Pa'] || row['Ukuran'] || '0').replace(/[^0-9.]/g,'')) || 0;
-    var bobotPalet    = parseFloat(String(row['Bobot/Palet'] || row['Bobot Palet'] || row['BobotPalet'] || '0').replace(/[^0-9.]/g,'')) || 0;
-    if(code && ukuranKemasan > 0 && bobotPalet > 0) {
-      result[code] = { ukuranKemasan: ukuranKemasan, bobotPalet: bobotPalet };
-    }
+    var bobotPalet    = parseFloat(String(row['Bobot/Palet']   || row['Bobot Palet'] || row['BobotPalet'] || '0').replace(/[^0-9.]/g,'')) || 0;
+    if(code && ukuranKemasan > 0 && bobotPalet > 0) result[code] = { ukuranKemasan: ukuranKemasan, bobotPalet: bobotPalet };
   });
   return result;
 }
@@ -7240,307 +7244,188 @@ function _appInit() {
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// ─── Pallet Usage Calculator ──────────────────────────────────────────────────
+// ─── Pallet Calculator + Pallet Position ─────────────────────────────────────
 function _fcCalcPallet(code, endingStock, uom) {
-  var isRM = /^3/.test(code);
-  var isPM = /^4/.test(code);
+  var isRM = /^3/.test(code), isPM = /^4/.test(code);
   if(isRM && STATE.palletRM) {
-    var pd = STATE.palletRM[code];
-    if(!pd) return null;
-    var ukuran = pd.ukuranKemasan;
-    var bobot  = pd.bobotPalet;
-    var uomLow = (uom||'').toLowerCase();
-    if(uomLow === 'gr' || uomLow === 'gram' || uomLow === 'g') {
-      ukuran = ukuran / 1000;
-      bobot  = bobot  / 1000;
-    }
-    var threshold = 2 * ukuran;
-    if(endingStock < threshold) return 0;
-    return Math.floor((endingStock - threshold) / bobot) + 1;
+    var pd = STATE.palletRM[code]; if(!pd) return null;
+    var ukuran = pd.ukuranKemasan, bobot = pd.bobotPalet;
+    var u = (uom||'').toLowerCase();
+    if(u==='gr'||u==='gram'||u==='g'){ ukuran/=1000; bobot/=1000; }
+    if(endingStock < 2*ukuran) return 0;
+    return Math.floor((endingStock - 2*ukuran) / bobot) + 1;
   }
   if(isPM && STATE.palletPM) {
-    var pd = STATE.palletPM[code];
-    if(!pd) return null;
-    var threshold = 2 * pd.pcsKarton;
-    if(endingStock < threshold) return 0;
-    return Math.floor((endingStock - threshold) / pd.pcsPalet) + 1;
+    var pd = STATE.palletPM[code]; if(!pd) return null;
+    if(endingStock < 2*pd.pcsKarton) return 0;
+    return Math.floor((endingStock - 2*pd.pcsKarton) / pd.pcsPalet) + 1;
   }
   return null;
 }
 
-// ─── PALLET POSITION ─────────────────────────────────────────────────────────
-var _whCapacityRM = parseInt(localStorage.getItem('wh_capacity_rm') || '0') || 0;
-var _whCapacityPM = parseInt(localStorage.getItem('wh_capacity_pm') || '0') || 0;
-var _ppViewMode   = 'pallet'; // 'pallet' | 'qty'
-var _ppFilterType = 'all';    // 'all' | 'RM' | 'PM' | 'FG'
-var _ppCache      = null;     // cached build data
+var _ppViewMode = 'pallet', _ppFilterType = 'all', _ppCache = null;
 
 function _ppSetView(mode) {
   _ppViewMode = mode;
   ['pallet','qty'].forEach(function(m){
     var b = document.getElementById('pp-btn-'+m);
-    if(b) { b.style.background = m===mode?'var(--teal)':'transparent'; b.style.color = m===mode?'#fff':'var(--muted)'; }
+    if(b){ b.style.background=m===mode?'var(--teal)':'transparent'; b.style.color=m===mode?'#fff':'var(--muted)'; }
   });
   renderPalletPos();
 }
 function _ppSetFilter(type) {
   _ppFilterType = type;
   ['all','rm','pm','fg'].forEach(function(t){
-    var b = document.getElementById('pp-f-'+t);
-    if(b) { b.style.background = t.toUpperCase()===type.toUpperCase()||t===type?'var(--accent)':'transparent'; b.style.color = t.toUpperCase()===type.toUpperCase()||t===type?'#fff':'var(--muted)'; }
+    var id = 'pp-f-'+t, b = document.getElementById(id);
+    var active = t===type||t.toUpperCase()===type;
+    if(b){ b.style.background=active?'var(--accent)':'transparent'; b.style.color=active?'#fff':'var(--muted)'; }
   });
   renderPalletPos();
 }
 function _ppSaveCapacity() {
-  var rm = parseInt(document.getElementById('pp-cap-rm').value) || 0;
-  var pm = parseInt(document.getElementById('pp-cap-pm').value) || 0;
-  _whCapacityRM = rm; _whCapacityPM = pm;
-  localStorage.setItem('wh_capacity_rm', rm);
-  localStorage.setItem('wh_capacity_pm', pm);
-  _ppCache = null; // force rebuild
+  _whCapacityRM = parseInt(document.getElementById('pp-cap-rm').value)||0;
+  _whCapacityPM = parseInt(document.getElementById('pp-cap-pm').value)||0;
+  localStorage.setItem('wh_capacity_rm', _whCapacityRM);
+  localStorage.setItem('wh_capacity_pm', _whCapacityPM);
+  _ppCache = null;
   renderPalletPos();
-  toast('Kapasitas tersimpan & disync ☁', 'ok');
+  toast('Kapasitas tersimpan ✓', 'ok');
 }
-
 function _ppBuildData() {
   if(_ppCache) return _ppCache;
-  var months  = FC_MONTHS;
-  var nM      = months.length;
-  var totals  = { RM: new Array(nM).fill(0), PM: new Array(nM).fill(0), FG: new Array(nM).fill(0) };
-  var items   = [];
-  var codes   = Object.keys(STATE.masterData || {});
-
-  codes.forEach(function(code) {
-    var hasPM = STATE.palletPM && STATE.palletPM[code];
-    var hasRM = STATE.palletRM && STATE.palletRM[code];
-    if(!hasPM && !hasRM) return;
-    var master = STATE.masterData[code] || {};
-    var uom    = master.uom || '';
-    var iType  = /^3/.test(code) ? 'RM' : /^4/.test(code) ? 'PM' : 'FG';
-    var fc;
-    try { fc = calcForecast(code); } catch(e) { return; }
-    var stockArr  = fc.stock || new Array(nM).fill(0);
+  var months = FC_MONTHS, nM = months.length;
+  var totals = { RM: new Array(nM).fill(0), PM: new Array(nM).fill(0), FG: new Array(nM).fill(0) };
+  var items = [];
+  Object.keys(STATE.masterData||{}).forEach(function(code) {
+    if((!STATE.palletPM||!STATE.palletPM[code]) && (!STATE.palletRM||!STATE.palletRM[code])) return;
+    var master = STATE.masterData[code]||{}, uom = master.uom||'';
+    var iType = /^3/.test(code)?'RM':/^4/.test(code)?'PM':'FG';
+    var fc; try{ fc=calcForecast(code); }catch(e){ return; }
+    var stockArr = fc.stock||new Array(nM).fill(0);
     var palletArr = stockArr.map(function(v){ return _fcCalcPallet(code, v||0, uom); });
-    palletArr.forEach(function(p, i){
-      if(p !== null && totals[iType]) totals[iType][i] += p;
-    });
-    items.push({ code: code, desc: master.desc || '', type: iType, uom: uom, stock: stockArr, pallets: palletArr });
+    palletArr.forEach(function(p,i){ if(p!==null&&totals[iType]) totals[iType][i]+=p; });
+    items.push({ code:code, desc:master.desc||'', type:iType, uom:uom, stock:stockArr, pallets:palletArr });
   });
-
-  _ppCache = { months: months, totals: totals, items: items };
+  _ppCache = { months:months, totals:totals, items:items };
   return _ppCache;
 }
-
 function _ppRenderPie(data) {
-  // data = [{label, value, color}]
-  var total = data.reduce(function(s,d){ return s+d.value; }, 0);
-  if(!total) return '<div style="text-align:center;color:var(--hint);padding:40px">Tidak ada data</div>';
-  var cx=120, cy=110, r=80, W=280, H=220;
-  var svgParts = ['<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:'+W+'px">'];
-  var angle = -Math.PI/2;
-  data.forEach(function(d) {
-    if(!d.value) return;
-    var sweep = (d.value/total) * 2 * Math.PI;
-    var x1 = cx + r*Math.cos(angle), y1 = cy + r*Math.sin(angle);
-    angle += sweep;
-    var x2 = cx + r*Math.cos(angle), y2 = cy + r*Math.sin(angle);
-    var large = sweep > Math.PI ? 1 : 0;
-    svgParts.push('<path d="M'+cx+','+cy+' L'+x1.toFixed(1)+','+y1.toFixed(1)+' A'+r+','+r+' 0 '+large+',1 '+x2.toFixed(1)+','+y2.toFixed(1)+' Z" fill="'+d.color+'" stroke="var(--bg)" stroke-width="2"/>');
-  });
-  // Legend
-  var ly = 20;
+  var total = data.reduce(function(s,d){return s+d.value;},0);
+  if(!total) return '<div style="text-align:center;color:var(--hint);padding:40px 0">Tidak ada data</div>';
+  var cx=110,cy=100,r=75,W=280,H=200,angle=-Math.PI/2;
+  var s=['<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:'+W+'px">'];
   data.forEach(function(d){
-    var pct = ((d.value/total)*100).toFixed(1);
-    svgParts.push('<rect x="'+(cx*2+10)+'" y="'+ly+'" width="12" height="12" rx="2" fill="'+d.color+'"/>');
-    svgParts.push('<text x="'+(cx*2+27)+'" y="'+(ly+10)+'" fill="var(--text)" font-size="12" font-family="inherit">'+d.label+'</text>');
-    svgParts.push('<text x="'+(W-8)+'" y="'+(ly+10)+'" fill="'+d.color+'" font-size="12" font-family="inherit" text-anchor="end" font-weight="600">'+n_id(d.value)+' ('+pct+'%)</text>');
-    ly += 22;
+    if(!d.value)return;
+    var sw=(d.value/total)*2*Math.PI;
+    var x1=cx+r*Math.cos(angle),y1=cy+r*Math.sin(angle);
+    angle+=sw;
+    var x2=cx+r*Math.cos(angle),y2=cy+r*Math.sin(angle);
+    s.push('<path d="M'+cx+','+cy+' L'+x1.toFixed(1)+','+y1.toFixed(1)+' A'+r+','+r+' 0 '+(sw>Math.PI?1:0)+',1 '+x2.toFixed(1)+','+y2.toFixed(1)+' Z" fill="'+d.color+'" stroke="var(--bg)" stroke-width="2"/>');
   });
-  // Total center
-  svgParts.push('<text x="'+cx+'" y="'+(cy-8)+'" text-anchor="middle" fill="var(--muted)" font-size="10" font-family="inherit">TOTAL</text>');
-  svgParts.push('<text x="'+cx+'" y="'+(cy+10)+'" text-anchor="middle" fill="var(--text)" font-size="15" font-family="inherit" font-weight="700">'+n_id(total)+'</text>');
-  svgParts.push('</svg>');
-  return svgParts.join('');
+  var ly=20;
+  data.forEach(function(d){
+    s.push('<rect x="'+(cx*2+8)+'" y="'+ly+'" width="11" height="11" rx="2" fill="'+d.color+'"/>');
+    s.push('<text x="'+(cx*2+23)+'" y="'+(ly+9)+'" fill="var(--text)" font-size="11" font-family="inherit">'+d.label+'</text>');
+    s.push('<text x="'+(W-6)+'" y="'+(ly+9)+'" fill="'+d.color+'" font-size="11" font-family="inherit" text-anchor="end" font-weight="600">'+n_id(d.value)+' ('+(d.value/total*100).toFixed(0)+'%)</text>');
+    ly+=20;
+  });
+  s.push('<text x="'+cx+'" y="'+(cy-6)+'" text-anchor="middle" fill="var(--muted)" font-size="9">TOTAL</text>');
+  s.push('<text x="'+cx+'" y="'+(cy+9)+'" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="700">'+n_id(total)+'</text>');
+  s.push('</svg>'); return s.join('');
 }
-
-function _ppRenderBar(barData) {
-  var months  = barData.months;
-  var series  = barData.series.filter(function(s){ return s.values.some(function(v){return v>0;}); });
-  var capRM   = barData.capRM;
-  var capPM   = barData.capPM;
-  var W=660, H=220, padL=48, padB=32, padT=16, padR=16;
-  var chartW  = W-padL-padR, chartH = H-padT-padB;
-  var nM      = months.length;
-  var barW    = Math.floor(chartW/nM) - 4;
-  // Max value
-  var stackedMaxArr = months.map(function(_,i){ return series.reduce(function(s,sr){ return s+sr.values[i]; },0); });
-  var maxVal  = Math.max.apply(null, stackedMaxArr.concat([capRM||0, capPM||0])) * 1.1 || 1;
-  var yScale  = function(v){ return padT + chartH - (v/maxVal)*chartH; };
-  var xPos    = function(i){ return padL + (i/nM)*chartW + 2; };
-  var svg = ['<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-height:220px">'];
-  // Y grid lines
+function _ppRenderBar(bd) {
+  var months=bd.months,series=bd.series.filter(function(s){return s.values.some(function(v){return v>0;});}),W=660,H=220,pL=48,pB=32,pT=14,pR=16;
+  var cW=W-pL-pR,cH=H-pT-pB,nM=months.length,bW=Math.max(4,Math.floor(cW/nM)-4);
+  var stacked=months.map(function(_,i){return series.reduce(function(s,sr){return s+sr.values[i];},0);});
+  var maxVal=Math.max.apply(null,stacked.concat([bd.capRM||0,bd.capPM||0]))*1.1||1;
+  var yS=function(v){return pT+cH-(v/maxVal)*cH;},xP=function(i){return pL+(i/nM)*cW+2;};
+  var s=['<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-height:220px">'];
   [0,0.25,0.5,0.75,1].forEach(function(t){
-    var y = padT + chartH*(1-t);
-    svg.push('<line x1="'+padL+'" y1="'+y.toFixed(0)+'" x2="'+(W-padR)+'" y2="'+y.toFixed(0)+'" stroke="var(--border)" stroke-width="0.5"/>');
-    svg.push('<text x="'+(padL-4)+'" y="'+(y+4)+'" text-anchor="end" fill="var(--muted)" font-size="9" font-family="inherit">'+n_id(Math.round(maxVal*t))+'</text>');
+    var y=pT+cH*(1-t);
+    s.push('<line x1="'+pL+'" y1="'+y.toFixed(0)+'" x2="'+(W-pR)+'" y2="'+y.toFixed(0)+'" stroke="var(--border)" stroke-width="0.5"/>');
+    s.push('<text x="'+(pL-3)+'" y="'+(y+4)+'" text-anchor="end" fill="var(--muted)" font-size="9">'+n_id(Math.round(maxVal*t))+'</text>');
   });
-  // Stacked bars
   months.forEach(function(_,i){
-    var x = xPos(i); var baseY = padT+chartH;
-    series.forEach(function(sr){
-      var v = sr.values[i]||0;
-      if(!v) return;
-      var h = (v/maxVal)*chartH;
-      baseY -= h;
-      svg.push('<rect x="'+x.toFixed(0)+'" y="'+baseY.toFixed(0)+'" width="'+barW+'" height="'+h.toFixed(0)+'" fill="'+sr.color+'" rx="2"/>');
-    });
-    // X label
-    svg.push('<text x="'+(x+barW/2).toFixed(0)+'" y="'+(H-padB+14)+'" text-anchor="middle" fill="var(--muted)" font-size="9" font-family="inherit">'+months[i].slice(0,3).toUpperCase()+'</text>');
-    // Value on top
-    var tot = stackedMaxArr[i];
-    if(tot>0) svg.push('<text x="'+(x+barW/2).toFixed(0)+'" y="'+(yScale(tot)-4).toFixed(0)+'" text-anchor="middle" fill="var(--text)" font-size="8" font-family="inherit">'+tot+'</text>');
+    var x=xP(i),baseY=pT+cH;
+    series.forEach(function(sr){ var v=sr.values[i]||0; if(!v)return; var h=(v/maxVal)*cH; baseY-=h; s.push('<rect x="'+x.toFixed(0)+'" y="'+baseY.toFixed(0)+'" width="'+bW+'" height="'+h.toFixed(0)+'" fill="'+sr.color+'" rx="1"/>'); });
+    s.push('<text x="'+(x+bW/2).toFixed(0)+'" y="'+(H-pB+14)+'" text-anchor="middle" fill="var(--muted)" font-size="9">'+months[i].slice(0,3).toUpperCase()+'</text>');
+    var tot=stacked[i]; if(tot>0) s.push('<text x="'+(x+bW/2).toFixed(0)+'" y="'+(yS(tot)-3).toFixed(0)+'" text-anchor="middle" fill="var(--text)" font-size="8">'+tot+'</text>');
   });
-  // Capacity lines
-  if(capRM > 0 && series.find(function(s){return s.label==='RM';})) {
-    var y = yScale(capRM);
-    svg.push('<line x1="'+padL+'" y1="'+y.toFixed(0)+'" x2="'+(W-padR)+'" y2="'+y.toFixed(0)+'" stroke="#0ea5e9" stroke-width="1.5" stroke-dasharray="6,3"/>');
-    svg.push('<text x="'+(W-padR-2)+'" y="'+(y-4)+'" text-anchor="end" fill="#0ea5e9" font-size="9" font-family="inherit">Cap RM</text>');
-  }
-  if(capPM > 0 && series.find(function(s){return s.label==='PM';})) {
-    var y = yScale(capPM);
-    svg.push('<line x1="'+padL+'" y1="'+y.toFixed(0)+'" x2="'+(W-padR)+'" y2="'+y.toFixed(0)+'" stroke="#8b5cf6" stroke-width="1.5" stroke-dasharray="6,3"/>');
-    svg.push('<text x="'+(W-padR-2)+'" y="'+(y-4)+'" text-anchor="end" fill="#8b5cf6" font-size="9" font-family="inherit">Cap PM</text>');
-  }
-  // Legend
-  var lx = padL;
-  series.forEach(function(s){
-    svg.push('<rect x="'+lx+'" y="'+(H-11)+'" width="10" height="10" rx="2" fill="'+s.color+'"/>');
-    svg.push('<text x="'+(lx+13)+'" y="'+(H-3)+'" fill="var(--muted)" font-size="9" font-family="inherit">'+s.label+'</text>');
-    lx += 40;
+  if(bd.capRM>0){var y=yS(bd.capRM).toFixed(0); s.push('<line x1="'+pL+'" y1="'+y+'" x2="'+(W-pR)+'" y2="'+y+'" stroke="#0ea5e9" stroke-width="1.5" stroke-dasharray="5,3"/>'); s.push('<text x="'+(W-pR-2)+'" y="'+(parseFloat(y)-3)+'" text-anchor="end" fill="#0ea5e9" font-size="9">Cap RM</text>');}
+  if(bd.capPM>0){var y=yS(bd.capPM).toFixed(0); s.push('<line x1="'+pL+'" y1="'+y+'" x2="'+(W-pR)+'" y2="'+y+'" stroke="#8b5cf6" stroke-width="1.5" stroke-dasharray="5,3"/>'); s.push('<text x="'+(W-pR-2)+'" y="'+(parseFloat(y)-3)+'" text-anchor="end" fill="#8b5cf6" font-size="9">Cap PM</text>');}
+  // Legend — clarify qty mode
+  var lx=pL, legendSuffix = bd.isQty?' (Qty Ending Stock)':'';
+  series.forEach(function(sr){
+    s.push('<rect x="'+lx+'" y="'+(H-11)+'" width="10" height="10" rx="2" fill="'+sr.color+'"/>');
+    s.push('<text x="'+(lx+13)+'" y="'+(H-3)+'" fill="var(--muted)" font-size="9">'+sr.label+legendSuffix+'</text>');
+    lx+=55+(bd.isQty?60:0);
   });
-  svg.push('</svg>');
-  return svg.join('');
+  s.push('</svg>'); return s.join('');
 }
-
 function renderPalletPos() {
-  var el = document.getElementById('pp-content');
-  if(!el) return;
-  if(!STATE.masterData) {
-    el.innerHTML='<div class="empty"><div class="empty-ico">📦</div><h3>Muat Master Data terlebih dahulu</h3></div>'; return;
+  var el=document.getElementById('pp-content'); if(!el)return;
+  if(!STATE.masterData){el.innerHTML='<div class="empty"><div class="empty-ico">📦</div><h3>Muat Master Data terlebih dahulu</h3></div>';return;}
+  if(!FC_MONTHS||!FC_MONTHS.length){el.innerHTML='<div class="empty"><div class="empty-ico">📅</div><h3>Buka halaman Forecast sekali untuk inisialisasi bulan</h3></div>';return;}
+  var hasPalletData = (STATE.palletPM&&Object.keys(STATE.palletPM).length>0)||(STATE.palletRM&&Object.keys(STATE.palletRM).length>0);
+  if(!hasPalletData){el.innerHTML='<div class="empty"><div class="empty-ico">🛢️</div><h3>Data Pallet belum dimuat</h3><p>Buka <strong>Data Source</strong> → klik <strong>Muat Pallet PM</strong> dan/atau <strong>Muat Pallet RM</strong></p></div>';return;}
+  _ppCache=null;
+  var d=_ppBuildData(), months=d.months, totRM=d.totals.RM, totPM=d.totals.PM, totFG=d.totals.FG;
+  var isPallet=_ppViewMode==='pallet', m0=0;
+  if(!d.items.length){el.innerHTML='<div class="empty"><div class="empty-ico">🔍</div><h3>Tidak ada item yang cocok dengan data pallet</h3><p>Pastikan kode item di sheet Pallet PM/RM sesuai dengan kode di Master Data, lalu muat ulang.</p></div>';return;}
+  // Alerts
+  var alertHtml='';
+  if(isPallet){
+    var overR=months.filter(function(m,i){return _whCapacityRM>0&&totRM[i]>_whCapacityRM;});
+    var overP=months.filter(function(m,i){return _whCapacityPM>0&&totPM[i]>_whCapacityPM;});
+    if(overR.length) alertHtml+='<div style="background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.3);border-radius:6px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px"><span style="font-size:18px">⚠️</span><div><strong style="color:var(--red)">Gudang RM Melebihi Kapasitas ('+_whCapacityRM+' pallet)</strong><div style="font-size:11px;color:var(--muted);margin-top:2px">Bulan: '+overR.join(', ')+'</div></div></div>';
+    if(overP.length) alertHtml+='<div style="background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.3);border-radius:6px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px"><span style="font-size:18px">⚠️</span><div><strong style="color:var(--red)">Gudang PM Melebihi Kapasitas ('+_whCapacityPM+' pallet)</strong><div style="font-size:11px;color:var(--muted);margin-top:2px">Bulan: '+overP.join(', ')+'</div></div></div>';
   }
-  if(!FC_MONTHS || !FC_MONTHS.length) {
-    el.innerHTML='<div class="empty"><div class="empty-ico">📅</div><h3>Buka Forecast sekali untuk inisialisasi bulan</h3></div>'; return;
-  }
-  if(!STATE.palletPM && !STATE.palletRM) {
-    el.innerHTML='<div class="empty"><div class="empty-ico">🛢️</div><h3>Data Pallet belum dimuat</h3><p>Buka Data Source → Muat Pallet PM dan/atau Pallet RM</p></div>'; return;
-  }
-  _ppCache = null;
-  var d = _ppBuildData();
-  var months = d.months, totRM = d.totals.RM, totPM = d.totals.PM, totFG = d.totals.FG;
-  var isPallet = _ppViewMode === 'pallet';
-
-  // ── ALERTS ──
-  var alertHtml = '';
-  if(isPallet) {
-    if(_whCapacityRM > 0) {
-      var overR = months.filter(function(m,i){ return totRM[i]>_whCapacityRM; });
-      if(overR.length) alertHtml += '<div style="background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.3);border-radius:6px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px">'
-        +'<span style="font-size:18px">⚠️</span><div><strong style="color:var(--red)">Gudang RM Melebihi Kapasitas ('+_whCapacityRM+' pallet)</strong>'
-        +'<div style="font-size:11px;color:var(--muted);margin-top:2px">Bulan: '+overR.join(', ')+'</div></div></div>';
-    }
-    if(_whCapacityPM > 0) {
-      var overP = months.filter(function(m,i){ return totPM[i]>_whCapacityPM; });
-      if(overP.length) alertHtml += '<div style="background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.3);border-radius:6px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px">'
-        +'<span style="font-size:18px">⚠️</span><div><strong style="color:var(--red)">Gudang PM Melebihi Kapasitas ('+_whCapacityPM+' pallet)</strong>'
-        +'<div style="font-size:11px;color:var(--muted);margin-top:2px">Bulan: '+overP.join(', ')+'</div></div></div>';
-    }
-  }
-
-  // ── KPI ──
-  var m0 = 0;
-  var kpi = '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">';
-  var kpiFn = function(lbl, val, sub, color) {
-    return '<div class="card" style="padding:12px 14px">'
-      +'<div style="font-size:10px;text-transform:uppercase;color:var(--muted);letter-spacing:.06em">'+lbl+'</div>'
-      +'<div style="font-size:22px;font-weight:700;color:'+(color||'var(--text)')+';margin:4px 0">'+val+'</div>'
-      +(sub?'<div style="font-size:10px;color:var(--muted)">'+sub+'</div>':'')
-      +'</div>';
-  };
-  var capRMpct = _whCapacityRM > 0 ? Math.round(totRM[m0]/_whCapacityRM*100)+'% kapasitas' : '';
-  var capPMpct = _whCapacityPM > 0 ? Math.round(totPM[m0]/_whCapacityPM*100)+'% kapasitas' : '';
-  kpi += kpiFn('Total Pallet '+months[m0], n_id(totRM[m0]+totPM[m0]+totFG[m0]), d.items.filter(function(it){return it.pallets[m0]>0;}).length+' item berisi', 'var(--text)');
-  kpi += kpiFn('RM '+months[m0], n_id(totRM[m0]), capRMpct||d.items.filter(function(it){return it.type==='RM'&&it.pallets[m0]>0;}).length+' item', '#0ea5e9');
-  kpi += kpiFn('PM '+months[m0], n_id(totPM[m0]), capPMpct||d.items.filter(function(it){return it.type==='PM'&&it.pallets[m0]>0;}).length+' item', '#8b5cf6');
-  kpi += kpiFn('Item dengan pallet data', n_id(d.items.length), 'RM: '+d.items.filter(function(i){return i.type==='RM';}).length+' | PM: '+d.items.filter(function(i){return i.type==='PM';}).length, 'var(--green)');
-  kpi += '</div>';
-
-  // ── CHARTS ──
-  var pieData = [
-    { label:'RM', value: totRM[m0], color:'#0ea5e9' },
-    { label:'PM', value: totPM[m0], color:'#8b5cf6' },
-    { label:'FG', value: totFG[m0], color:'#10b981' }
-  ].filter(function(p){ return p.value>0; });
-  var barSeries = [
-    { label:'RM', values: totRM, color:'#0ea5e9' },
-    { label:'PM', values: totPM, color:'#8b5cf6' },
-    { label:'FG', values: totFG, color:'#10b981' }
-  ];
-  var charts = '<div style="display:grid;grid-template-columns:280px 1fr;gap:12px;margin-bottom:14px">'
-    +'<div class="card"><div class="card-hdr"><span class="card-title">Distribusi '+months[m0]+'</span></div>'
-    +'<div style="padding:12px 8px">'+_ppRenderPie(pieData)+'</div></div>'
-    +'<div class="card"><div class="card-hdr"><span class="card-title">Trend Bulanan '+(isPallet?'(Pallet)':'(Qty Ending Stock)')+'</span></div>'
-    +'<div style="padding:12px 8px">'+_ppRenderBar({months:months, series:barSeries, capRM:isPallet?_whCapacityRM:0, capPM:isPallet?_whCapacityPM:0})+'</div></div>'
+  // KPI
+  var kpi='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">';
+  var kF=function(lbl,val,sub,col){return '<div class="card" style="padding:12px 14px"><div style="font-size:10px;text-transform:uppercase;color:var(--muted);letter-spacing:.06em">'+lbl+'</div><div style="font-size:22px;font-weight:700;color:'+(col||'var(--text)')+';margin:4px 0">'+val+'</div><div style="font-size:10px;color:var(--muted)">'+sub+'</div></div>';};
+  kpi+=kF('Total Pallet '+months[m0], n_id(totRM[m0]+totPM[m0]+totFG[m0]), d.items.filter(function(i){return(i.pallets[m0]||0)>0;}).length+' item berisi', 'var(--text)');
+  kpi+=kF('RM '+months[m0], n_id(totRM[m0]), (_whCapacityRM>0?Math.round(totRM[m0]/_whCapacityRM*100)+'% kapasitas':d.items.filter(function(i){return i.type==='RM'&&(i.pallets[m0]||0)>0;}).length+' item'), '#0ea5e9');
+  kpi+=kF('PM '+months[m0], n_id(totPM[m0]), (_whCapacityPM>0?Math.round(totPM[m0]/_whCapacityPM*100)+'% kapasitas':d.items.filter(function(i){return i.type==='PM'&&(i.pallets[m0]||0)>0;}).length+' item'), '#8b5cf6');
+  kpi+=kF('Item Pallet Data', n_id(d.items.length), 'RM: '+d.items.filter(function(i){return i.type==='RM';}).length+' | PM: '+d.items.filter(function(i){return i.type==='PM';}).length, 'var(--green)');
+  kpi+='</div>';
+  // Charts
+  var pieData=[{label:'RM',value:totRM[m0],color:'#0ea5e9'},{label:'PM',value:totPM[m0],color:'#8b5cf6'},{label:'FG',value:totFG[m0],color:'#10b981'}].filter(function(p){return p.value>0;});
+  var barSeries=[{label:'RM',values:totRM,color:'#0ea5e9'},{label:'PM',values:totPM,color:'#8b5cf6'},{label:'FG',values:totFG,color:'#10b981'}];
+  var charts='<div style="display:grid;grid-template-columns:280px 1fr;gap:12px;margin-bottom:14px">'
+    +'<div class="card"><div class="card-hdr"><span class="card-title">Distribusi '+months[m0]+'</span></div><div style="padding:12px 8px">'+_ppRenderPie(pieData)+'</div></div>'
+    +'<div class="card"><div class="card-hdr"><span class="card-title">Trend Bulanan — '+(isPallet?'Jumlah Pallet':'Qty Ending Stock')+'</span></div><div style="padding:12px 8px">'+_ppRenderBar({months:months,series:barSeries,capRM:isPallet?_whCapacityRM:0,capPM:isPallet?_whCapacityPM:0,isQty:!isPallet})+'</div></div>'
     +'</div>';
-
-  // ── CAPACITY SETTINGS ──
-  var cap = '<div class="card" style="margin-bottom:14px">'
-    +'<div class="card-hdr"><span class="card-title">⚙ Kapasitas Gudang</span><span style="font-size:10px;color:var(--muted)">Disync ke semua laptop via cloud</span></div>'
+  // Capacity
+  var cap='<div class="card" style="margin-bottom:14px"><div class="card-hdr"><span class="card-title">⚙ Kapasitas Gudang</span></div>'
     +'<div style="padding:12px;display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap">'
-    +'<div><label style="font-size:11px;display:block;margin-bottom:4px;color:var(--muted)">Max Pallet Gudang RM</label>'
-    +'<input id="pp-cap-rm" type="number" value="'+(_whCapacityRM||'')+'" placeholder="cth: 500" style="width:130px;padding:6px 8px;font-size:13px;border:1px solid var(--border);border-radius:var(--r);background:var(--bg3);color:var(--text)"></div>'
-    +'<div><label style="font-size:11px;display:block;margin-bottom:4px;color:var(--muted)">Max Pallet Gudang PM</label>'
-    +'<input id="pp-cap-pm" type="number" value="'+(_whCapacityPM||'')+'" placeholder="cth: 300" style="width:130px;padding:6px 8px;font-size:13px;border:1px solid var(--border);border-radius:var(--r);background:var(--bg3);color:var(--text)"></div>'
+    +'<div><label style="font-size:11px;display:block;margin-bottom:4px;color:var(--muted)">Max Pallet Gudang RM</label><input id="pp-cap-rm" type="number" value="'+(_whCapacityRM||'')+'" placeholder="cth: 500" style="width:130px;padding:6px 8px;font-size:13px;border:1px solid var(--border);border-radius:var(--r);background:var(--bg3);color:var(--text)"></div>'
+    +'<div><label style="font-size:11px;display:block;margin-bottom:4px;color:var(--muted)">Max Pallet Gudang PM</label><input id="pp-cap-pm" type="number" value="'+(_whCapacityPM||'')+'" placeholder="cth: 300" style="width:130px;padding:6px 8px;font-size:13px;border:1px solid var(--border);border-radius:var(--r);background:var(--bg3);color:var(--text)"></div>'
     +'<button class="btn btn-primary btn-sm" onclick="_ppSaveCapacity()" style="height:34px">💾 Simpan & Sync</button>'
     +'</div></div>';
-
-  // ── TABLE ──
-  var filtered = d.items.filter(function(it){
-    return _ppFilterType==='all' || it.type===_ppFilterType;
-  });
-  filtered.sort(function(a,b){ return (a.type<b.type?-1:a.type>b.type?1:0)||a.code.localeCompare(b.code); });
-  var tcols = ['<th style="padding:7px 10px;text-align:left;font-size:10px;text-transform:uppercase;color:var(--muted);white-space:nowrap">Kode</th>',
-    '<th style="padding:7px 10px;text-align:left;font-size:10px;text-transform:uppercase;color:var(--muted)">Deskripsi</th>',
-    '<th style="padding:7px 10px;text-align:center;font-size:10px;text-transform:uppercase;color:var(--muted)">Tipe</th>',
-    '<th style="padding:7px 10px;text-align:center;font-size:10px;text-transform:uppercase;color:var(--muted)">UOM</th>'].concat(
-    months.map(function(m){
-      return '<th style="padding:7px 10px;text-align:right;font-size:10px;text-transform:uppercase;color:var(--muted);white-space:nowrap">'+m.slice(0,3).toUpperCase()+'</th>';
-    })
-  ).join('');
-  var trows = filtered.map(function(it){
-    var arr = isPallet ? it.pallets : it.stock;
-    var typeColor = it.type==='RM'?'#0ea5e9':it.type==='PM'?'#8b5cf6':'#10b981';
-    var cells = arr.map(function(v,i){
+  // Table
+  var filtered=d.items.filter(function(it){return _ppFilterType==='all'||it.type===_ppFilterType;});
+  filtered.sort(function(a,b){return (a.type<b.type?-1:a.type>b.type?1:0)||a.code.localeCompare(b.code);});
+  var tcols='<th style="padding:7px 10px;text-align:left;font-size:10px;text-transform:uppercase;color:var(--muted);white-space:nowrap">Kode</th>'
+    +'<th style="padding:7px 10px;text-align:left;font-size:10px;text-transform:uppercase;color:var(--muted)">Deskripsi</th>'
+    +'<th style="padding:7px 10px;text-align:center;font-size:10px;text-transform:uppercase;color:var(--muted)">Tipe</th>'
+    +'<th style="padding:7px 10px;text-align:center;font-size:10px;text-transform:uppercase;color:var(--muted)">UOM</th>'
+    +months.map(function(m){return '<th style="padding:7px 10px;text-align:right;font-size:10px;text-transform:uppercase;color:var(--muted);white-space:nowrap">'+m.slice(0,3).toUpperCase()+'</th>';}).join('');
+  var trows=filtered.map(function(it){
+    var arr=isPallet?it.pallets:it.stock, tc=it.type==='RM'?'#0ea5e9':it.type==='PM'?'#8b5cf6':'#10b981';
+    var cells=arr.map(function(v){
       if(v===null||v===undefined) return '<td style="padding:6px 10px;text-align:right;color:var(--hint)">—</td>';
-      var isOver = isPallet && ((it.type==='RM'&&_whCapacityRM>0)|(it.type==='PM'&&_whCapacityPM>0)) && false; // per-item cap not meaningful
-      var disp = isPallet ? (v>0?'<strong>'+v+'</strong>':v===0?'<span style="color:var(--hint)">0</span>':'—') : n_id(Math.round(v));
+      var disp=isPallet?(v>0?'<strong>'+v+'</strong>':'<span style="color:var(--hint)">0</span>'):n_id(Math.round(v));
       return '<td style="padding:6px 10px;text-align:right;font-family:var(--mono);font-size:11px">'+disp+'</td>';
     }).join('');
-    return '<tr style="border-top:1px solid var(--border)">'
-      +'<td style="padding:6px 10px;font-family:var(--mono);font-size:11px;white-space:nowrap">'+it.code+'</td>'
-      +'<td style="padding:6px 10px;font-size:11px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)">'+it.desc+'</td>'
-      +'<td style="padding:6px 10px;text-align:center"><span style="font-size:10px;font-weight:700;color:'+typeColor+'">'+it.type+'</span></td>'
-      +'<td style="padding:6px 10px;text-align:center;font-size:10px;color:var(--muted)">'+it.uom+'</td>'
-      +cells+'</tr>';
+    return '<tr style="border-top:1px solid var(--border)"><td style="padding:6px 10px;font-family:var(--mono);font-size:11px;white-space:nowrap">'+it.code+'</td><td style="padding:6px 10px;font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)">'+it.desc+'</td><td style="padding:6px 10px;text-align:center"><span style="font-size:10px;font-weight:700;color:'+tc+'">'+it.type+'</span></td><td style="padding:6px 10px;text-align:center;font-size:10px;color:var(--muted)">'+it.uom+'</td>'+cells+'</tr>';
   }).join('');
-  var tbl = '<div class="card"><div class="card-hdr"><span class="card-title">Detail Per Item</span>'
-    +'<span style="font-size:11px;color:var(--muted)">'+filtered.length+' item | '+(isPallet?'Jumlah Pallet':'Ending Stock')+'</span></div>'
-    +'<div style="overflow-x:auto;max-height:480px;overflow-y:auto">'
-    +'<table style="width:100%;border-collapse:collapse;font-size:12px">'
-    +'<thead style="position:sticky;top:0;z-index:1;background:var(--bg3)"><tr>'+tcols+'</tr></thead>'
-    +'<tbody>'+trows+'</tbody></table></div></div>';
-
-  el.innerHTML = alertHtml + kpi + charts + cap + tbl;
+  var tbl='<div class="card"><div class="card-hdr"><span class="card-title">Detail Per Item</span><span style="font-size:11px;color:var(--muted)">'+filtered.length+' item | '+(isPallet?'Jumlah Pallet':'Qty Ending Stock')+'</span></div>'
+    +'<div style="overflow-x:auto;max-height:480px;overflow-y:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
+    +'<thead style="position:sticky;top:0;z-index:1;background:var(--bg3)"><tr>'+tcols+'</tr></thead><tbody>'+trows+'</tbody></table></div></div>';
+  el.innerHTML=alertHtml+kpi+charts+cap+tbl;
 }
+
+// 📅 FORECAST & PROPOSE PR  — no Firebase, session-only state
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // FC_MONTHS dynamic — start from current month (max Des)
@@ -8431,19 +8316,15 @@ function _fcDetailRow(code, fc, master) {
     + gRow('DOI (hari)',     isFcView ? fc.doiFc   : fc.doi,   doiClsFn)
     + gRow('Propose PR', fc.propose, null, true, code)
     + (function(){
-        var masterItem = (STATE.masterData||{})[code] || {};
-        var uom = masterItem.uom || '';
+        var master = (STATE.masterData||{})[code]||{}, uom = master.uom||'';
         var stockArr = isFcView ? fc.stockFc : fc.stock;
-        var palletVals = (stockArr||[]).map(function(v){ return _fcCalcPallet(code, v||0, uom); });
-        if(!palletVals.some(function(v){ return v !== null; })) return '';
-        var cells = palletVals.map(function(v){
-          if(v === null) return '<td style="text-align:right;padding:5px 6px;color:var(--hint)">—</td>';
-          var color = v === 0 ? 'color:var(--hint)' : 'color:var(--teal);font-weight:600';
-          return '<td style="text-align:right;padding:5px 6px;'+color+'">'+v+'</td>';
+        var pv = (stockArr||[]).map(function(v){ return _fcCalcPallet(code, v||0, uom); });
+        if(!pv.some(function(v){ return v!==null; })) return '';
+        var cells = pv.map(function(v){
+          if(v===null) return '<td style="text-align:right;padding:5px 6px;color:var(--hint)">—</td>';
+          return '<td style="text-align:right;padding:5px 6px;'+(v>0?'color:var(--teal);font-weight:600':'color:var(--hint)')+'">'+v+'</td>';
         }).join('');
-        return '<tr style="border-top:1px solid var(--border);background:rgba(20,184,166,.04)">'
-          + '<td style="padding:5px 6px;font-size:10.5px;font-weight:700;color:var(--teal);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap">Pallet Usage</td>'
-          + cells + '<td></td></tr>';
+        return '<tr style="border-top:1px solid var(--border);background:rgba(20,184,166,.04)"><td style="padding:5px 6px;font-size:10.5px;font-weight:700;color:var(--teal);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap">Pallet Usage</td>'+cells+'<td></td></tr>';
       }())
     + '</tbody></table></div>';
 
