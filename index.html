@@ -624,6 +624,7 @@ body.light-mode .theme-toggle-knob{transform:translateX(15px);background:var(--a
       <button class="btn" onclick="loadPO()">↺ Refresh SAP</button>
       <button class="btn btn-sm btn-amber" onclick="savePOChanges()">💾 Simpan</button>
       <button class="btn btn-sm" onclick="generateUpdateDelDate()" style="background:var(--teal);color:#fff" title="Hitung Update Delivery Date dari forecast untuk semua PO">📅 Generate Update DelDate</button>
+      <span id="po-udd-ts" style="font-size:10px;color:var(--muted)"></span>
       <button class="btn btn-sm" onclick="exportPOExcel()" style="background:#22c55e;color:#fff">⬇ Export XLSX</button>
       <button class="btn btn-sm" onclick="exportPOGSheet()" style="background:#4285f4;color:#fff">⬆ GSheet</button>
       <button class="btn btn-sm btn-red" onclick="resetPOOverrides()">🗑 Reset Semua</button>
@@ -810,6 +811,7 @@ body.light-mode .theme-toggle-knob{transform:translateX(15px);background:var(--a
       <span id="fc-matcom-badge" style="display:none;font-size:10.5px;background:var(--teal-bg,rgba(20,184,166,.1));color:var(--teal);border:1px solid rgba(20,184,166,.25);border-radius:var(--r);padding:3px 9px;font-weight:600"></span>
       <button class="btn btn-primary" id="fc-gen-btn" onclick="generateProposePR()" style="font-size:11.5px">⚡ Generate Propose PR</button>
       <span id="fc-gen-badge" style="display:none;font-size:10.5px;background:var(--green-bg);color:var(--green);border:1px solid rgba(16,185,129,.25);border-radius:var(--r);padding:3px 9px;font-weight:600">✓ Generated</span>
+      <span id="fc-gen-ts" style="font-size:10px;color:var(--muted)"></span>
       <button id="fc-view-toggle" class="btn btn-sm" onclick="_fcToggleGridView()" style="font-size:11px" title="Switch tampilan Aktual / Forecast">⇄ Aktual</button>
       <button class="btn btn-sm" onclick="_fcResetOspoOspr()" style="font-size:11px;border-color:var(--teal);color:var(--teal)" title="Kembalikan semua edit OSPO & OSPR ke data SAP">↺ Reset OSPO/OSPR</button>
       <button class="btn btn-sm btn-red" onclick="_fcResetPropose()" style="font-size:11px" title="Hapus semua propose PR yang sudah di-generate">↺ Reset Propose</button>
@@ -2168,8 +2170,8 @@ function showPage(name, el) {
   var handlers = {
     dashboard: function(){updateDashStats();setTimeout(_matchDashColumns,100)},
     projection: function(){setUrgentCutoff();renderProjection();},
-    forecast: function(){_fcPopulateDatePicker();renderForecast();},
-    po: function(){if(!STATE.poData.length)loadPO();else renderPO()},
+    forecast: function(){_fcPopulateDatePicker();renderForecast();_loadGenTimestamp('gen_ts_propose_pr','fc-gen-ts');},
+    po: function(){if(!STATE.poData.length)loadPO();else renderPO();_loadGenTimestamp('gen_ts_update_deldate','po-udd-ts');},
     schedule: renderSchedule,
     'daily-list': function(){initDailyList();renderDailyList()},
     'performance': function(){renderPerformance();},
@@ -2712,6 +2714,26 @@ var _poShowAll = false;
 var _PO_LIMIT = 300;
 
 // ─── Update DelDate ──────────────────────────────────────────────
+// Helper: simpan & tampilkan timestamp generate
+function _saveGenTimestamp(lsKey, spanId) {
+  var now = new Date();
+  var ts = now.getDate().toString().padStart(2,'0') + '/'
+    + (now.getMonth()+1).toString().padStart(2,'0') + '/'
+    + now.getFullYear() + ' '
+    + now.getHours().toString().padStart(2,'0') + '.'
+    + now.getMinutes().toString().padStart(2,'0');
+  localStorage.setItem(lsKey, ts);
+  var el = document.getElementById(spanId);
+  if(el) el.textContent = 'Last: ' + ts;
+  return ts;
+}
+
+function _loadGenTimestamp(lsKey, spanId) {
+  var ts = localStorage.getItem(lsKey);
+  var el = document.getElementById(spanId);
+  if(el && ts) el.textContent = 'Last: ' + ts;
+}
+
 function generateUpdateDelDate() {
   if(!STATE.poData || !STATE.poData.length) { toast('Load PO dulu dari SAP', 'err'); return; }
   if(!STATE.mrpData) { toast('Load MRP/Master Data terlebih dahulu', 'err'); return; }
@@ -2840,6 +2862,7 @@ function generateUpdateDelDate() {
   STATE.updateDelDateData = newUpdateDelDate;
   localStorage.setItem('update_deldate_data', JSON.stringify(newUpdateDelDate));
   cloudSave('update_deldate_data', JSON.stringify(newUpdateDelDate));
+  _saveGenTimestamp('gen_ts_update_deldate', 'po-udd-ts');
   renderPO();
   toast('Update DelDate di-generate: ' + Object.keys(newUpdateDelDate).length + ' PO ✓', 'ok');
 }
@@ -8572,6 +8595,7 @@ function generateProposePR() {
     try { localStorage.setItem('fc_propose', JSON.stringify(_fcPropose)); localStorage.setItem('fc_autopropose','1'); cloudSave('fc_propose', JSON.stringify(_fcPropose)); } catch(e){}
     var badge = document.getElementById('fc-gen-badge');
     if(badge) { badge.style.display = 'inline'; setTimeout(function(){ badge.style.display='none'; }, 5000); }
+    _saveGenTimestamp('gen_ts_propose_pr', 'fc-gen-ts');
     toast('Propose PR di-generate ✓','ok');
   }, 50);
 }
