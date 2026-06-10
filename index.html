@@ -2770,10 +2770,11 @@ function generateUpdateDelDate() {
     var uomRaw=(master.uom||'').toLowerCase();
     var gF=(/^(g|gr|gram)$/i.test(uomRaw.trim()))?0.001:1;
 
-    // Forecast dgn semua OSPO (fc.stock[i] = ending stock bulan i)
     var fc; try{fc=_calcForecast(code,ospoIdx);}catch(e){return;}
-    var fcStock=fc.stock||new Array(FC_MONTHS.length).fill(0);
-    var fcReq=fc.forecast||new Array(FC_MONTHS.length).fill(0);
+    // Gunakan fc.stockFc — sesuai nilai yg ditampilkan di forecast UI (Forecast view)
+    // fc.stock menggunakan pull-forward algorithm → nilai berbeda dari yang user lihat
+    var fcStock = fc.stockFc || fc.stock || new Array(FC_MONTHS.length).fill(0);
+    var fcReq   = fc.forecast || new Array(FC_MONTHS.length).fill(0);
     var daysArr=FC_DAYS||FC_MONTHS.map(function(){return 30;});
     var sd=(STATE.stockData||{})[code]||{};
     var sohTotal=((sd.btg||0)+(sd.sng||0))*gF;
