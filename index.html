@@ -6146,8 +6146,9 @@ function openFbModal(idx) {
       var poKey = po.docNum && po.docNum !== '—' ? (po.docNum + '_' + itemCode) : null;
       var ovr = poKey && STATE.poOverrides[poKey] ? STATE.poOverrides[poKey] : {};
       var origQty = po.openQty || 0;
-      // QTY REQUEST = openQty dari SAP (tidak terpengaruh override)
-      var reqQty = origQty;
+      // QTY REQUEST = pakai reqQtyOverride kalau user sudah ubah qty di jadwal,
+      // fallback ke openQty SAP kalau belum diubah
+      var reqQty = (ovr.reqQtyOverride !== undefined && ovr.reqQtyOverride >= 0) ? ovr.reqQtyOverride : origQty;
       var confQty = ovr.confQty !== undefined ? ovr.confQty : reqQty;
       // Auto-fill: jika belum ada confQty, isi dengan reqQty
       if(!ovr.confQty && !ovr.confDate) confQty = reqQty;
