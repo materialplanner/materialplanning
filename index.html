@@ -7829,11 +7829,19 @@ function _ppRenderBar(bd) {
     var y=yS(bd.capRM).toFixed(0);
     s.push('<line x1="'+pL+'" y1="'+y+'" x2="'+(W-pR)+'" y2="'+y+'" stroke="'+_PP_COLORS.RM+'" stroke-width="1.5" stroke-dasharray="6,3"/>');
     s.push('<text x="'+(W-pR-2)+'" y="'+(parseFloat(y)-4)+'" text-anchor="end" fill="'+_PP_COLORS.RM+'" font-size="9" font-weight="600" font-family="inherit">Max RM ('+n_id(bd.capRM)+')</text>');
+    // Garis 80%
+    var y80R=yS(bd.capRM*0.8).toFixed(0);
+    s.push('<line x1="'+pL+'" y1="'+y80R+'" x2="'+(W-pR)+'" y2="'+y80R+'" stroke="'+_PP_COLORS.RM+'" stroke-width="1" stroke-dasharray="3,4" opacity="0.5"/>');
+    s.push('<text x="'+(W-pR-2)+'" y="'+(parseFloat(y80R)-3)+'" text-anchor="end" fill="'+_PP_COLORS.RM+'" font-size="8" font-family="inherit" opacity="0.7">80% ('+n_id(Math.round(bd.capRM*0.8))+')</text>');
   }
   if(bd.capPM>0 && activeSeries.some(function(s){return s.label==='PM';})){
     var y=yS(bd.capPM).toFixed(0);
     s.push('<line x1="'+pL+'" y1="'+y+'" x2="'+(W-pR)+'" y2="'+y+'" stroke="'+_PP_COLORS.PM+'" stroke-width="1.5" stroke-dasharray="6,3"/>');
     s.push('<text x="'+(W-pR-2)+'" y="'+(parseFloat(y)-4)+'" text-anchor="end" fill="'+_PP_COLORS.PM+'" font-size="9" font-weight="600" font-family="inherit">Max PM ('+n_id(bd.capPM)+')</text>');
+    // Garis 80%
+    var y80P=yS(bd.capPM*0.8).toFixed(0);
+    s.push('<line x1="'+pL+'" y1="'+y80P+'" x2="'+(W-pR)+'" y2="'+y80P+'" stroke="'+_PP_COLORS.PM+'" stroke-width="1" stroke-dasharray="3,4" opacity="0.5"/>');
+    s.push('<text x="'+(W-pR-2)+'" y="'+(parseFloat(y80P)-3)+'" text-anchor="end" fill="'+_PP_COLORS.PM+'" font-size="8" font-family="inherit" opacity="0.7">80% ('+n_id(Math.round(bd.capPM*0.8))+')</text>');
   }
 
   // Legend
@@ -7928,7 +7936,9 @@ function _ppRenderTodayView(el, isPallet, filterType) {
   var alertHtml='';
   if(isPallet){
     if(_whCapacityRM>0&&totRM>_whCapacityRM) alertHtml+='<div style="background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.3);border-radius:6px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px"><span>⚠️</span><div><strong style="color:var(--red)">Gudang RM Melebihi Kapasitas Hari Ini</strong><div style="font-size:11px;color:var(--muted)">'+n_id(totRM)+' / '+n_id(_whCapacityRM)+' pallet ('+Math.round(totRM/_whCapacityRM*100)+'%)</div></div></div>';
+    else if(_whCapacityRM>0&&totRM>=_whCapacityRM*0.8) alertHtml+='<div style="background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.35);border-radius:6px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px"><span>⚡</span><div><strong style="color:var(--amber)">Gudang RM Mendekati Kapasitas Hari Ini</strong><div style="font-size:11px;color:var(--muted)">'+n_id(totRM)+' / '+n_id(_whCapacityRM)+' pallet ('+Math.round(totRM/_whCapacityRM*100)+'%) &mdash; &ge;80% kapasitas</div></div></div>';
     if(_whCapacityPM>0&&totPM>_whCapacityPM) alertHtml+='<div style="background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.3);border-radius:6px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px"><span>⚠️</span><div><strong style="color:var(--red)">Gudang PM Melebihi Kapasitas Hari Ini</strong><div style="font-size:11px;color:var(--muted)">'+n_id(totPM)+' / '+n_id(_whCapacityPM)+' pallet ('+Math.round(totPM/_whCapacityPM*100)+'%)</div></div></div>';
+    else if(_whCapacityPM>0&&totPM>=_whCapacityPM*0.8) alertHtml+='<div style="background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.35);border-radius:6px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px"><span>⚡</span><div><strong style="color:var(--amber)">Gudang PM Mendekati Kapasitas Hari Ini</strong><div style="font-size:11px;color:var(--muted)">'+n_id(totPM)+' / '+n_id(_whCapacityPM)+' pallet ('+Math.round(totPM/_whCapacityPM*100)+'%) &mdash; &ge;80% kapasitas</div></div></div>';
   }
 
   // Pie (distribusi tipe) + Horizontal bar (ranking item)
@@ -8049,10 +8059,14 @@ function renderPalletPos() {
   // ── Alerts (hanya di mode pallet) ─────────────────────────────────────────
   var alertHtml='';
   if(isPallet){
-    var overR=months.filter(function(m,i){return _whCapacityRM>0&&(d.totals.RM[i]||0)>_whCapacityRM;});
-    var overP=months.filter(function(m,i){return _whCapacityPM>0&&(d.totals.PM[i]||0)>_whCapacityPM;});
+    var overR  = months.filter(function(m,i){return _whCapacityRM>0&&(d.totals.RM[i]||0)>_whCapacityRM;});
+    var warnR  = months.filter(function(m,i){return _whCapacityRM>0&&(d.totals.RM[i]||0)>=_whCapacityRM*0.8&&(d.totals.RM[i]||0)<=_whCapacityRM;});
+    var overP  = months.filter(function(m,i){return _whCapacityPM>0&&(d.totals.PM[i]||0)>_whCapacityPM;});
+    var warnP  = months.filter(function(m,i){return _whCapacityPM>0&&(d.totals.PM[i]||0)>=_whCapacityPM*0.8&&(d.totals.PM[i]||0)<=_whCapacityPM;});
     if(overR.length) alertHtml+='<div style="background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.3);border-radius:6px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px"><span>⚠️</span><div><strong style="color:var(--red)">Gudang RM Melebihi Kapasitas ('+_whCapacityRM+' pallet)</strong><div style="font-size:11px;color:var(--muted)">Bulan: '+overR.join(', ')+'</div></div></div>';
+    if(warnR.length) alertHtml+='<div style="background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.35);border-radius:6px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px"><span>⚡</span><div><strong style="color:var(--amber)">Gudang RM Mendekati Kapasitas &ge;80% ('+_whCapacityRM+' pallet)</strong><div style="font-size:11px;color:var(--muted)">Bulan: '+warnR.join(', ')+'</div></div></div>';
     if(overP.length) alertHtml+='<div style="background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.3);border-radius:6px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px"><span>⚠️</span><div><strong style="color:var(--red)">Gudang PM Melebihi Kapasitas ('+_whCapacityPM+' pallet)</strong><div style="font-size:11px;color:var(--muted)">Bulan: '+overP.join(', ')+'</div></div></div>';
+    if(warnP.length) alertHtml+='<div style="background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.35);border-radius:6px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px"><span>⚡</span><div><strong style="color:var(--amber)">Gudang PM Mendekati Kapasitas &ge;80% ('+_whCapacityPM+' pallet)</strong><div style="font-size:11px;color:var(--muted)">Bulan: '+warnP.join(', ')+'</div></div></div>';
   }
 
   // ── KPI ───────────────────────────────────────────────────────────────────
