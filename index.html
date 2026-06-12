@@ -2024,18 +2024,26 @@ function loadSheetData(type) {
   var sheet = localStorage.getItem('sheet_tab_'+type)||'';
   if(!url){ toast('Masukkan URL Google Sheets untuk '+type,'err'); return Promise.reject('no url'); }
 
-  var csvUrl = _sheetsCSVUrl(url, sheet);
+  var isScriptProxy = url.indexOf('script.google.com') >= 0;
+  var csvUrl;
+  if(isScriptProxy) {
+    // Apps Script proxy — bisa akses sheet restricted (tidak perlu "Anyone can view")
+    csvUrl = url + (url.indexOf('?') >= 0 ? '&' : '?') + (sheet ? 'sheet='+encodeURIComponent(sheet) : '');
+  } else {
+    csvUrl = _sheetsCSVUrl(url, sheet);
+  }
   if(!csvUrl){ toast('URL tidak valid untuk '+type,'err'); return Promise.reject('bad url'); }
 
   var infoEl = document.getElementById(type+'-info');
   var tsEl   = document.getElementById(type+'-ts');
   var dotEl  = document.getElementById(type+'-status');
-  if(infoEl) infoEl.textContent='⏳ Memuat dari Google Sheets...';
+  if(infoEl) infoEl.textContent='⏳ Memuat dari '+(isScriptProxy?'Apps Script Proxy':'Google Sheets')+'...';
 
   return fetch(csvUrl).then(function(r){
-    if(!r.ok) throw new Error('HTTP '+r.status+' — pastikan sheet sudah di-share "Anyone with link"');
+    if(!r.ok) throw new Error('HTTP '+r.status+(isScriptProxy?' — cek deployment Apps Script':'— pastikan sheet sudah di-share "Anyone with link"'));
     return r.text();
   }).then(function(text){
+    if(text.startsWith('ERROR:')) throw new Error(text.replace('ERROR:','').trim());
     var headerRowHint = (type === 'matcom') ? 3 : 0;
     var parsed = _parseCSV(text, headerRowHint);
     var rows = parsed.rows; var headers = parsed.headers;
