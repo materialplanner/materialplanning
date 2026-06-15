@@ -2957,6 +2957,24 @@ function generateUpdateDelDate() {
     });
   });
 
+  // ── FIFO enforcement ────────────────────────────────────────
+  // Pastikan UpdateDelDate tidak mundur antar PO per item
+  // (urutan prReqDate ASC → date harus non-decreasing)
+  Object.keys(byItem).forEach(function(code){
+    var pos = byItem[code]; // sudah FIFO sorted
+    var prevISO = null;
+    pos.forEach(function(p){
+      var key = p.docNum+'_'+p.itemCode;
+      var d = newUpdateDelDate[key];
+      if(!d || d === '2027-01-01') { prevISO = d; return; }
+      if(prevISO && d < prevISO) {
+        newUpdateDelDate[key] = prevISO; // naikkan ke tanggal PO sebelumnya
+        d = prevISO;
+      }
+      prevISO = d;
+    });
+  });
+
   STATE.updateDelDateData=newUpdateDelDate;
   localStorage.setItem('update_deldate_data',JSON.stringify(newUpdateDelDate));
   cloudSave('update_deldate_data',JSON.stringify(newUpdateDelDate));
