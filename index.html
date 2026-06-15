@@ -249,6 +249,22 @@ thead{position:sticky;top:0;z-index:2;will-change:transform}
 body.light-mode .theme-toggle{background:var(--accent-bg)}
 body.light-mode .theme-toggle-knob{transform:translateX(15px);background:var(--accent)}
 
+/* ── Sidebar light mode ── */
+body.light-mode .sidebar{background:#f1f5f9;box-shadow:2px 0 12px rgba(0,0,0,.08);border-right:1px solid #e2e8f0}
+body.light-mode .sidebar-toggle{border-color:rgba(0,0,0,.12);background:rgba(0,0,0,.04);color:#64748b}
+body.light-mode .sidebar-toggle:hover{background:rgba(0,0,0,.09);color:#1e293b}
+body.light-mode .ni{color:#64748b}
+body.light-mode .ni:hover{color:#1e293b;background:rgba(0,0,0,.06)}
+body.light-mode .ni.active{color:#1e40af;background:rgba(37,99,235,.1);border-left-color:#3b82f6;font-weight:600}
+body.light-mode .nav-divider{background:rgba(0,0,0,.08)}
+body.light-mode .nav-section{color:rgba(0,0,0,.35)}
+body.light-mode .logo-mark{border-bottom-color:rgba(0,0,0,.08)}
+body.light-mode .logo-text{color:#1e293b!important}
+body.light-mode .logo p{color:#64748b}
+/* Override inline style untuk logo title dan subtitle */
+body.light-mode .sidebar .logo-text:first-of-type{color:#1e293b!important}
+body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
+
 /* PO date auto vs manual */
 .date-auto{color:var(--text)}
 .date-manual{color:var(--amber);font-weight:500}
@@ -1511,7 +1527,8 @@ var CLOUD_KEYS = [
   'fc_propose','fc_ospo_ovr','fc_ospr_ovr','fc_doi2','fc_doi2_suppliers','mrp_source',
   'fc_autopropose',
   'matcom_monthly','matcom_data','matcom_count','last_matcom_sync',
-  'mps_ui_status','bom_ui_status','mrp_last_calc'
+  'mps_ui_status','bom_ui_status','mrp_last_calc',
+  'email_daily_data'
 ];
 
 // ── Sync indicator di header ──────────────────────────────────────────────────
@@ -2024,18 +2041,26 @@ function loadSheetData(type) {
   var sheet = localStorage.getItem('sheet_tab_'+type)||'';
   if(!url){ toast('Masukkan URL Google Sheets untuk '+type,'err'); return Promise.reject('no url'); }
 
-  var csvUrl = _sheetsCSVUrl(url, sheet);
+  var isScriptProxy = url.indexOf('script.google.com') >= 0;
+  var csvUrl;
+  if(isScriptProxy) {
+    // Apps Script proxy — bisa akses sheet restricted (tidak perlu "Anyone can view")
+    csvUrl = url + (url.indexOf('?') >= 0 ? '&' : '?') + (sheet ? 'sheet='+encodeURIComponent(sheet) : '');
+  } else {
+    csvUrl = _sheetsCSVUrl(url, sheet);
+  }
   if(!csvUrl){ toast('URL tidak valid untuk '+type,'err'); return Promise.reject('bad url'); }
 
   var infoEl = document.getElementById(type+'-info');
   var tsEl   = document.getElementById(type+'-ts');
   var dotEl  = document.getElementById(type+'-status');
-  if(infoEl) infoEl.textContent='⏳ Memuat dari Google Sheets...';
+  if(infoEl) infoEl.textContent='⏳ Memuat dari '+(isScriptProxy?'Apps Script Proxy':'Google Sheets')+'...';
 
-  return fetch(csvUrl).then(function(r){
-    if(!r.ok) throw new Error('HTTP '+r.status+' — pastikan sheet sudah di-share "Anyone with link"');
+  return fetch(csvUrl, isScriptProxy ? {credentials:'include',redirect:'follow'} : {}).then(function(r){
+    if(!r.ok) throw new Error('HTTP '+r.status+(isScriptProxy?' — cek deployment Apps Script':'— pastikan sheet sudah di-share "Anyone with link"'));
     return r.text();
   }).then(function(text){
+    if(text.startsWith('ERROR:')) throw new Error(text.replace('ERROR:','').trim());
     var headerRowHint = (type === 'matcom') ? 3 : 0;
     var parsed = _parseCSV(text, headerRowHint);
     var rows = parsed.rows; var headers = parsed.headers;
@@ -4272,6 +4297,22 @@ function _doBuildProjection() {
   document.getElementById('s-total').textContent = projection.length;
   var nb = document.getElementById('nb-urgent');
   if(nb) { nb.style.display = urgentCount > 0 ? '' : 'none'; if(urgentCount > 0) nb.textContent = urgentCount; }
+
+  // Simpan data kritis ke Firebase untuk email harian otomatis
+  try {
+    var todayISO2 = (function(){ var d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); })();
+    var urgentItems = projection.filter(function(p){ return p.isUrgent; }).slice(0,50).map(function(p){
+      return { code:p.code, name:p.name||p.code, doi:p.doiFCNum||0, coverage:p.coverageDateStr||'', type:p.itemType||'', supplier:p.supplier||'', stock:p.totalStock||0, site:p.site||'' };
+    });
+    var underItems = projection.filter(function(p){ return p.category==='UNDER'&&!p.isUrgent; }).slice(0,30).map(function(p){
+      return { code:p.code, name:p.name||p.code, doi:p.doiFCNum||0, coverage:p.coverageDateStr||'', type:p.itemType||'', supplier:p.supplier||'' };
+    });
+    var overItems = projection.filter(function(p){ return p.category==='OVER'; }).slice(0,20).map(function(p){
+      return { code:p.code, name:p.name||p.code, doi:p.doiFCNum||0, type:p.itemType||'' };
+    });
+    var emailData = { date:todayISO2, urgent:urgentItems, under:underItems, over:overItems, totalItems:projection.length, urgentCount:urgentCount };
+    cloudSave('email_daily_data', JSON.stringify(emailData));
+  } catch(e) { console.warn('[build] email_daily_data save fail:', e.message); }
 
   try { renderProjection(); } catch(e) { console.error('[build] renderProjection CRASH:', e.message, e.stack); }
   try { populateSKUFilter(); } catch(e) { console.warn('[build] populateSKUFilter fail:', e.message); }
@@ -6648,17 +6689,27 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape')document.que
 
 // ─── THEME TOGGLE ────────────────────────────────────────────────────────────
 function toggleTheme() {
-  var isLight = document.body.classList.toggle('dark-mode');
-  localStorage.setItem('theme', isLight ? 'light' : 'dark');
-  document.getElementById('theme-label').textContent = isLight ? '☀️ Light' : '🌙 Dark';
-  document.getElementById('theme-knob').textContent = isLight ? '☀️' : '🌙';
+  var isDark = document.body.classList.toggle('dark-mode');
+  // light-mode = kebalikan dari dark-mode (kontrol sidebar + overrides)
+  document.body.classList.toggle('light-mode', !isDark);
+  localStorage.setItem('theme', isDark ? 'dark' : 'light');
+  var lbl  = document.getElementById('theme-label');
+  var knob = document.getElementById('theme-knob');
+  if(lbl)  lbl.textContent  = isDark ? '🌙 Dark'  : '☀️ Light';
+  if(knob) knob.textContent = isDark ? '🌙' : '☀️';
 }
 (function(){
-  if(localStorage.getItem('theme') === 'light') {
+  var saved = localStorage.getItem('theme');
+  if(saved === 'dark') {
+    document.body.classList.add('dark-mode');
+    document.body.classList.remove('light-mode');
+  } else {
+    // default light atau sudah pilih light
+    document.body.classList.remove('dark-mode');
     document.body.classList.add('light-mode');
     document.addEventListener('DOMContentLoaded', function(){
-      var lbl = document.getElementById('theme-label'); if(lbl) lbl.textContent='☀️ Light';
-      var knob = document.getElementById('theme-knob'); if(knob) knob.textContent='☀️';
+      var lbl  = document.getElementById('theme-label'); if(lbl)  lbl.textContent  = '☀️ Light';
+      var knob = document.getElementById('theme-knob');  if(knob) knob.textContent = '☀️';
     });
   }
 })();
