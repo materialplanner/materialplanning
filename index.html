@@ -2400,24 +2400,26 @@ function _aiBuildCtx() {
       total_po_open_qty: Math.round(p.totalIncoming||0),
       total_ospr: Math.round(p.totalOSPR||0),
       pct_aktual_vs_forecast: p.pctUsageVsForecast ? Math.round(p.pctUsageVsForecast*100)+'%' : null,
-      kebutuhan_per_bulan: getMRPBulanan(p.productCode),
-      po_open: getPOItem(p.productCode),
+      kebutuhan_per_bulan: (function(){var m=getMRPBulanan(p.productCode); if(!m) return null; var keys=Object.keys(m).slice(0,6); var out={}; keys.forEach(function(k){out[k]=m[k];}); return out;})(),
+      po_open: getPOItem(p.productCode).slice(0,3),
       matcom: getMatcomItem(p.productCode),
       comment: p.comment || null
     };
     return obj;
   }
 
-  // UNDER items - full detail (semua, bukan hanya 30)
-  var underItems = proj.filter(function(p){return p.category==='UNDER';})
+  // UNDER items - top 25 full detail, sisanya compact
+  var allUnder = proj.filter(function(p){return p.category==='UNDER';})
     .sort(function(a,b){return (a.coverageDate||0)-(b.coverageDate||0);});
+  var underItems = allUnder.slice(0,25);
+  var underExtra = allUnder.slice(25).map(compact); // sisanya compact saja
 
-  // GOOD items mendekati kritis (DOI < 20 hari) - full detail
+  // GOOD items mendekati kritis (DOI < 20 hari) - compact only
   var goodNearCritical = proj.filter(function(p){
     return p.category==='GOOD' && (p.doiFC||0) < 20;
-  }).sort(function(a,b){return (a.doiFC||0)-(b.doiFC||0);}).slice(0,15);
+  }).sort(function(a,b){return (a.doiFC||0)-(b.doiFC||0);}).slice(0,10);
 
-  // GOOD & OVER items - compact summary
+  // GOOD & OVER - compact
   var goodItems  = proj.filter(function(p){return p.category==='GOOD' && (p.doiFC||0)>=20;});
   var overItems  = proj.filter(function(p){return p.category==='OVER';});
   function compact(p){
@@ -2483,12 +2485,12 @@ function _aiBuildCtx() {
       doi_target_general: doiTarget + ' hari',
       doi_target_impor: doiImpor + ' hari',
       urgency_cutoff_wn: (CFG&&CFG.wn||14) + ' hari',
-      bulan_perencanaan: fcMonths
+      bulan_perencanaan: fcMonths.slice(0,4)
     },
     ringkasan: {
       total_item: proj.length,
-      UNDER_kritis: underItems.length,
-      GOOD_aman: goodItems.length + goodNearCritical.length,
+      UNDER_kritis: allUnder.length,
+      GOOD_aman: goodItems.length,
       GOOD_mendekati_kritis: goodNearCritical.length,
       OVER_berlebih: overItems.length,
       po_open_total: (STATE.poData||[]).length,
@@ -2497,12 +2499,13 @@ function _aiBuildCtx() {
       overdue: overdue.length,
       highlighted: hlCodes.length
     },
-    item_UNDER_kritis: underItems.map(buildDetail),
-    item_GOOD_mendekati_kritis: goodNearCritical.map(buildDetail),
-    item_GOOD_aman_ringkas: goodItems.slice(0,50).map(compact),
-    item_OVER_ringkas: overItems.slice(0,30).map(compact),
+    catatan: 'item_UNDER_kritis hanya top 25 paling kritis. Gunakan search_item/get_item_detail untuk item lain.',
+    item_UNDER_kritis_top25: underItems.map(buildDetail),
+    item_UNDER_kritis_lainnya_ringkas: underExtra,
+    item_GOOD_mendekati_kritis: goodNearCritical.map(compact),
+    item_GOOD_aman_ringkas: goodItems.slice(0,30).map(compact),
     item_highlighted: hlDetails,
-    jadwal_pengiriman: sched,
+    jadwal_pengiriman: sched.slice(0,15),
     overdue_belum_terima: overdue,
     grpo_masuk_hari_ini: grpoToday
   };
@@ -3734,6 +3737,10 @@ async function sapFetchTO(reportId, params, _retry) {
       return sapFetchTO(reportId, params, true);
     }
     if(e.name === 'AbortError') throw new Error('Timeout 60s — SAP tidak merespons');
+    // Detect CORS/network block - beri pesan yang jelas
+    if(e.message && (e.message.includes('Failed to fetch') || e.message.includes('NetworkError'))) {
+      throw new Error('SAP tidak dapat dijangkau dari jaringan ini. Data akan diambil dari cache Firebase.');
+    }
     throw e;
   }
 }
@@ -8804,8 +8811,36 @@ function _doGRPOPoll() {
       updateDashStats();
       if(statusEl) statusEl.textContent = 'Update: ' + new Date().toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'});
     }).catch(function(e){
-      console.warn('[GRPO poll] Error:', e.message);
-      if(statusEl) statusEl.textContent = '⚠ gagal';
+      var isCORS = e.message && (
+        e.message.includes('Failed to fetch') ||
+        e.message.includes('NetworkError') ||
+        e.message.includes('CORS') ||
+        e.message.includes('ERR_FAILED') ||
+        e.message.includes('net::')
+      );
+      if(isCORS) {
+        // SAP tidak bisa diakses dari jaringan ini (CORS/network block)
+        // Matikan auto-poll dan load dari Firebase cache saja
+        console.log('[GRPO poll] SAP tidak terjangkau dari jaringan ini — auto-poll dimatikan, pakai cache Firebase.');
+        if(_grpoPollTimer) { clearTimeout(_grpoPollTimer); _grpoPollTimer = null; }
+        if(statusEl) statusEl.textContent = '☁ cache';
+        // Load dari Firebase cache jika ada
+        var cached = localStorage.getItem('sap_cache_grpo');
+        if(cached && !STATE.grpoData.length) {
+          try {
+            var rawG = JSON.parse(cached);
+            STATE.grpoData = rawG.map(function(g){
+              return g.d !== undefined
+                ? {grpoDate:g.d,itemCode:g.i,itemName:g.n,supplierName:g.s,qty:g.q,uom:g.u,site:g.t}
+                : g;
+            });
+            updateDashStats();
+          } catch(e2) {}
+        }
+      } else {
+        console.warn('[GRPO poll] Error:', e.message);
+        if(statusEl) statusEl.textContent = '⚠ gagal';
+      }
     });
 }
 
