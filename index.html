@@ -1307,19 +1307,19 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
         <span id="ai-dot" class="dot off"></span>
       </div>
       <div style="padding:16px">
-        <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Masukkan Groq API Key untuk mengaktifkan asisten AI. Groq <b>gratis</b> — tidak perlu kartu kredit. Kalau sudah pakai Groq untuk WA bot, key-nya sama.</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Masukkan Google Gemini API Key. Gemini <b>gratis</b> — tidak perlu kartu kredit, dan lebih pintar dari Groq.</div>
         <div class="fg">
-          <label style="font-size:11px">Groq API Key</label>
-          <input id="cfg-ai-key" type="password" placeholder="gsk_..." style="width:100%;font-family:var(--mono);font-size:11.5px">
+          <label style="font-size:11px">Gemini API Key</label>
+          <input id="cfg-ai-key" type="password" placeholder="AIza..." style="width:100%;font-family:var(--mono);font-size:11.5px">
         </div>
         <div style="display:flex;gap:8px;margin-top:2px">
           <button class="btn btn-primary btn-sm" onclick="_aiSaveKey()">Simpan & Aktifkan</button>
-          <button class="btn btn-sm" onclick="window.open('https://console.groq.com/keys','_blank')">Ambil Key di Groq ↗</button>
+          <button class="btn btn-sm" onclick="window.open('https://aistudio.google.com/apikey','_blank')">Ambil Key di Google ↗</button>
         </div>
         <div id="ai-key-status" style="margin-top:8px;font-size:11px;color:var(--muted)"></div>
         <div style="margin-top:10px;padding:8px;background:var(--bg3);border-radius:5px;font-size:10.5px;color:var(--muted);line-height:1.6">
           Key tersimpan di <b>Firebase</b> — setelah diisi di satu perangkat, perangkat lain langsung aktif.<br>
-          <b>Gratis:</b> 1.000 request/hari, 30 request/menit. Lebih dari cukup untuk tim PPIC.
+          <b>Gratis:</b> 1.500 req/hari, 1.000.000 token/menit — jauh lebih longgar dari Groq.
         </div>
       </div>
     </div>
@@ -2031,7 +2031,7 @@ document.addEventListener('click', function(e){
     <div class="ai-hdr-ico">&#x1F916;</div>
     <div style="flex:1">
       <div class="ai-hdr-title">AI Asisten PPIC</div>
-      <div class="ai-hdr-sub">Pakai Groq AI (gratis) — tanya apa saja</div>
+      <div class="ai-hdr-sub">Pakai Gemini 2.5 Flash (gratis) — tanya apa saja</div>
     </div>
     <button class="ai-icon-btn" onclick="_aiClearHistory()" title="Hapus riwayat">&#x1F5D1;</button>
     <button class="ai-icon-btn" onclick="_aiTogglePanel()" style="margin-left:4px">&#x2715;</button>
@@ -2288,14 +2288,14 @@ function _aiIsCommand(msg) {
 // ─── Helper: Groq API call ────────────────────────────────────────────────────
 async function _aiGroqCall(messages, useTools) {
   var body = {
-    model: 'llama-3.3-70b-versatile',
+    model: 'gemini-2.5-flash',
     max_tokens: 1024,
     messages: messages
   };
   if(useTools) { body.tools = _AI_TOOLS; body.tool_choice = 'auto'; }
   else         { body.stream = true; }
 
-  return await fetch('https://api.groq.com/openai/v1/chat/completions', {
+  return await fetch('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', {
     method: 'POST',
     headers: {'Content-Type':'application/json','Authorization':'Bearer '+_aiKey},
     body: JSON.stringify(body)
@@ -2312,7 +2312,7 @@ function _aiSaveKey() {
   var dot=document.getElementById('ai-dot'); if(dot) dot.className='dot';
   var st=document.getElementById('ai-key-status');
   if(st) st.innerHTML='<span style="color:var(--green)">&#x2713; API Key aktif</span>';
-  toast('Groq API Key disimpan &#x2713;','ok');
+  toast('Gemini API Key disimpan &#x2713;','ok');
 }
 
 function _aiTogglePanel() {
