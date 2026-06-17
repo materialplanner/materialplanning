@@ -2064,30 +2064,204 @@ var _aiHistory = [];
 var _aiStreaming = false;
 var _aiPanelOpen = false;
 
-// Init textarea keyboard handler after DOM ready
-document.addEventListener('DOMContentLoaded', function() {
-  var inp = document.getElementById('ai-input');
-  if(inp) {
-    inp.addEventListener('keydown', function(e) {
-      if(e.key==='Enter' && !e.shiftKey) { e.preventDefault(); _aiSend(); }
-    });
-    inp.addEventListener('input', function() {
-      this.style.height = 'auto';
-      this.style.height = Math.min(this.scrollHeight, 120) + 'px';
-    });
-  }
-});
+// ─── Tool definitions ─────────────────────────────────────────────────────────
+var _AI_TOOLS = [
+  {type:'function',function:{name:'search_item',
+    description:'Cari item material berdasarkan nama atau kode. Gunakan sebelum aksi lain jika kode item belum diketahui.',
+    parameters:{type:'object',properties:{query:{type:'string',description:'Nama item atau kode material'}},required:['query']}}},
+  {type:'function',function:{name:'highlight_item',
+    description:'Tandai item sebagai Highlighted Issue (item bermasalah yang perlu dipantau), atau hapus dari daftar.',
+    parameters:{type:'object',properties:{
+      item_code:{type:'string',description:'Kode material (productCode)'},
+      action:{type:'string',enum:['add','remove'],description:'add=tandai, remove=hapus'}
+    },required:['item_code','action']}}},
+  {type:'function',function:{name:'add_comment',
+    description:'Tambah atau update komentar pada item di Projection Stock.',
+    parameters:{type:'object',properties:{
+      item_code:{type:'string',description:'Kode material (productCode)'},
+      comment:{type:'string',description:'Isi komentar'}
+    },required:['item_code','comment']}}},
+  {type:'function',function:{name:'schedule_delivery',
+    description:'Set tanggal request kirim untuk PO. Bisa by item code (semua PO item tersebut) atau by nomor PO spesifik dari SAP.',
+    parameters:{type:'object',properties:{
+      date:{type:'string',description:'Tanggal kirim format YYYY-MM-DD, contoh: 2026-06-25'},
+      item_code:{type:'string',description:'Kode material item — set semua PO open untuk item ini'},
+      po_number:{type:'string',description:'Nomor PO spesifik (DocNum dari SAP) — set hanya PO ini saja'}
+    },required:['date']}}}
+];
 
+// ─── Tool label untuk konfirmasi ──────────────────────────────────────────────
+var _AI_TOOL_LABELS = {
+  search_item:       function(a){ return '&#x1F50D; Cari item: "'+a.query+'"'; },
+  highlight_item:    function(a){ return a.action==='add'
+    ? '&#x1F4CC; Tandai <b>'+_aiGetItemName(a.item_code)+'</b> sebagai Highlighted Issue'
+    : '&#x1F4CC; Hapus <b>'+_aiGetItemName(a.item_code)+'</b> dari Highlighted Issues'; },
+  add_comment:       function(a){ return '&#x1F4AC; Tambah comment pada <b>'+_aiGetItemName(a.item_code)+'</b>: <em>"'+a.comment+'"</em>'; },
+  schedule_delivery: function(a){
+    var by = a.po_number ? 'PO <b>'+a.po_number+'</b>' : 'semua PO <b>'+_aiGetItemName(a.item_code)+'</b>';
+    return '&#x1F4C5; Jadwalkan kirim '+by+' tanggal <b>'+a.date.split('-').reverse().join('/')+'</b>';
+  }
+};
+
+function _aiGetItemName(code) {
+  if(!code) return '(?)';
+  var it = (STATE.projectionData||[]).find(function(p){return p.productCode===code;});
+  return it ? ((typeof _dispName==='function'?_dispName(it):it.description)||code)+' ('+code+')' : code;
+}
+
+// ─── Tool executors ───────────────────────────────────────────────────────────
+function _aiExecTool(name, args) {
+  try {
+    if(name==='search_item')       return _aiToolSearch(args.query);
+    if(name==='highlight_item')    return _aiToolHighlight(args.item_code, args.action);
+    if(name==='add_comment')       return _aiToolComment(args.item_code, args.comment);
+    if(name==='schedule_delivery') return _aiToolSchedule(args.date, args.item_code, args.po_number);
+    return 'Tool tidak dikenal: '+name;
+  } catch(e) { return 'Error eksekusi tool: '+e.message; }
+}
+
+function _aiToolSearch(query) {
+  var q = (query||'').toLowerCase();
+  var results = (STATE.projectionData||[]).filter(function(p){
+    return p.productCode.toLowerCase().includes(q) ||
+      (p.description||'').toLowerCase().includes(q) ||
+      (typeof _dispName==='function' ? (_dispName(p)||'').toLowerCase().includes(q) : false);
+  }).slice(0,8).map(function(p){
+    return {kode:p.productCode,nama:p.description,tipe:p.itemType,
+      doi:Math.round(p.doiFC||0),status:p.category,supplier:p.supplier};
+  });
+  if(!results.length) return 'Tidak ditemukan item dengan kata kunci "'+query+'"';
+  return JSON.stringify(results);
+}
+
+function _aiToolHighlight(code, action) {
+  if(!code) return 'ERROR: item_code diperlukan';
+  PROJ_HIGHLIGHTED[code] = (action==='add');
+  localStorage.setItem('proj_highlighted', JSON.stringify(PROJ_HIGHLIGHTED));
+  cloudSave('proj_highlighted', JSON.stringify(PROJ_HIGHLIGHTED));
+  if(typeof updateDashStats==='function') updateDashStats();
+  var nama = _aiGetItemName(code);
+  return action==='add'
+    ? nama+' berhasil ditandai sebagai Highlighted Issue ✓'
+    : nama+' dihapus dari Highlighted Issues ✓';
+}
+
+function _aiToolComment(code, comment) {
+  if(!code||!comment) return 'ERROR: item_code dan comment diperlukan';
+  if(!STATE.projComments) STATE.projComments = {};
+  STATE.projComments[code] = {text:comment, _manual:true, ts:new Date().toISOString()};
+  (STATE.projectionData||[]).forEach(function(p){ if(p.productCode===code) p.comment=comment; });
+  localStorage.setItem('proj_comments', JSON.stringify(STATE.projComments));
+  cloudSave('proj_comments', JSON.stringify(STATE.projComments));
+  if(typeof renderProjectionRAF==='function' &&
+     document.getElementById('pg-projection') &&
+     document.getElementById('pg-projection').classList.contains('active')) renderProjectionRAF();
+  return 'Comment ditambahkan pada '+_aiGetItemName(code)+': "'+comment+'" ✓';
+}
+
+function _aiToolSchedule(date, item_code, po_number) {
+  if(!date) return 'ERROR: date diperlukan (format YYYY-MM-DD)';
+  if(!item_code && !po_number) return 'ERROR: item_code atau po_number diperlukan';
+  var affected = [];
+  (STATE.poData||[]).forEach(function(po){
+    var matchItem = item_code && po.itemCode===item_code;
+    var matchPO   = po_number && String(po.docNum)===String(po_number);
+    if(!matchItem && !matchPO) return;
+    var key = String(po.docNum)+'_'+po.itemCode;
+    if(!STATE.poOverrides[key]) STATE.poOverrides[key]={};
+    STATE.poOverrides[key].date    = date;
+    STATE.poOverrides[key].isManual = true;
+    STATE.poOverrides[key].isAuto   = false;
+    STATE.poOverrides[key].confUpd  = new Date().toISOString().split('T')[0];
+    affected.push('PO '+po.docNum+' ('+( po.itemName||po.itemCode)+' | '+po.openQty+' '+po.uom+')');
+  });
+  if(!affected.length) return 'Tidak ada PO ditemukan untuk '+(item_code?'item '+item_code:'PO '+po_number);
+  localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
+  cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
+  if(typeof renderPO==='function' &&
+     document.getElementById('pg-po') &&
+     document.getElementById('pg-po').classList.contains('active')) renderPO();
+  var d = date.split('-').reverse().join('/');
+  return 'Tanggal request kirim diset '+d+' untuk '+affected.length+' PO:\n'+affected.join('\n')+' ✓';
+}
+
+// ─── Confirmation promise ─────────────────────────────────────────────────────
+var _aiConfirmResolve = null;
+
+function _aiConfirmExec(confirmed) {
+  var box = document.getElementById('ai-confirm-box');
+  if(box) box.remove();
+  if(_aiConfirmResolve) { _aiConfirmResolve(confirmed); _aiConfirmResolve=null; }
+}
+
+function _aiShowConfirm(toolCalls) {
+  return new Promise(function(resolve) {
+    _aiConfirmResolve = resolve;
+    var msgs = document.getElementById('ai-messages');
+    if(!msgs) { resolve(false); return; }
+
+    var listHtml = toolCalls.map(function(tc){
+      try {
+        var args = JSON.parse(tc.function.arguments);
+        var lbl = _AI_TOOL_LABELS[tc.function.name];
+        return '<div class="ai-confirm-row">'+(lbl?lbl(args):tc.function.name)+'</div>';
+      } catch(e){ return '<div class="ai-confirm-row">'+tc.function.name+'</div>'; }
+    }).join('');
+
+    var box = document.createElement('div');
+    box.id = 'ai-confirm-box';
+    box.className = 'ai-msg assistant';
+    box.innerHTML =
+      '<div class="ai-bubble ai-confirm-bubble">'+
+        '<div class="ai-confirm-title">&#x26A1; AI mau melakukan:</div>'+
+        '<div class="ai-confirm-list">'+listHtml+'</div>'+
+        '<div class="ai-confirm-btns">'+
+          '<button class="ai-cbtn ai-cbtn-ok" onclick="_aiConfirmExec(true)">&#x2713; Jalankan</button>'+
+          '<button class="ai-cbtn ai-cbtn-cancel" onclick="_aiConfirmExec(false)">&#x2715; Batal</button>'+
+        '</div>'+
+      '</div>';
+    msgs.appendChild(box);
+    msgs.scrollTop = msgs.scrollHeight;
+  });
+}
+
+// ─── Detect command vs question ───────────────────────────────────────────────
+var _AI_CMD_WORDS = ['tandai','highlight','jadwal','schedule','comment','komentar','catat',
+  'tambah','hapus dari','set tgl','set tanggal','ubah tanggal','pindah','ping',
+  'masukkan ke','keluarkan dari','issue','tandain'];
+function _aiIsCommand(msg) {
+  var m = msg.toLowerCase();
+  return _AI_CMD_WORDS.some(function(w){ return m.includes(w); });
+}
+
+// ─── Helper: Groq API call ────────────────────────────────────────────────────
+async function _aiGroqCall(messages, useTools) {
+  var body = {
+    model: 'llama-3.3-70b-versatile',
+    max_tokens: 1024,
+    messages: messages
+  };
+  if(useTools) { body.tools = _AI_TOOLS; body.tool_choice = 'auto'; }
+  else         { body.stream = true; }
+
+  return await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json','Authorization':'Bearer '+_aiKey},
+    body: JSON.stringify(body)
+  });
+}
+
+// ─── Main send ────────────────────────────────────────────────────────────────
 function _aiSaveKey() {
   var k = (document.getElementById('cfg-ai-key')||{value:''}).value.trim();
   if(!k) { toast('Masukkan API Key terlebih dahulu','err'); return; }
   _aiKey = k;
   localStorage.setItem('ai_api_key', k);
   cloudSave('ai_api_key', k);
-  var dot = document.getElementById('ai-dot'); if(dot) dot.className = 'dot';
-  var st = document.getElementById('ai-key-status');
-  if(st) st.innerHTML = '<span style="color:var(--green)">&#x2713; API Key aktif</span>';
-  toast('AI API Key disimpan &#x2713;','ok');
+  var dot=document.getElementById('ai-dot'); if(dot) dot.className='dot';
+  var st=document.getElementById('ai-key-status');
+  if(st) st.innerHTML='<span style="color:var(--green)">&#x2713; API Key aktif</span>';
+  toast('Groq API Key disimpan &#x2713;','ok');
 }
 
 function _aiTogglePanel() {
@@ -2098,239 +2272,262 @@ function _aiTogglePanel() {
 }
 
 function _aiRefreshCtx() {
-  var urgent = (STATE.projectionData||[]).filter(function(p){return p.category==='UNDER';}).length;
-  var po = (STATE.poData||[]).length;
-  var jadwal = (STATE.scheduleData||[]).filter(function(s){return s.status!=='confirmed';}).length;
-  var td = new Date();
-  var dd = String(td.getDate()).padStart(2,'0');
-  var mm = String(td.getMonth()+1).padStart(2,'0');
-  var grpoToday = (STATE.grpoData||[]).filter(function(g){
+  var urgent=(STATE.projectionData||[]).filter(function(p){return p.category==='UNDER';}).length;
+  var po=(STATE.poData||[]).length;
+  var jadwal=(STATE.scheduleData||[]).filter(function(s){return s.status!=='confirmed';}).length;
+  var td=new Date(), dd=String(td.getDate()).padStart(2,'0'), mm=String(td.getMonth()+1).padStart(2,'0');
+  var grpoToday=(STATE.grpoData||[]).filter(function(g){
     if(!g.grpoDate) return false;
-    var pts = g.grpoDate.split('/');
-    return pts[0]===dd && pts[1]===mm;
+    var p=g.grpoDate.split('/'); return p[0]===dd&&p[1]===mm;
   }).length;
-  var setEl = function(id,txt){ var e=document.getElementById(id); if(e) e.textContent=txt; };
-  setEl('ai-ctx-urgent', urgent+' item urgent');
-  setEl('ai-ctx-po', po+' PO open');
-  setEl('ai-ctx-jadwal', jadwal+' jadwal aktif');
-  setEl('ai-ctx-grpo', grpoToday+' GRPO hari ini');
+  var s=function(id,t){var e=document.getElementById(id);if(e)e.textContent=t;};
+  s('ai-ctx-urgent',urgent+' item urgent');
+  s('ai-ctx-po',po+' PO open');
+  s('ai-ctx-jadwal',jadwal+' jadwal aktif');
+  s('ai-ctx-grpo',grpoToday+' GRPO hari ini');
 }
 
 function _aiBuildCtx() {
-  var today = new Date().toLocaleDateString('id-ID',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
-  var proj = STATE.projectionData || [];
-  var dispFn = (typeof _dispName==='function') ? _dispName : function(p){return p.description||p.productCode;};
-  var fmtFn  = (typeof fmtDateID==='function')  ? fmtDateID  : function(d){return String(d);};
-
-  var urgent = proj.filter(function(p){return p.category==='UNDER';})
+  var today=new Date().toLocaleDateString('id-ID',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+  var proj=STATE.projectionData||[];
+  var dispFn=(typeof _dispName==='function')?_dispName:function(p){return p.description||p.productCode;};
+  var fmtFn=(typeof fmtDateID==='function')?fmtDateID:function(d){return String(d);};
+  var urgent=proj.filter(function(p){return p.category==='UNDER';})
     .sort(function(a,b){return (a.coverageDate||0)-(b.coverageDate||0);})
     .slice(0,25).map(function(p){
-      return {kode:p.productCode, nama:dispFn(p)||p.productCode,
-        tipe:p.itemType, doi:Math.round(p.doiFC||0),
-        coverage:p.coverageDate?fmtFn(p.coverageDate):'-',
-        stok:Math.round(((p.stockBTG||0)+(p.stockSNG||0))*10)/10,
-        supplier:p.supplier, site:p.site};
+      return {kode:p.productCode,nama:dispFn(p)||p.productCode,tipe:p.itemType,
+        doi:Math.round(p.doiFC||0),coverage:p.coverageDate?fmtFn(p.coverageDate):'-',
+        stok:Math.round(((p.stockBTG||0)+(p.stockSNG||0))*10)/10,supplier:p.supplier,site:p.site};
     });
-
-  var sched = (STATE.scheduleData||[]).slice(0,20).map(function(s){
+  var sched=(STATE.scheduleData||[]).slice(0,20).map(function(s){
     return {supplier:s.supName,tanggal:s.date,status:s.status,items:(s.items||'').substring(0,100)};
   });
-
-  var today_iso = new Date().toISOString().split('T')[0];
-  var overdue = (STATE.scheduleData||[]).filter(function(s){
+  var today_iso=new Date().toISOString().split('T')[0];
+  var overdue=(STATE.scheduleData||[]).filter(function(s){
     if(s.status!=='confirmed') return false;
     return (s.entries||[]).some(function(en){
       var k=en.pos&&en.pos[0]?en.pos[0].docNum+'_'+en.pos[0].itemCode:'';
       var ov=k?(STATE.poOverrides[k]||{}):{};
-      return ov.confDate && ov.confDate < today_iso;
+      return ov.confDate&&ov.confDate<today_iso;
     });
   }).map(function(s){return {supplier:s.supName,items:(s.items||'').substring(0,80)};});
-
-  var td2=new Date();
-  var dd2=String(td2.getDate()).padStart(2,'0');
-  var mm2=String(td2.getMonth()+1).padStart(2,'0');
-  var grpoToday = (STATE.grpoData||[]).filter(function(g){
+  var td2=new Date(),dd2=String(td2.getDate()).padStart(2,'0'),mm2=String(td2.getMonth()+1).padStart(2,'0');
+  var grpoToday=(STATE.grpoData||[]).filter(function(g){
     if(!g.grpoDate) return false;
-    var pts=g.grpoDate.split('/');
-    return pts[0]===dd2 && pts[1]===mm2;
-  }).slice(0,15).map(function(g){
-    return {item:g.itemName||g.itemCode, supplier:g.supplierName, qty:g.qty, uom:g.uom};
-  });
-
-  var hl = Object.keys(PROJ_HIGHLIGHTED||{}).filter(function(k){return PROJ_HIGHLIGHTED[k];})
-    .map(function(k){
-      var it=proj.find(function(p){return p.productCode===k;});
-      return it?{kode:k, nama:dispFn(it)||k, doi:Math.round(it.doiFC||0)}:{kode:k};
-    });
-
-  return {
-    tanggal: today,
-    ringkasan: {
-      totalItem: proj.length,
-      itemUrgent: urgent.length,
-      itemGood: proj.filter(function(p){return p.category==='GOOD';}).length,
-      itemOver: proj.filter(function(p){return p.category==='OVER';}).length,
-      poOpen: (STATE.poData||[]).length,
-      jadwalBelumConfirm: sched.filter(function(j){return j.status!=='confirmed';}).length,
-      overdueCount: overdue.length
-    },
-    itemKritis_top25: urgent,
-    jadwalPengiriman: sched,
-    overdueSupplier: overdue,
-    grpoHariIni: grpoToday,
-    highlightedIssues: hl
-  };
+    var p=g.grpoDate.split('/'); return p[0]===dd2&&p[1]===mm2;
+  }).slice(0,15).map(function(g){return {item:g.itemName||g.itemCode,supplier:g.supplierName,qty:g.qty,uom:g.uom};});
+  var hl=Object.keys(PROJ_HIGHLIGHTED||{}).filter(function(k){return PROJ_HIGHLIGHTED[k];})
+    .map(function(k){var it=proj.find(function(p){return p.productCode===k;});
+      return it?{kode:k,nama:dispFn(it)||k,doi:Math.round(it.doiFC||0)}:{kode:k};});
+  return {tanggal:today,
+    ringkasan:{totalItem:proj.length,itemUrgent:urgent.length,
+      itemGood:proj.filter(function(p){return p.category==='GOOD';}).length,
+      itemOver:proj.filter(function(p){return p.category==='OVER';}).length,
+      poOpen:(STATE.poData||[]).length,jadwalBelumConfirm:sched.filter(function(j){return j.status!=='confirmed';}).length,
+      overdueCount:overdue.length},
+    itemKritis_top25:urgent,jadwalPengiriman:sched,
+    overdueSupplier:overdue,grpoHariIni:grpoToday,highlightedIssues:hl};
 }
 
-function _aiMsgEl(role, text) {
-  var msgs = document.getElementById('ai-messages');
-  if(!msgs) return null;
-  var div = document.createElement('div');
-  div.className = 'ai-msg ' + role;
-  var bub = document.createElement('div');
-  bub.className = 'ai-bubble';
-  bub.innerHTML = _aiFmt(text);
-  div.appendChild(bub);
-  msgs.appendChild(div);
-  msgs.scrollTop = msgs.scrollHeight;
-  return bub;
+function _aiMsgEl(role,text){
+  var msgs=document.getElementById('ai-messages'); if(!msgs) return null;
+  var div=document.createElement('div'); div.className='ai-msg '+role;
+  var bub=document.createElement('div'); bub.className='ai-bubble';
+  bub.innerHTML=_aiFmt(text); div.appendChild(bub); msgs.appendChild(div);
+  msgs.scrollTop=msgs.scrollHeight; return bub;
 }
-
-function _aiFmt(t) {
-  return (t||'')
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-    .replace(/\*\*(.+?)\*\*/g,'<b>$1</b>')
-    .replace(/\*([^*]+?)\*/g,'<em>$1</em>')
+function _aiFmt(t){
+  return (t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/\*([^*]+?)\*/g,'<em>$1</em>')
     .replace(/`([^`]+)`/g,'<code style="background:var(--bg4);padding:1px 5px;border-radius:3px;font-family:var(--mono);font-size:11px">$1</code>')
     .replace(/\n/g,'<br>');
 }
-
-function _aiSetStream(bub, t) {
+function _aiSetStream(bub,t){
   if(!bub) return;
-  bub.innerHTML = _aiFmt(t) + '<span style="display:inline-block;width:2px;height:13px;background:var(--purple);margin-left:2px;vertical-align:middle;animation:ai-blink .7s infinite"></span>';
+  bub.innerHTML=_aiFmt(t)+'<span style="display:inline-block;width:2px;height:13px;background:var(--purple);margin-left:2px;vertical-align:middle;animation:ai-blink .7s infinite"></span>';
   var m=document.getElementById('ai-messages'); if(m) m.scrollTop=m.scrollHeight;
 }
-
-function _aiClearHistory() {
-  _aiHistory = [];
-  var m = document.getElementById('ai-messages');
-  if(m) m.innerHTML = '<div class="ai-msg assistant"><div class="ai-bubble">Riwayat dihapus. Ada yang bisa saya bantu? &#x1F44B;</div></div>';
+function _aiClearHistory(){
+  _aiHistory=[];
+  var m=document.getElementById('ai-messages');
+  if(m) m.innerHTML='<div class="ai-msg assistant"><div class="ai-bubble">Riwayat dihapus. &#x1F44B;</div></div>';
 }
-
-function _aiQuick(btn) {
-  var txt = btn.textContent.replace(/^.\s/, '').trim();
-  var inp = document.getElementById('ai-input');
-  if(inp){ inp.value=txt; inp.style.height='auto'; }
+function _aiQuick(btn){
+  var txt=btn.textContent.replace(/^.\s/,'').trim();
+  var inp=document.getElementById('ai-input');
+  if(inp){inp.value=txt;inp.style.height='auto';}
   _aiSend();
 }
 
 async function _aiSend() {
   if(_aiStreaming) return;
-  var inp = document.getElementById('ai-input');
-  if(!inp) return;
-  var msg = inp.value.trim();
-  if(!msg) return;
-  inp.value = ''; inp.style.height = 'auto';
+  var inp=document.getElementById('ai-input'); if(!inp) return;
+  var msg=inp.value.trim(); if(!msg) return;
+  inp.value=''; inp.style.height='auto';
 
-  if(!_aiKey) {
-    _aiMsgEl('system', '&#x26A0; API Key belum diisi.\nBuka Settings &#x2192; AI Asisten PPIC untuk menambahkan API Key Anthropic.');
+  if(!_aiKey){
+    _aiMsgEl('system','&#x26A0; API Key belum diisi.\nBuka Settings &#x2192; AI Asisten PPIC.');
     return;
   }
 
   _aiMsgEl('user', msg);
-  _aiHistory.push({role:'user', content:msg});
+  _aiHistory.push({role:'user',content:msg});
 
-  var msgs = document.getElementById('ai-messages');
-  var typDiv = document.createElement('div');
-  typDiv.id = 'ai-typ'; typDiv.className = 'ai-msg assistant';
-  typDiv.innerHTML = '<div class="ai-typing"><span></span><span></span><span></span></div>';
-  if(msgs){ msgs.appendChild(typDiv); msgs.scrollTop = msgs.scrollHeight; }
+  // Typing indicator
+  var msgs=document.getElementById('ai-messages');
+  var typDiv=document.createElement('div');
+  typDiv.id='ai-typ'; typDiv.className='ai-msg assistant';
+  typDiv.innerHTML='<div class="ai-typing"><span></span><span></span><span></span></div>';
+  if(msgs){msgs.appendChild(typDiv);msgs.scrollTop=msgs.scrollHeight;}
 
-  _aiStreaming = true;
-  var sb = document.getElementById('ai-send-btn'); if(sb) sb.disabled = true;
+  _aiStreaming=true;
+  var sb=document.getElementById('ai-send-btn'); if(sb) sb.disabled=true;
 
-  var ctx = _aiBuildCtx();
-  var sys = 'Kamu adalah asisten PPIC untuk Eka Jaya Internasional, perusahaan manufaktur dengan pabrik di Bitung (BTG) dan Sangiang (SNG).\n\nData kondisi aktual saat ini:\n'
-    + JSON.stringify(ctx, null, 2)
-    + '\n\nTerminologi:\n- DOI: Days of Inventory (berapa hari stok bertahan)\n- Coverage: perkiraan tanggal stok habis\n- UNDER <14 hari | GOOD 14-30 hari | OVER >30 hari\n- RM: Raw Material | PM: Packaging Material | FG: Finished Goods\n- GRPO: barang masuk gudang | PO: Purchase Order | MRP: Material Requirement Planning\n\nGunakan bahasa Indonesia profesional. Jawaban spesifik dan actionable. Jika ada daftar item, sebutkan nama dan kode materialnya. Jika data kosong belum sync, sampaikan itu.';
+  var ctx=_aiBuildCtx();
+  var sys='Kamu adalah asisten PPIC Eka Jaya Internasional (pabrik Bitung/BTG dan Sangiang/SNG).\n\nData aktual:\n'
+    +JSON.stringify(ctx,null,2)
+    +'\n\nTerminologi: DOI=hari stok bertahan, Coverage=tgl stok habis, UNDER<14hr, GOOD 14-30hr, OVER>30hr, RM=Raw Material, PM=Packaging, FG=Finished Goods, GRPO=barang masuk gudang, PO=Purchase Order.\n\n'
+    +'Jika diminta melakukan aksi (tandai item, tambah comment, jadwalkan PO), gunakan tools yang tersedia. Cari item dulu dengan search_item jika kode belum diketahui. Konfirmasi dengan menyebut nama + kode item sebelum eksekusi. Bahasa Indonesia profesional.';
 
-  var fullText = ''; var bub = null;
+  var isCmd=_aiIsCommand(msg);
+  var allMsgs=[{role:'system',content:sys}].concat(_aiHistory.slice(-10));
+
   try {
-    var resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + _aiKey
-      },
-      body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
-        max_tokens: 1024,
-        messages: [{role:'system',content:sys}].concat(_aiHistory.slice(-10)),
-        stream: true
-      })
-    });
+    var resp = await _aiGroqCall(allMsgs, isCmd);
+    var td2=document.getElementById('ai-typ'); if(td2) td2.remove();
 
-    var td2 = document.getElementById('ai-typ'); if(td2) td2.remove();
+    if(!resp.ok){
+      var ed={}; try{ed=await resp.json();}catch(e){}
+      var em=(ed.error&&ed.error.message)||('HTTP '+resp.status);
+      if(resp.status===401) em='Groq API Key tidak valid. Cek di Settings \u2192 AI Asisten PPIC.';
+      if(resp.status===429) em='Rate limit Groq. Tunggu sebentar lalu coba lagi.';
+      _aiMsgEl('system','&#x274C; '+em);
+      _aiHistory.pop(); _aiStreaming=false;
+      var sb2=document.getElementById('ai-send-btn'); if(sb2) sb2.disabled=false; return;
+    }
 
-    if(!resp.ok) {
-      var ed = {}; try{ ed = await resp.json(); }catch(e){}
-      var em = (ed.error && ed.error.message) || ('HTTP ' + resp.status);
-      if(resp.status===401) em = 'Groq API Key tidak valid. Cek di Settings → AI Asisten PPIC.';
-      if(resp.status===429) em = 'Terlalu banyak request. Tunggu beberapa detik.';
-      _aiMsgEl('system', '&#x274C; ' + em);
-      _aiHistory.pop();
-    } else {
-      var d2 = document.createElement('div');
-      d2.className = 'ai-msg assistant';
-      bub = document.createElement('div');
-      bub.className = 'ai-bubble';
-      d2.appendChild(bub);
-      if(msgs){ msgs.appendChild(d2); msgs.scrollTop = msgs.scrollHeight; }
+    // ── TOOL CALL mode (non-streaming) ──────────────────────────────────────
+    if(isCmd) {
+      var data=await resp.json();
+      var choice=data.choices&&data.choices[0];
+      if(!choice){_aiMsgEl('system','Tidak ada respons dari AI.');_aiHistory.pop();_aiStreaming=false;var sb3=document.getElementById('ai-send-btn');if(sb3)sb3.disabled=false;return;}
 
-      var reader = resp.body.getReader();
-      var dec = new TextDecoder();
-      while(true) {
-        var res = await reader.read(); if(res.done) break;
-        var lines = dec.decode(res.value).split('\n');
-        for(var i=0; i<lines.length; i++) {
-          var ln = lines[i];
-          if(!ln.startsWith('data: ')) continue;
-          var dat = ln.slice(6).trim();
-          if(dat==='[DONE]') break;
-          try {
-            var parsed = JSON.parse(dat);
-            var delta = parsed.choices && parsed.choices[0] && parsed.choices[0].delta;
-            if(delta && delta.content) {
-              fullText += delta.content;
-              _aiSetStream(bub, fullText);
+      // Jika ada tool calls → tampilkan konfirmasi
+      if(choice.finish_reason==='tool_calls' && choice.message && choice.message.tool_calls) {
+        var toolCalls=choice.message.tool_calls;
+        var confirmed=await _aiShowConfirm(toolCalls);
+
+        if(!confirmed){
+          _aiMsgEl('system','&#x2713; Dibatalkan.');
+          _aiHistory.pop(); _aiStreaming=false;
+          var sb4=document.getElementById('ai-send-btn'); if(sb4) sb4.disabled=false; return;
+        }
+
+        // Eksekusi semua tools
+        var toolResults=[];
+        toolCalls.forEach(function(tc){
+          var args={}; try{args=JSON.parse(tc.function.arguments);}catch(e){}
+          var result=_aiExecTool(tc.function.name,args);
+          toolResults.push({role:'tool',tool_call_id:tc.id,content:result});
+        });
+
+        // Append ke history: assistant msg (tool_calls) + tool results
+        _aiHistory.push(choice.message);
+        toolResults.forEach(function(tr){_aiHistory.push(tr);});
+
+        // Streaming call untuk summary
+        var td3=document.createElement('div');
+        td3.id='ai-typ2'; td3.className='ai-msg assistant';
+        td3.innerHTML='<div class="ai-typing"><span></span><span></span><span></span></div>';
+        if(msgs){msgs.appendChild(td3);msgs.scrollTop=msgs.scrollHeight;}
+
+        var resp2=await _aiGroqCall([{role:'system',content:sys}].concat(_aiHistory.slice(-14)), false);
+        var td4=document.getElementById('ai-typ2'); if(td4) td4.remove();
+
+        if(resp2.ok){
+          var d2=document.createElement('div'); d2.className='ai-msg assistant';
+          var bub=document.createElement('div'); bub.className='ai-bubble';
+          d2.appendChild(bub); if(msgs){msgs.appendChild(d2);msgs.scrollTop=msgs.scrollHeight;}
+          var reader=resp2.body.getReader(); var dec=new TextDecoder(); var fullText='';
+          while(true){
+            var res=await reader.read(); if(res.done) break;
+            var lines=dec.decode(res.value).split('\n');
+            for(var i=0;i<lines.length;i++){
+              var ln=lines[i]; if(!ln.startsWith('data: ')) continue;
+              var dat=ln.slice(6).trim(); if(dat==='[DONE]') break;
+              try{
+                var p2=JSON.parse(dat);
+                var dlt=p2.choices&&p2.choices[0]&&p2.choices[0].delta;
+                if(dlt&&dlt.content){fullText+=dlt.content;_aiSetStream(bub,fullText);}
+              }catch(e){}
             }
-          } catch(e){}
+          }
+          if(bub) bub.innerHTML=_aiFmt(fullText);
+          _aiHistory.push({role:'assistant',content:fullText});
+        }
+
+      } else {
+        // Tool mode tapi AI balas teks biasa
+        var txt=choice.message&&choice.message.content||'';
+        _aiHistory.push({role:'assistant',content:txt});
+        _aiMsgEl('assistant',txt);
+      }
+
+    // ── STREAMING mode (pertanyaan biasa) ───────────────────────────────────
+    } else {
+      var d3=document.createElement('div'); d3.className='ai-msg assistant';
+      var bub2=document.createElement('div'); bub2.className='ai-bubble';
+      d3.appendChild(bub2); if(msgs){msgs.appendChild(d3);msgs.scrollTop=msgs.scrollHeight;}
+      var reader2=resp.body.getReader(); var dec2=new TextDecoder(); var fullText2='';
+      while(true){
+        var res2=await reader2.read(); if(res2.done) break;
+        var lines2=dec2.decode(res2.value).split('\n');
+        for(var j=0;j<lines2.length;j++){
+          var ln2=lines2[j]; if(!ln2.startsWith('data: ')) continue;
+          var dat2=ln2.slice(6).trim(); if(dat2==='[DONE]') break;
+          try{
+            var p3=JSON.parse(dat2);
+            var dlt2=p3.choices&&p3.choices[0]&&p3.choices[0].delta;
+            if(dlt2&&dlt2.content){fullText2+=dlt2.content;_aiSetStream(bub2,fullText2);}
+          }catch(e){}
         }
       }
-      if(bub) bub.innerHTML = _aiFmt(fullText);
-      _aiHistory.push({role:'assistant', content:fullText});
+      if(bub2) bub2.innerHTML=_aiFmt(fullText2);
+      _aiHistory.push({role:'assistant',content:fullText2});
     }
+
   } catch(e) {
-    var td3 = document.getElementById('ai-typ'); if(td3) td3.remove();
-    _aiMsgEl('system', '&#x274C; Gagal terhubung: ' + e.message);
+    var td5=document.getElementById('ai-typ'); if(td5) td5.remove();
+    var td6=document.getElementById('ai-typ2'); if(td6) td6.remove();
+    _aiMsgEl('system','&#x274C; Gagal: '+e.message);
     _aiHistory.pop();
   }
 
-  _aiStreaming = false;
-  var sb2 = document.getElementById('ai-send-btn'); if(sb2) sb2.disabled = false;
-  var inp2 = document.getElementById('ai-input'); if(inp2) inp2.focus();
+  _aiStreaming=false;
+  var sb5=document.getElementById('ai-send-btn'); if(sb5) sb5.disabled=false;
+  var inp2=document.getElementById('ai-input'); if(inp2) inp2.focus();
 }
 
 // Restore key on load
 (function(){
-  var k = localStorage.getItem('ai_api_key');
-  if(k) {
-    _aiKey = k;
-    var dot = document.getElementById('ai-dot'); if(dot) dot.className = 'dot';
-    var si = document.getElementById('cfg-ai-key'); if(si) si.value = k;
-    var st = document.getElementById('ai-key-status');
-    if(st) st.innerHTML = '<span style="color:var(--green)">&#x2713; API Key aktif</span>';
+  var k=localStorage.getItem('ai_api_key');
+  if(k){
+    _aiKey=k;
+    var dot=document.getElementById('ai-dot'); if(dot) dot.className='dot';
+    var si=document.getElementById('cfg-ai-key'); if(si) si.value=k;
+    var st=document.getElementById('ai-key-status');
+    if(st) st.innerHTML='<span style="color:var(--green)">&#x2713; API Key aktif</span>';
   }
+  // Keyboard handler untuk textarea
+  document.addEventListener('DOMContentLoaded', function(){
+    var inp=document.getElementById('ai-input');
+    if(inp){
+      inp.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();_aiSend();}});
+      inp.addEventListener('input',function(){this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px';});
+    }
+  });
+})();
+
 })();
 </script>
 
