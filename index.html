@@ -383,6 +383,7 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
     </div>
   </div>
   <div class="ni" data-label="Settings" onclick="showPage('settings',this)"><span class="ni-ico">⚙</span><span class="nav-label">Settings </span><span id="lock-settings" style="font-size:10px">🔒</span></div>
+  <div class="ni" data-label="How to Use" onclick="showPage('howto',this)"><span class="ni-ico">📖</span><span class="nav-label">How to Use</span></div>
   <div class="ni" data-label="<span id="login-label">Login</" id="nav-login" onclick="_isAdmin?doLogout():showLoginModal()" style="border-top:0.5px solid var(--border);margin-top:4px">
     <span class="ni-ico" id="login-ico">🔒</span><span id="login-label">Login</span>
   </div>
@@ -1316,6 +1317,457 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
     </div>
   </div>
 </div>
+
+<!-- HOW TO USE -->
+<div class="page" id="pg-howto">
+<style>
+.htu-wrap{display:grid;grid-template-columns:220px 1fr;gap:0;min-height:calc(100vh - 48px)}
+.htu-toc{position:sticky;top:0;height:calc(100vh - 48px);overflow-y:auto;background:var(--bg3);border-right:1px solid var(--border);padding:16px 0 40px}
+.htu-toc-hdr{padding:0 16px 12px;border-bottom:1px solid var(--border);margin-bottom:8px}
+.htu-toc-hdr h3{font-size:12px;font-weight:700;color:var(--text)}
+.htu-toc-hdr p{font-size:10.5px;color:var(--muted);margin-top:2px}
+.htu-toc-sec{font-size:9px;text-transform:uppercase;letter-spacing:.7px;color:var(--muted);padding:8px 16px 3px;font-weight:600}
+.htu-toc a{display:block;padding:5px 16px;font-size:11.5px;color:var(--muted);text-decoration:none;border-left:2px solid transparent;transition:.1s}
+.htu-toc a:hover{color:var(--text);background:var(--bg4)}
+.htu-toc a.htu-active{color:var(--accent);border-left-color:var(--accent);background:var(--accent-bg);font-weight:600}
+.htu-body{padding:28px 36px 80px;overflow-y:auto;max-width:860px}
+.htu-hero{background:var(--navy);border-radius:12px;padding:24px 28px;margin-bottom:28px;color:#fff}
+.htu-hero h2{font-size:18px;font-weight:700;letter-spacing:-.3px;margin-bottom:6px}
+.htu-hero p{font-size:12px;color:rgba(255,255,255,.6);max-width:520px}
+.htu-sec{margin-bottom:36px;scroll-margin-top:24px}
+.htu-sec-title{font-size:14px;font-weight:700;color:var(--text);letter-spacing:-.2px;margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid var(--border);display:flex;align-items:center;gap:7px}
+.htu-sec h4{font-size:12.5px;font-weight:700;color:var(--text);margin:16px 0 6px}
+.htu-sec p{font-size:12.5px;color:var(--muted);margin-bottom:8px}
+.htu-sec p strong{color:var(--text)}
+.htu-table{width:100%;border-collapse:collapse;margin:8px 0;font-size:12px}
+.htu-table th{background:var(--navy);color:#fff;padding:7px 11px;text-align:left;font-size:11px;font-weight:600}
+.htu-table td{padding:7px 11px;border-bottom:1px solid var(--border);color:var(--muted);vertical-align:top}
+.htu-table tr:hover td{background:var(--bg3)}
+.htu-steps{display:flex;flex-direction:column;margin:10px 0}
+.htu-step{display:flex;gap:12px;padding:10px 0 10px 20px;border-left:2px solid var(--border);position:relative}
+.htu-step::before{content:attr(data-n);position:absolute;left:-10px;top:11px;width:18px;height:18px;background:var(--accent);color:#fff;font-size:9px;font-weight:700;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--mono)}
+.htu-step-title{font-size:12px;font-weight:700;color:var(--text);margin-bottom:2px}
+.htu-step-desc{font-size:11.5px;color:var(--muted)}
+.htu-wf{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin:10px 0}
+.htu-wf-step{background:var(--bg2);border:1.5px solid var(--border);border-radius:6px;padding:5px 12px;font-size:11.5px;font-weight:600;color:var(--text)}
+.htu-wf-step.hi{border-color:var(--accent);color:var(--accent);background:var(--accent-bg)}
+.htu-wf-arr{color:var(--muted);font-size:13px}
+.htu-alert{display:flex;gap:9px;padding:10px 13px;border-radius:7px;margin:10px 0;font-size:12px}
+.htu-alert-info{background:var(--accent-bg);border:1px solid rgba(37,99,235,.2);color:var(--accent)}
+.htu-alert-warn{background:var(--amber-bg);border:1px solid rgba(217,119,6,.25);color:var(--amber)}
+.htu-alert-ok{background:var(--green-bg);border:1px solid rgba(5,150,105,.2);color:var(--green)}
+.htu-alert-danger{background:var(--red-bg);border:1px solid rgba(220,38,38,.2);color:var(--red)}
+.htu-badge{display:inline-flex;align-items:center;font-size:10px;font-weight:700;padding:1px 7px;border-radius:99px;white-space:nowrap}
+.htu-badge-red{background:var(--red-bg);color:var(--red);border:1px solid rgba(220,38,38,.2)}
+.htu-badge-amber{background:var(--amber-bg);color:var(--amber);border:1px solid rgba(217,119,6,.2)}
+.htu-badge-blue{background:var(--accent-bg);color:var(--accent);border:1px solid rgba(37,99,235,.2)}
+.htu-badge-green{background:var(--green-bg);color:var(--green);border:1px solid rgba(5,150,105,.2)}
+.htu-badge-teal{background:var(--teal-bg);color:var(--teal);border:1px solid rgba(8,145,178,.2)}
+.htu-badge-purple{background:var(--purple-bg);color:var(--purple);border:1px solid rgba(124,58,237,.2)}
+.htu-badge-dev{background:var(--amber-bg);color:var(--amber);border:1px solid rgba(217,119,6,.2);font-size:9px}
+.htu-grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0}
+.htu-item{background:var(--bg2);border:1px solid var(--border);border-radius:7px;padding:10px 12px}
+.htu-item-ico{font-size:16px;margin-bottom:4px}
+.htu-item-name{font-size:12px;font-weight:700;color:var(--text)}
+.htu-item-desc{font-size:11px;color:var(--muted);margin-top:2px}
+@media(max-width:700px){.htu-wrap{grid-template-columns:1fr}.htu-toc{display:none}.htu-grid2{grid-template-columns:1fr}}
+</style>
+<div class="htu-wrap">
+
+  <!-- TOC -->
+  <nav class="htu-toc">
+    <div class="htu-toc-hdr">
+      <h3>📖 How to Use</h3>
+      <p>Material Planner v20</p>
+    </div>
+    <div class="htu-toc-sec">Mulai</div>
+    <a href="#htu-overview" class="htu-toc-link">Gambaran Umum</a>
+    <a href="#htu-setup" class="htu-toc-link">Setup Awal</a>
+    <a href="#htu-nav" class="htu-toc-link">Struktur Menu</a>
+    <a href="#htu-workflow" class="htu-toc-link">Workflow Harian</a>
+    <div class="htu-toc-sec">Modul Planning</div>
+    <a href="#htu-dashboard" class="htu-toc-link">Dashboard</a>
+    <a href="#htu-projection" class="htu-toc-link">Projection Stock</a>
+    <a href="#htu-forecast" class="htu-toc-link">Forecast & Propose PR</a>
+    <a href="#htu-mps" class="htu-toc-link">MPS → MRP</a>
+    <a href="#htu-pallet" class="htu-toc-link">Pallet Position</a>
+    <div class="htu-toc-sec">Modul Delivery</div>
+    <a href="#htu-po" class="htu-toc-link">List Pengiriman (PO)</a>
+    <a href="#htu-jadwal" class="htu-toc-link">Jadwal Pengiriman</a>
+    <a href="#htu-daily" class="htu-toc-link">List Kiriman Daily</a>
+    <div class="htu-toc-sec">Data</div>
+    <a href="#htu-grpo" class="htu-toc-link">GRPO</a>
+    <a href="#htu-ospr" class="htu-toc-link">OSPR</a>
+    <a href="#htu-stock" class="htu-toc-link">Stock Daily</a>
+    <a href="#htu-sheets" class="htu-toc-link">Data Source (Sheets)</a>
+    <div class="htu-toc-sec">Konfigurasi</div>
+    <a href="#htu-settings" class="htu-toc-link">Settings</a>
+    <a href="#htu-firebase" class="htu-toc-link">Firebase & Cloud Sync</a>
+    <a href="#htu-login" class="htu-toc-link">Login Admin</a>
+    <a href="#htu-tips" class="htu-toc-link">Tips & Troubleshooting</a>
+  </nav>
+
+  <!-- Body -->
+  <div class="htu-body" id="htu-scroll-body">
+
+    <!-- Hero -->
+    <div class="htu-hero">
+      <div style="font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:rgba(255,255,255,.4);margin-bottom:10px">Dokumentasi Internal · Eka Jaya Internasional</div>
+      <h2>Material Planner Dashboard</h2>
+      <p>Panduan penggunaan lengkap untuk tim PPIC — menggabungkan data SAP, Google Sheets, dan cloud sync dalam satu tampilan terpadu.</p>
+    </div>
+
+    <!-- OVERVIEW -->
+    <div class="htu-sec" id="htu-overview">
+      <div class="htu-sec-title">◈ Gambaran Umum</div>
+      <p>Dashboard ini menggantikan proses manual yang sebelumnya tersebar di SAP, spreadsheet, dan WhatsApp. Semua modul perencanaan dan pengiriman material ada dalam satu file HTML yang berjalan di browser — tidak perlu install apapun.</p>
+      <div class="card" style="margin-bottom:10px">
+        <div class="card-hdr"><span class="card-title">🔗 Sumber Data Utama</span></div>
+        <div style="padding:12px">
+          <table class="htu-table">
+            <tr><th>Sumber</th><th>Data</th><th>Mode</th></tr>
+            <tr><td><strong>SAP B1 v9.3 HANA</strong></td><td>Stock, PO Open, GRPO, OSPR, Item Master</td><td><span class="htu-badge htu-badge-teal">Read-only</span></td></tr>
+            <tr><td><strong>Google Sheets</strong></td><td>Master Data, MRP Bulanan, Real Name, Pallet PM/RM, Matcom</td><td><span class="htu-badge htu-badge-blue">Pull CSV</span></td></tr>
+            <tr><td><strong>Firebase Firestore</strong></td><td>Schedule, Konfirmasi, PO Overrides, Settings, Cache SAP</td><td><span class="htu-badge htu-badge-green">Cloud Sync</span></td></tr>
+          </table>
+        </div>
+      </div>
+      <div class="htu-grid2">
+        <div class="htu-item"><div class="htu-item-ico">📦</div><div class="htu-item-name">Projection Stock</div><div class="htu-item-desc">Status coverage per item (UNDER / GOOD / OVER)</div></div>
+        <div class="htu-item"><div class="htu-item-ico">🔮</div><div class="htu-item-name">Forecast & Propose PR</div><div class="htu-item-desc">Hitung kebutuhan & usulkan Purchase Request</div></div>
+        <div class="htu-item"><div class="htu-item-ico">⚙</div><div class="htu-item-name">MPS → MRP</div><div class="htu-item-desc">Generate MRP dari MPS & BOM otomatis</div></div>
+        <div class="htu-item"><div class="htu-item-ico">🏗</div><div class="htu-item-name">Pallet Position</div><div class="htu-item-desc">Proyeksi posisi pallet per bulan di gudang</div></div>
+        <div class="htu-item"><div class="htu-item-ico">🚛</div><div class="htu-item-name">Jadwal Pengiriman</div><div class="htu-item-desc">Review, approve, blast ke supplier via WA</div></div>
+        <div class="htu-item"><div class="htu-item-ico">📋</div><div class="htu-item-name">List Pengiriman (PO)</div><div class="htu-item-desc">PO aktif + Generate Update Delivery Date</div></div>
+      </div>
+    </div>
+
+    <!-- SETUP AWAL -->
+    <div class="htu-sec" id="htu-setup">
+      <div class="htu-sec-title">🚀 Setup Awal (Pertama Kali)</div>
+      <p>Lakukan sekali di satu perangkat. Setelah terhubung ke Firebase, semua pengaturan sinkron otomatis ke perangkat lain.</p>
+      <div class="htu-steps">
+        <div class="htu-step" data-n="1"><div><div class="htu-step-title">Settings → Konfigurasi SAP API</div><div class="htu-step-desc">Isi Base URL, Username, Password SAP. Klik <strong>Test Koneksi</strong> — dot hijau berarti berhasil.</div></div></div>
+        <div class="htu-step" data-n="2"><div><div class="htu-step-title">Settings → Sambungkan Firebase</div><div class="htu-step-desc">Isi API Key, Project ID, App ID Firebase lalu klik <strong>Simpan & Hubungkan</strong>. Gunakan panduan Firebase jika belum punya project.</div></div></div>
+        <div class="htu-step" data-n="3"><div><div class="htu-step-title">Settings → Isi Token Fonnte (opsional)</div><div class="htu-step-desc">Diperlukan untuk blast WA ke supplier. Ambil token dari fonnte.com.</div></div></div>
+        <div class="htu-step" data-n="4"><div><div class="htu-step-title">Data Source (Sheets) → Daftarkan URL Google Sheets</div><div class="htu-step-desc">Input URL untuk: Master Data, MRP, Real Name, Pallet PM, Pallet RM. Klik <strong>↺ Muat Semua</strong>. Sheets harus di-share <em>"Anyone with the link can view"</em>.</div></div></div>
+        <div class="htu-step" data-n="5"><div><div class="htu-step-title">Dashboard → Klik "↺ Sync Semua"</div><div class="htu-step-desc">Menarik data Stock, PO, GRPO, OSPR dari SAP. Lanjut klik <strong>⚡ Build</strong> untuk generate Projection Stock.</div></div></div>
+        <div class="htu-step" data-n="6"><div><div class="htu-step-title">Settings → Tambah Supplier</div><div class="htu-step-desc">Nama supplier harus sama persis dengan SAP. Tambahkan nomor / grup WA untuk keperluan blast jadwal.</div></div></div>
+      </div>
+      <div class="htu-alert htu-alert-warn">⚠ URL Sheets dan semua konfigurasi <strong>tersimpan di Firebase</strong> — perangkat lain yang terhubung Firebase yang sama tidak perlu input ulang.</div>
+    </div>
+
+    <!-- NAVIGASI -->
+    <div class="htu-sec" id="htu-nav">
+      <div class="htu-sec-title">🗂 Struktur Menu</div>
+      <p>Sidebar kiri bisa di-collapse jadi ikon saja (klik tombol ❮ di atas sidebar). Hover ikon untuk melihat label saat collapsed.</p>
+      <table class="htu-table">
+        <tr><th>Grup</th><th>Menu</th><th>Fungsi</th></tr>
+        <tr><td rowspan="5" style="color:var(--accent);font-weight:600">Planning</td><td>◈ Dashboard</td><td>KPI, item kritis, GRPO hari ini, jadwal minggu ini</td></tr>
+        <tr><td>📦 Projection Stock</td><td>Tabel utama status stok semua item</td></tr>
+        <tr><td>🔮 Forecast & Propose PR</td><td>Kalkulasi kebutuhan & generate PR tiap bulan</td></tr>
+        <tr><td>⚙ MPS → MRP</td><td>Upload MPS+BOM, hitung & terapkan MRP</td></tr>
+        <tr><td>🏗 Pallet Position</td><td>Posisi pallet per bulan (proyeksi / hari ini)</td></tr>
+        <tr><td rowspan="4" style="color:var(--teal);font-weight:600">Delivery</td><td>📋 List Pengiriman (PO)</td><td>PO open SAP, edit tanggal request, generate UDD</td></tr>
+        <tr><td>🚛 Jadwal Pengiriman</td><td>Kartu jadwal per supplier, approve & blast WA</td></tr>
+        <tr><td>📬 List Kiriman Daily</td><td>Daftar pengiriman berdasarkan rentang tanggal</td></tr>
+        <tr><td>📊 Performance</td><td>Analisis ketepatan supplier <span class="htu-badge htu-badge-dev">On Develop</span></td></tr>
+        <tr><td rowspan="4" style="color:var(--green);font-weight:600">Data</td><td>✅ GRPO</td><td>Goods Receipt bulan berjalan & history</td></tr>
+        <tr><td>📝 OSPR</td><td>Purchase Request outstanding dari SAP</td></tr>
+        <tr><td>📅 Stock Daily</td><td>Histori stock freeze tiap pagi</td></tr>
+        <tr><td>☁ Data Source (Sheets)</td><td>Kelola URL Google Sheets <span class="htu-badge htu-badge-red">🔒 Admin</span></td></tr>
+        <tr><td style="color:var(--purple);font-weight:600">Sistem</td><td>⚙ Settings</td><td>SAP, Firebase, Fonnte, parameter sistem <span class="htu-badge htu-badge-red">🔒 Admin</span></td></tr>
+      </table>
+    </div>
+
+    <!-- WORKFLOW HARIAN -->
+    <div class="htu-sec" id="htu-workflow">
+      <div class="htu-sec-title">🔄 Workflow Harian</div>
+      <h4>Rutinitas Pagi (Setiap Hari Kerja)</h4>
+      <div class="htu-wf">
+        <div class="htu-wf-step hi">↺ Sync Semua</div><div class="htu-wf-arr">→</div>
+        <div class="htu-wf-step hi">↺ Sync Matcom</div><div class="htu-wf-arr">→</div>
+        <div class="htu-wf-step">Cek Dashboard</div><div class="htu-wf-arr">→</div>
+        <div class="htu-wf-step">Cek Item Kritis</div>
+      </div>
+      <h4>Saat File MPS / BOM Diperbarui</h4>
+      <div class="htu-wf">
+        <div class="htu-wf-step">Upload MPS</div><div class="htu-wf-arr">→</div>
+        <div class="htu-wf-step">Upload BOM</div><div class="htu-wf-arr">→</div>
+        <div class="htu-wf-step hi">⚡ Hitung MRP</div><div class="htu-wf-arr">→</div>
+        <div class="htu-wf-step hi">✓ Terapkan MRP</div><div class="htu-wf-arr">→</div>
+        <div class="htu-wf-step">⚡ Build Projection</div>
+      </div>
+      <h4>Generate Jadwal Pengiriman</h4>
+      <div class="htu-wf">
+        <div class="htu-wf-step">Projection Stock</div><div class="htu-wf-arr">→</div>
+        <div class="htu-wf-step hi">⚡ Generate Jadwal</div><div class="htu-wf-arr">→</div>
+        <div class="htu-wf-step">Review Jadwal</div><div class="htu-wf-arr">→</div>
+        <div class="htu-wf-step">✓ Approve</div><div class="htu-wf-arr">→</div>
+        <div class="htu-wf-step">📲 Blast WA</div>
+      </div>
+      <div class="htu-alert htu-alert-info">ℹ Urutan wajib: <strong>Sync Semua → Sync Matcom</strong>. Jika MPS/BOM berubah, tambah: <strong>Hitung MRP → Terapkan MRP</strong> sebelum Build Projection.</div>
+    </div>
+
+    <!-- DASHBOARD -->
+    <div class="htu-sec" id="htu-dashboard">
+      <div class="htu-sec-title">◈ Dashboard</div>
+      <p>Halaman utama. Menampilkan ringkasan kondisi planning secara real-time.</p>
+      <table class="htu-table">
+        <tr><th>Elemen</th><th>Penjelasan</th></tr>
+        <tr><td><span class="htu-badge htu-badge-red">Item Urgent</span></td><td>Item dengan coverage ≤ W+N hari (default 14). Perlu tindakan segera.</td></tr>
+        <tr><td><span class="htu-badge htu-badge-blue">PO Open</span></td><td>PO yang masih menunggu pengiriman dari SAP.</td></tr>
+        <tr><td><span class="htu-badge htu-badge-purple">Belum Confirm</span></td><td>Jadwal sudah di-blast tapi belum dikonfirmasi supplier.</td></tr>
+        <tr><td>📌 Highlighted Issues</td><td>Item yang di-pin dari tabel Projection Stock (centang checkbox di kolom kiri).</td></tr>
+        <tr><td>📦 GRPO Hari Ini</td><td>GRPO masuk hari ini — auto-refresh tiap 10 menit. Klik ↺ untuk refresh manual.</td></tr>
+        <tr><td>↺ Sync Semua</td><td>Tarik Stock, PO, GRPO, OSPR dari SAP sekaligus. Ada progress bar per sumber.</td></tr>
+        <tr><td>⚡ Build</td><td>Jalankan ulang kalkulasi Projection Stock dari data SAP + MRP yang ada.</td></tr>
+      </table>
+    </div>
+
+    <!-- PROJECTION STOCK -->
+    <div class="htu-sec" id="htu-projection">
+      <div class="htu-sec-title">📦 Projection Stock</div>
+      <p>Tabel utama PPIC. Status coverage, DOI, MRP, dan stok per bulan untuk semua item.</p>
+      <table class="htu-table">
+        <tr><th>Status</th><th>Coverage</th><th>Arti</th></tr>
+        <tr><td><span class="htu-badge htu-badge-red">UNDER</span></td><td>&lt; 14 hari</td><td>Kritis — perlu PR / percepatan pengiriman</td></tr>
+        <tr><td><span class="htu-badge htu-badge-green">GOOD</span></td><td>14–30 hari</td><td>Normal</td></tr>
+        <tr><td><span class="htu-badge htu-badge-blue">OVER</span></td><td>&gt; 30 hari</td><td>Stok berlebih</td></tr>
+      </table>
+      <h4>Kolom-Kolom Penting</h4>
+      <table class="htu-table">
+        <tr><th>Kolom</th><th>Penjelasan</th></tr>
+        <tr><td>DOI Max / DOI Real</td><td>Days of Inventory — Max dari forecast MRP, Real dari actual consumption (Matcom)</td></tr>
+        <tr><td>MRP Max (max3MRP)</td><td>Nilai tertinggi MRP 3 bulan terakhir — baseline sizing</td></tr>
+        <tr><td>Est. Coverage</td><td>Estimasi stok habis dalam berapa hari ke depan</td></tr>
+        <tr><td>End Stock vs MRP</td><td>Sisa stok akhir bulan dibanding kebutuhan MRP</td></tr>
+        <tr><td>OSPO Months</td><td>PO open per bulan — bisa di-edit manual untuk override</td></tr>
+        <tr><td>Comment</td><td>Catatan manual per item — tersinkron ke semua perangkat via Firebase</td></tr>
+      </table>
+      <h4>Tombol Penting</h4>
+      <p><strong>⚙ Kolom</strong> — sembunyikan/tampilkan kolom yang tidak dibutuhkan.<br>
+      <strong>⚡ Generate Jadwal</strong> — buat jadwal pengiriman dari PO yang belum terjadwal. Pilih tipe (RM/PM/FG) dari dropdown ▾.<br>
+      <strong>📅 History View</strong> — pilih tanggal di kanan atas untuk melihat kondisi stok masa lalu.</p>
+    </div>
+
+    <!-- FORECAST -->
+    <div class="htu-sec" id="htu-forecast">
+      <div class="htu-sec-title">🔮 Forecast & Propose PR</div>
+      <p>Menghitung kebutuhan pembelian per item per bulan berdasarkan MRP, stok, dan target DOI.</p>
+      <h4>DOI Target</h4>
+      <p>Dua target di strip atas: <strong>General</strong> (default 30 hari, untuk domestik) dan <strong>Impor</strong> (default 60 hari). Klik ⚙ di sebelah angka Impor untuk memilih supplier mana yang dikategorikan impor. Ubah nilai → langsung recalculate otomatis.</p>
+      <h4>Alur Penggunaan</h4>
+      <div class="htu-steps">
+        <div class="htu-step" data-n="1"><div><div class="htu-step-title">↺ Sync Matcom</div><div class="htu-step-desc">Tarik actual consumption dari SAP sebagai basis DOI Real.</div></div></div>
+        <div class="htu-step" data-n="2"><div><div class="htu-step-title">Review tabel & edit OSPO/OSPR jika perlu</div><div class="htu-step-desc">Item dengan DOI &lt; target tampil merah. Edit nilai OSPO/OSPR manual jika data SAP tidak akurat.</div></div></div>
+        <div class="htu-step" data-n="3"><div><div class="htu-step-title">⚡ Generate Propose PR</div><div class="htu-step-desc">Sistem menghitung kebutuhan PR per bulan — gap antara stok+PO vs target DOI.</div></div></div>
+        <div class="htu-step" data-n="4"><div><div class="htu-step-title">Edit manual & Export</div><div class="htu-step-desc">Klik nilai Propose PR untuk edit manual. Nilai 0 tetap dihormati. Export ke Excel / GSheets via tombol ↓ Export.</div></div></div>
+      </div>
+    </div>
+
+    <!-- MPS MRP -->
+    <div class="htu-sec" id="htu-mps">
+      <div class="htu-sec-title">⚙ MPS → MRP</div>
+      <p>Generate Material Requirement Planning otomatis dari file MPS dan BOM. Hasilnya menggantikan data MRP dari GSheet untuk bulan-bulan yang dihitung.</p>
+      <div class="htu-alert htu-alert-warn">⚠ Menu ini terkunci — perlu <strong>login admin</strong> untuk upload dan menghitung MRP.</div>
+      <div class="htu-steps">
+        <div class="htu-step" data-n="1"><div><div class="htu-step-title">Upload MPS (.xlsx)</div><div class="htu-step-desc">File berisi volume produksi FG per bulan.</div></div></div>
+        <div class="htu-step" data-n="2"><div><div class="htu-step-title">Upload BOM (.xlsx)</div><div class="htu-step-desc">File Bill of Materials — komponen RM/PM per produk FG beserta kuantitas.</div></div></div>
+        <div class="htu-step" data-n="3"><div><div class="htu-step-title">⚡ Hitung MRP</div><div class="htu-step-desc">Sistem mengalikan MPS × BOM → kebutuhan bahan per bulan. Hasil tampil di tabel bawah.</div></div></div>
+        <div class="htu-step" data-n="4"><div><div class="htu-step-title">✓ Terapkan MRP</div><div class="htu-step-desc">Data diterapkan ke Forecast & Projection. Flag <em>mrp_source=mps</em> aktif — reload GSheet hanya update max3MRP, tidak menimpa data bulan dari MPS.</div></div></div>
+      </div>
+      <div class="htu-alert htu-alert-info">ℹ Untuk kembali ke GSheet sepenuhnya: klik tombol <strong>Reset</strong> di Data Source → bagian MRP.</div>
+    </div>
+
+    <!-- PALLET -->
+    <div class="htu-sec" id="htu-pallet">
+      <div class="htu-sec-title">🏗 Pallet Position</div>
+      <p>Proyeksi jumlah pallet yang dibutuhkan per bulan berdasarkan ending stock, dibandingkan kapasitas gudang.</p>
+      <table class="htu-table">
+        <tr><th>Mode</th><th>Tampilan</th></tr>
+        <tr><td><span class="htu-badge htu-badge-blue">📅 Proyeksi</span></td><td>Posisi pallet per bulan ke depan (dari Projection Stock)</td></tr>
+        <tr><td><span class="htu-badge htu-badge-green">📍 Hari Ini</span></td><td>Posisi pallet berdasarkan stock on-hand saat ini</td></tr>
+        <tr><td><span class="htu-badge htu-badge-teal">🏗 Pallet</span></td><td>Jumlah unit palet</td></tr>
+        <tr><td><span class="htu-badge htu-badge-purple">📦 Qty</span></td><td>Kuantitas stok dalam UOM item</td></tr>
+      </table>
+      <p>Kapasitas gudang RM dan PM dikonfigurasi di Settings → Parameter Sistem.</p>
+    </div>
+
+    <!-- PO -->
+    <div class="htu-sec" id="htu-po">
+      <div class="htu-sec-title">📋 List Pengiriman (PO)</div>
+      <p>Semua PO aktif dari SAP beserta tanggal request kirim. Edit dan konfirmasi langsung dari tabel.</p>
+      <table class="htu-table">
+        <tr><th>Tombol</th><th>Fungsi</th></tr>
+        <tr><td>↺ Refresh SAP</td><td>Muat ulang PO terbaru dari SAP</td></tr>
+        <tr><td>📅 Generate Update DelDate</td><td>Hitung otomatis tanggal pengiriman ideal dari forecast. Algoritma berbasis <code>fc.stockFc</code>, dikelompokkan per bulan prReqDate. PO digeser jika DOI melebihi hari dalam bulan.</td></tr>
+        <tr><td>💾 Simpan</td><td>Simpan semua perubahan tanggal request ke Firebase</td></tr>
+        <tr><td>⬇ Export XLSX / ⬆ GSheet</td><td>Export data PO ke Excel atau Google Sheets</td></tr>
+      </table>
+      <div class="htu-alert htu-alert-warn">⚠ Generate UDD membutuhkan data Projection Stock yang sudah di-Build. Jalankan <strong>Sync Semua → Build</strong> terlebih dahulu.</div>
+    </div>
+
+    <!-- JADWAL -->
+    <div class="htu-sec" id="htu-jadwal">
+      <div class="htu-sec-title">🚛 Jadwal Pengiriman</div>
+      <p>Kartu jadwal per supplier — review, approve, dan blast ke supplier via WA.</p>
+      <table class="htu-table">
+        <tr><th>Status</th><th>Arti</th></tr>
+        <tr><td><span class="htu-badge htu-badge-amber">Pending</span></td><td>Baru di-generate, belum di-approve</td></tr>
+        <tr><td><span class="htu-badge htu-badge-blue">Approved</span></td><td>Sudah di-approve, siap di-blast</td></tr>
+        <tr><td><span class="htu-badge htu-badge-teal">Terkirim</span></td><td>Pesan WA sudah terkirim ke supplier</td></tr>
+        <tr><td><span class="htu-badge htu-badge-green">Konfirmasi</span></td><td>Supplier sudah konfirmasi tanggal kirim</td></tr>
+      </table>
+      <h4>Alur per Kartu</h4>
+      <div class="htu-wf" style="flex-direction:column;align-items:flex-start;gap:4px">
+        <div style="display:flex;align-items:center;gap:8px"><div class="htu-wf-step" style="font-size:11px">1. Review item & tanggal</div></div>
+        <div style="display:flex;align-items:center;gap:8px"><div class="htu-wf-step hi" style="font-size:11px">2. ✓ Approve → sync ke GSheet otomatis</div></div>
+        <div style="display:flex;align-items:center;gap:8px"><div class="htu-wf-step hi" style="font-size:11px">3. 📲 Blast WA → preview → kirim</div></div>
+        <div style="display:flex;align-items:center;gap:8px"><div class="htu-wf-step" style="font-size:11px">4. Input Konfirmasi dari supplier</div></div>
+      </div>
+    </div>
+
+    <!-- DAILY LIST -->
+    <div class="htu-sec" id="htu-daily">
+      <div class="htu-sec-title">📬 List Kiriman Daily</div>
+      <p>Daftar pengiriman yang dikelompokkan per tanggal request kirim. Berguna untuk briefing harian ke tim gudang. Filter per range tanggal, tipe item, atau supplier. Tombol <strong>Minggu Ini / Bulan Ini</strong> mempercepat navigasi. Export ke CSV tersedia.</p>
+    </div>
+
+    <!-- GRPO -->
+    <div class="htu-sec" id="htu-grpo">
+      <div class="htu-sec-title">✅ GRPO</div>
+      <p>Goods Receipt Purchase Order — barang yang sudah diterima gudang. Default otomatis menampilkan bulan berjalan. Gunakan input <strong>History</strong> untuk melihat bulan lain. Panel GRPO Hari Ini di Dashboard di-refresh otomatis tiap 10 menit.</p>
+    </div>
+
+    <!-- OSPR -->
+    <div class="htu-sec" id="htu-ospr">
+      <div class="htu-sec-title">📝 OSPR</div>
+      <p>Outstanding Purchase Request — PR yang sudah dibuat di SAP tapi belum menjadi PO. Berguna untuk memantau status permintaan yang sedang diproses purchasing. Klik <strong>↺ Refresh OSPR</strong> untuk data terbaru.</p>
+    </div>
+
+    <!-- STOCK DAILY -->
+    <div class="htu-sec" id="htu-stock">
+      <div class="htu-sec-title">📅 Stock Daily</div>
+      <p>Histori stock yang di-freeze setiap pagi. Klik <strong>❄ Freeze Stock Hari Ini</strong> sebelum aktivitas gudang dimulai. Filter tersedia per bulan atau per tanggal spesifik. Berguna untuk melacak pergerakan stok harian dan audit.</p>
+    </div>
+
+    <!-- DATA SOURCE -->
+    <div class="htu-sec" id="htu-sheets">
+      <div class="htu-sec-title">☁ Data Source (Sheets)</div>
+      <p>Konfigurasi URL Google Sheets sumber data. Memerlukan login admin.</p>
+      <table class="htu-table">
+        <tr><th>Sheet</th><th>Isi</th><th>Status</th></tr>
+        <tr><td>⭐ Master Data</td><td>Item code, UOM, supplier, site, ABC class, pallet qty</td><td><span class="htu-badge htu-badge-red">Wajib</span></td></tr>
+        <tr><td>📊 MRP</td><td>Kebutuhan material per bulan (monthly + max3MRP)</td><td><span class="htu-badge htu-badge-red">Wajib</span></td></tr>
+        <tr><td>🏷️ Real Name</td><td>Nama internal item RM (rahasia)</td><td><span class="htu-badge htu-badge-amber">Opsional</span></td></tr>
+        <tr><td>📦 Pallet PM</td><td>Data pallet per item Packaging Material</td><td><span class="htu-badge htu-badge-amber">Opsional</span></td></tr>
+        <tr><td>🛢 Pallet RM</td><td>Data pallet per item Raw Material</td><td><span class="htu-badge htu-badge-amber">Opsional</span></td></tr>
+      </table>
+      <div class="htu-alert htu-alert-warn">⚠ Sheets harus di-share <strong>"Anyone with the link can view"</strong>. URL tersimpan di Firebase — tidak perlu input ulang di perangkat lain.</div>
+    </div>
+
+    <!-- SETTINGS -->
+    <div class="htu-sec" id="htu-settings">
+      <div class="htu-sec-title">⚙ Settings</div>
+      <table class="htu-table">
+        <tr><th>Bagian</th><th>Yang Dikonfigurasi</th></tr>
+        <tr><td>🏷️ Tampilan Nama RM</td><td>Deskripsi SAP atau Real Name (🔒 admin only)</td></tr>
+        <tr><td>🔑 Kredensial Admin</td><td>Ubah username dan password login</td></tr>
+        <tr><td>☁ Firebase</td><td>API Key, Project ID, App ID. Maintenance: pangkas history / bersihkan konfirmasi lama</td></tr>
+        <tr><td>SAP API</td><td>Base URL, username, password SAP. Ada tombol Test Koneksi.</td></tr>
+        <tr><td>Fonnte WA</td><td>Token API untuk blast WhatsApp ke supplier</td></tr>
+        <tr><td>Parameter Sistem</td><td>W+N (cutoff urgency), hari kerja, max DOI target</td></tr>
+        <tr><td>📋 GSheet Sync</td><td>URL & token Apps Script untuk auto-sync List Pengiriman saat approve jadwal</td></tr>
+      </table>
+    </div>
+
+    <!-- FIREBASE -->
+    <div class="htu-sec" id="htu-firebase">
+      <div class="htu-sec-title">☁ Firebase & Cloud Sync</div>
+      <p>Firebase Firestore sebagai layer sinkronisasi real-time. Perubahan di perangkat A langsung terlihat di perangkat B tanpa refresh.</p>
+      <table class="htu-table">
+        <tr><th>Data Yang Disinkronkan</th><th>Catatan</th></tr>
+        <tr><td>Schedule, PO overrides, konfirmasi supplier, comment</td><td>Operasional harian</td></tr>
+        <tr><td>SAP credentials, Fonnte, parameter sistem, Sheet URLs</td><td>Konfigurasi</td></tr>
+        <tr><td>Cache SAP (stock, PO, GRPO, OSPR), master data, MRP</td><td>Sync antar perangkat tanpa harus tarik ulang dari SAP</td></tr>
+        <tr><td style="color:var(--red)">proj_history</td><td>❌ <strong>Lokal saja</strong> — ukuran bisa &gt;1MB, melebihi batas Firestore per dokumen</td></tr>
+      </table>
+      <p>Indikator status sync muncul di pojok bawah: <strong>⏳ menyimpan → ☁ Tersimpan</strong>. Jika gagal: <strong>⚠ Gagal sync</strong> — cek koneksi atau Firebase di Settings.</p>
+      <h4>Maintenance</h4>
+      <p>Jika cloudSave gagal karena data besar — buka Settings → Firebase:<br>
+      <strong>🗑 Pangkas History</strong> (simpan 14 hari terakhir) · <strong>🧹 Bersihkan Konfirmasi PO Lama</strong></p>
+    </div>
+
+    <!-- LOGIN -->
+    <div class="htu-sec" id="htu-login">
+      <div class="htu-sec-title">🔐 Login Admin</div>
+      <p>Klik ikon 🔒 di bawah sidebar atau menu <strong>Login</strong>. Sesi bertahan selama tab tidak ditutup (sessionStorage). Default awal: <code>admin</code> / <code>admin123</code>.</p>
+      <div class="htu-alert htu-alert-danger">🚨 <strong>Segera ubah password default</strong> setelah setup pertama di Settings → Ubah Kredensial Admin.</div>
+      <h4>Fitur Yang Memerlukan Login</h4>
+      <table class="htu-table">
+        <tr><th>Fitur</th><th>Alasan Dikunci</th></tr>
+        <tr><td>Data Source (Sheets) — edit URL</td><td>Berdampak ke seluruh sistem dan semua pengguna</td></tr>
+        <tr><td>Settings — semua konfigurasi</td><td>Kredensial SAP, Firebase, Fonnte bersifat sensitif</td></tr>
+        <tr><td>Real Name RM</td><td>Nama internal bersifat rahasia bisnis</td></tr>
+        <tr><td>MPS → MRP — upload & hitung</td><td>Perubahan MRP berdampak ke kalkulasi semua item</td></tr>
+      </table>
+    </div>
+
+    <!-- TIPS -->
+    <div class="htu-sec" id="htu-tips">
+      <div class="htu-sec-title">💡 Tips & Troubleshooting</div>
+      <div class="card" style="margin-bottom:8px">
+        <div class="card-hdr"><span class="card-title">⚠ Item DOI sangat besar (ratusan hari)</span></div>
+        <div style="padding:10px 14px;font-size:12px;color:var(--muted)">Disebabkan nilai <code>multipleQty</code> yang besar di master data SAP (contoh: 20.000 gram). Bukan bug dashboard — perlu perbaikan master data di SAP.</div>
+      </div>
+      <div class="card" style="margin-bottom:8px">
+        <div class="card-hdr"><span class="card-title">⚠ Sync Semua gagal / data SAP tidak muncul</span></div>
+        <div style="padding:10px 14px;font-size:12px;color:var(--muted)">Periksa konfigurasi SAP di Settings → klik <strong>Test Koneksi</strong>. Pastikan Base URL, username, password benar dan jaringan bisa akses server SAP.</div>
+      </div>
+      <div class="card" style="margin-bottom:8px">
+        <div class="card-hdr"><span class="card-title">⚠ Data berbeda antar perangkat</span></div>
+        <div style="padding:10px 14px;font-size:12px;color:var(--muted)">Pastikan Firebase terhubung (dot hijau di Settings). Jika baru pertama buka, tunggu cloud load selesai saat splash screen. Jika masih beda, klik Sync Semua ulang.</div>
+      </div>
+      <div class="card" style="margin-bottom:8px">
+        <div class="card-hdr"><span class="card-title">⚠ MRP dari GSheet tertimpa MPS</span></div>
+        <div style="padding:10px 14px;font-size:12px;color:var(--muted)">Jika Terapkan MRP pernah diklik, flag <code>mrp_source=mps</code> aktif. Reload GSheet hanya update <code>max3MRP</code>. Untuk kembali pakai GSheet sepenuhnya: klik <strong>Reset</strong> di Data Source → bagian MRP.</div>
+      </div>
+      <div class="htu-alert htu-alert-info">ℹ <strong>Konsistensi multi-device:</strong> Kalkulasi UDD, Projection, dan Pallet menggunakan <code>fc.stockFc</code> (deterministik) bukan <code>fc.stock</code> (pull-forward, device-dependent). Ini menjamin hasil kalkulasi sama di semua perangkat.</div>
+      <div style="margin-top:28px;padding:14px 18px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font-size:11px;color:var(--muted);text-align:center">
+        Material Planner Dashboard v20 &nbsp;·&nbsp; Eka Jaya Internasional
+      </div>
+    </div>
+
+  </div><!-- /htu-body -->
+</div><!-- /htu-wrap -->
+<script>
+(function(){
+  var body = document.getElementById('htu-scroll-body');
+  var links = document.querySelectorAll('.htu-toc-link');
+  var secs = document.querySelectorAll('.htu-sec');
+  if(!body) return;
+  function updateActive(){
+    var top = body.scrollTop + 60;
+    var cur = '';
+    secs.forEach(function(s){ if(s.offsetTop <= top) cur = s.id; });
+    links.forEach(function(a){
+      var href = a.getAttribute('href').replace('#','');
+      a.classList.toggle('htu-active', href === cur);
+    });
+  }
+  body.addEventListener('scroll', updateActive, {passive:true});
+  links.forEach(function(a){
+    a.addEventListener('click', function(e){
+      e.preventDefault();
+      var target = document.getElementById(a.getAttribute('href').replace('#',''));
+      if(target) body.scrollTo({top: target.offsetTop - 24, behavior:'smooth'});
+    });
+  });
+  updateActive();
+})();
+</script>
+</div><!-- /pg-howto -->
 
 </div><!-- /main -->
 </div><!-- /shell -->
@@ -5185,14 +5637,19 @@ function _toggleGenDropdown() {
 function generateSchedule(typeFilter) {
   if(!_requireAdmin('generate jadwal')) return;
 
-  // Cleanup: reset isManual untuk PO yang tanggalnya sudah lewat minggu ini
-  // Supaya tidak terbaca sebagai manual forced di generate berikutnya
-  var todayISO2 = new Date().toISOString().split('T')[0];
+  // Cleanup: reset isManual untuk PO yang tanggalnya sebelum delivery window berikutnya
+  // Fix: pakai local date (bukan UTC toISOString), bandingkan ke Senin depan, bukan < today UTC
+  // Bug lama: toISOString() bisa 1 hari mundur di WIB pagi; strict < membuat hari ini & besok tidak pernah di-reset
+  var _cleanToday = new Date(); _cleanToday.setHours(0,0,0,0);
+  var _cleanDow = _cleanToday.getDay();
+  var _cleanMon = new Date(_cleanToday);
+  _cleanMon.setDate(_cleanToday.getDate() + (_cleanDow === 0 ? 1 : (8 - _cleanDow)));
+  var _cleanMonISO = _cleanMon.getFullYear()+'-'+String(_cleanMon.getMonth()+1).padStart(2,'0')+'-'+String(_cleanMon.getDate()).padStart(2,'0');
   Object.keys(STATE.poOverrides||{}).forEach(function(key){
     var ovr = STATE.poOverrides[key];
-    if(ovr && ovr.isManual && ovr.date && ovr.date < todayISO2) {
+    if(ovr && ovr.isManual && ovr.date && ovr.date < _cleanMonISO) {
       ovr.isManual = false;
-      ovr.isAuto = true;
+      ovr.isAuto = false;
     }
   });
 
@@ -5951,6 +6408,19 @@ function removeSchedItem(schedIdx, entryIdx) {
     // Item terakhir — hapus seluruh jadwal entry
     if(!confirm('Hapus jadwal ' + e.supName + '?')) return;
     STATE.scheduleData.splice(schedIdx, 1);
+    // Fix: bersihkan isManual dari poOverrides agar tidak mempengaruhi generate berikutnya
+    (e.entries||[]).forEach(function(en){
+      (en.pos||[]).forEach(function(po){
+        var pk = po.docNum + '_' + po.itemCode;
+        var ovr = STATE.poOverrides[pk];
+        if(ovr && ovr.isManual) {
+          delete ovr.date; ovr.isManual = false; delete ovr.isAuto;
+          if(!Object.keys(ovr).length) delete STATE.poOverrides[pk];
+        }
+      });
+    });
+    localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
+    cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
   } else {
     var itemName = removed.item ? _dispName(removed.item) : 'item';
     if(!confirm('Hapus ' + itemName + ' dari jadwal ' + e.supName + '?')) return;
@@ -6066,6 +6536,22 @@ function removeSchedule(idx) {
 function resetSchedule() {
   if(!_requireAdmin('hapus jadwal')) return;
   if(!confirm('Hapus SEMUA jadwal pengiriman? Tindakan ini tidak bisa dibatalkan.')) return;
+  // Fix: bersihkan isManual dari poOverrides sebelum reset jadwal
+  // supaya generate berikutnya tidak dipaksa pakai tanggal lama
+  STATE.scheduleData.forEach(function(e){
+    (e.entries||[]).forEach(function(en){
+      (en.pos||[]).forEach(function(po){
+        var pk = po.docNum + '_' + po.itemCode;
+        var ovr = STATE.poOverrides[pk];
+        if(ovr && ovr.isManual) {
+          delete ovr.date; ovr.isManual = false; delete ovr.isAuto;
+          if(!Object.keys(ovr).length) delete STATE.poOverrides[pk];
+        }
+      });
+    });
+  });
+  localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
+  cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
   STATE.scheduleData = [];
   localStorage.setItem('schedule', '[]');
   document.getElementById('s-unconfirmed').textContent = '—';
