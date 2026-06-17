@@ -1319,7 +1319,7 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
         <div id="ai-key-status" style="margin-top:8px;font-size:11px;color:var(--muted)"></div>
         <div style="margin-top:10px;padding:8px;background:var(--bg3);border-radius:5px;font-size:10.5px;color:var(--muted);line-height:1.6">
           Key tersimpan di <b>Firebase</b> — setelah diisi di satu perangkat, perangkat lain langsung aktif.<br>
-          <b>Gratis:</b> 1.500 req/hari, 1.000.000 token/menit — jauh lebih longgar dari Groq.
+          <b>Gratis:</b> 1.500 req/hari, 4.000.000 token/menit — cepat & responsif.
         </div>
       </div>
     </div>
@@ -2031,7 +2031,7 @@ document.addEventListener('click', function(e){
     <div class="ai-hdr-ico">&#x1F916;</div>
     <div style="flex:1">
       <div class="ai-hdr-title">AI Asisten PPIC</div>
-      <div class="ai-hdr-sub">Pakai Gemini 2.5 Flash (gratis) — tanya apa saja</div>
+      <div class="ai-hdr-sub">Pakai Gemini Flash Lite (gratis) — tanya apa saja</div>
     </div>
     <button class="ai-icon-btn" onclick="_aiClearHistory()" title="Hapus riwayat">&#x1F5D1;</button>
     <button class="ai-icon-btn" onclick="_aiTogglePanel()" style="margin-left:4px">&#x2715;</button>
@@ -2288,7 +2288,7 @@ function _aiIsCommand(msg) {
 // ─── Helper: Groq API call ────────────────────────────────────────────────────
 async function _aiGroqCall(messages, useTools) {
   var body = {
-    model: 'gemini-2.5-flash',
+    model: 'gemini-2.5-flash-lite-preview-06-17',
     max_tokens: 1024,
     messages: messages
   };
@@ -2706,8 +2706,14 @@ async function _aiSend() {
           }catch(e){}
         }
       }
-      if(bub2) bub2.innerHTML=_aiFmt(fullText2);
-      _aiHistory.push({role:'assistant',content:fullText2});
+      if(bub2) {
+        if(!fullText2.trim()) {
+          bub2.innerHTML = _aiFmt('Maaf, tidak ada respons dari AI. Coba lagi atau periksa API Key di Settings.');
+        } else {
+          bub2.innerHTML = _aiFmt(fullText2);
+        }
+      }
+      if(fullText2.trim()) _aiHistory.push({role:'assistant',content:fullText2});
     }
 
   } catch(e) {
