@@ -2081,6 +2081,11 @@ var _AI_TOOLS = [
       item_code:{type:'string',description:'Kode material (productCode)'},
       comment:{type:'string',description:'Isi komentar'}
     },required:['item_code','comment']}}},
+  {type:'function',function:{name:'get_item_detail',
+    description:'Dapatkan data lengkap satu item: stok, DOI, coverage, kebutuhan bulanan, PO open, matcom. Gunakan jika item tidak ada di context awal.',
+    parameters:{type:'object',properties:{
+      item_code:{type:'string',description:'Kode material item (productCode)'}
+    },required:['item_code']}}},
   {type:'function',function:{name:'schedule_delivery',
     description:'Set tanggal request kirim untuk PO. Bisa by item code (semua PO item tersebut) atau by nomor PO spesifik dari SAP.',
     parameters:{type:'object',properties:{
@@ -2097,6 +2102,7 @@ var _AI_TOOL_LABELS = {
     ? '&#x1F4CC; Tandai <b>'+_aiGetItemName(a.item_code)+'</b> sebagai Highlighted Issue'
     : '&#x1F4CC; Hapus <b>'+_aiGetItemName(a.item_code)+'</b> dari Highlighted Issues'; },
   add_comment:       function(a){ return '&#x1F4AC; Tambah comment pada <b>'+_aiGetItemName(a.item_code)+'</b>: <em>"'+a.comment+'"</em>'; },
+  get_item_detail:    function(a){ return '&#x1F4CB; Ambil detail item: <b>'+_aiGetItemName(a.item_code)+'</b>'; },
   schedule_delivery: function(a){
     var by = a.po_number ? 'PO <b>'+a.po_number+'</b>' : 'semua PO <b>'+_aiGetItemName(a.item_code)+'</b>';
     return '&#x1F4C5; Jadwalkan kirim '+by+' tanggal <b>'+a.date.split('-').reverse().join('/')+'</b>';
@@ -2113,6 +2119,7 @@ function _aiGetItemName(code) {
 function _aiExecTool(name, args) {
   try {
     if(name==='search_item')       return _aiToolSearch(args.query);
+    if(name==='get_item_detail')    return _aiToolGetDetail(args.item_code);
     if(name==='highlight_item')    return _aiToolHighlight(args.item_code, args.action);
     if(name==='add_comment')       return _aiToolComment(args.item_code, args.comment);
     if(name==='schedule_delivery') return _aiToolSchedule(args.date, args.item_code, args.po_number);
@@ -2122,16 +2129,60 @@ function _aiExecTool(name, args) {
 
 function _aiToolSearch(query) {
   var q = (query||'').toLowerCase();
+  var dispFn2 = (typeof _dispName==='function') ? _dispName : function(p){return p.description||p.productCode;};
   var results = (STATE.projectionData||[]).filter(function(p){
     return p.productCode.toLowerCase().includes(q) ||
       (p.description||'').toLowerCase().includes(q) ||
-      (typeof _dispName==='function' ? (_dispName(p)||'').toLowerCase().includes(q) : false);
-  }).slice(0,8).map(function(p){
-    return {kode:p.productCode,nama:p.description,tipe:p.itemType,
-      doi:Math.round(p.doiFC||0),status:p.category,supplier:p.supplier};
+      (dispFn2(p)||'').toLowerCase().includes(q) ||
+      (p.supplier||'').toLowerCase().includes(q);
+  }).slice(0,5);
+  if(!results.length) {
+    // Try PO data juga
+    var poMatch = (STATE.poData||[]).filter(function(po){
+      return (po.itemName||'').toLowerCase().includes(q) || po.itemCode.toLowerCase().includes(q);
+    }).slice(0,3).map(function(po){return {docNum:po.docNum,item:po.itemCode,nama:po.itemName,qty:po.openQty,uom:po.uom,supplier:po.supplierName};});
+    if(poMatch.length) return 'Ditemukan di PO: '+JSON.stringify(poMatch);
+    return 'Tidak ditemukan item "'+query+'" di projection, PO, atau jadwal.';
+  }
+  // Return full detail menggunakan _aiBuildCtx helpers inline
+  var out = results.map(function(p){
+    var stok = Math.round(((p.stockBTG||0)+(p.stockSNG||0))*100)/100;
+    var mrp  = STATE.mrpData && STATE.mrpData[p.productCode];
+    var mrpBul={};
+    if(mrp&&mrp.months){ var months=typeof FC_MONTHS!=='undefined'?FC_MONTHS:[];
+      months.forEach(function(m,i){if(mrp.months[i]>0) mrpBul[m]=Math.round(mrp.months[i]);}); }
+    var pos = (STATE.poData||[]).filter(function(po){return po.itemCode===p.productCode;})
+      .map(function(po){
+        var ovr=(STATE.poOverrides||{})[String(po.docNum)+'_'+po.itemCode]||{};
+        return {docNum:po.docNum,qty:po.openQty,uom:po.uom,prReqDate:po.prReqDate,
+          tglKirim:ovr.date?ovr.date.split('-').reverse().join('/'):'belum dijadwal'};
+      });
+    var mc = STATE.matcomMonthly&&STATE.matcomMonthly[p.productCode];
+    return {
+      kode:p.productCode, nama:dispFn2(p)||p.productCode, tipe:p.itemType,
+      abc:p.abc||'', supplier:p.supplier, site:p.site, uom:p.uom||'',
+      status:p.category, stok:stok,
+      doi_hari:Math.round(p.doiFC||0),
+      coverage_habis:p.coverageDateStr||'?',
+      mrp_bulan_ini:Math.round(p.actualMRP||0),
+      mrp_max_3bln:Math.round(p.max3MRP||0),
+      mrp_bulan_depan:Math.round(p.mrpNextMonth||0),
+      end_stock_bln_ini:Math.round(p.endStock||0),
+      total_po_open:Math.round(p.totalIncoming||0),
+      kebutuhan_per_bulan:Object.keys(mrpBul).length?mrpBul:null,
+      po_open:pos,
+      avg_usg_matcom:mc?Math.round((mc.avgUsg||0)*10)/10:null,
+      comment:p.comment||null
+    };
   });
-  if(!results.length) return 'Tidak ditemukan item dengan kata kunci "'+query+'"';
-  return JSON.stringify(results);
+  return JSON.stringify(out);
+}
+
+function _aiToolGetDetail(code) {
+  if(!code) return 'ERROR: item_code diperlukan';
+  var p = (STATE.projectionData||[]).find(function(x){return x.productCode===code;});
+  if(!p) return 'Item '+code+' tidak ditemukan di projection data. Coba search_item dulu.';
+  return _aiToolSearch(code);
 }
 
 function _aiToolHighlight(code, action) {
@@ -2288,20 +2339,127 @@ function _aiRefreshCtx() {
 }
 
 function _aiBuildCtx() {
-  var today=new Date().toLocaleDateString('id-ID',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
-  var proj=STATE.projectionData||[];
-  var dispFn=(typeof _dispName==='function')?_dispName:function(p){return p.description||p.productCode;};
-  var fmtFn=(typeof fmtDateID==='function')?fmtDateID:function(d){return String(d);};
-  var urgent=proj.filter(function(p){return p.category==='UNDER';})
-    .sort(function(a,b){return (a.coverageDate||0)-(b.coverageDate||0);})
-    .slice(0,25).map(function(p){
-      return {kode:p.productCode,nama:dispFn(p)||p.productCode,tipe:p.itemType,
-        doi:Math.round(p.doiFC||0),coverage:p.coverageDate?fmtFn(p.coverageDate):'-',
-        stok:Math.round(((p.stockBTG||0)+(p.stockSNG||0))*10)/10,supplier:p.supplier,site:p.site};
+  var today = new Date().toLocaleDateString('id-ID',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+  var proj  = STATE.projectionData || [];
+  var dispFn = (typeof _dispName==='function') ? _dispName : function(p){return p.description||p.productCode;};
+
+  function fmtCov(d) {
+    if(!d) return 'tidak tersedia';
+    try { var dt=new Date(d); return dt.getDate()+'/'+(dt.getMonth()+1)+'/'+dt.getFullYear(); }
+    catch(e){ return String(d); }
+  }
+
+  function getMRPBulanan(code) {
+    var mrp = STATE.mrpData && STATE.mrpData[code];
+    if(!mrp || !mrp.months) return null;
+    var out = {}, months = typeof FC_MONTHS!=='undefined' ? FC_MONTHS : [];
+    months.forEach(function(m,i){ if(mrp.months[i]>0) out[m]=Math.round(mrp.months[i]); });
+    return Object.keys(out).length ? out : null;
+  }
+
+  function getPOItem(code) {
+    var pos = (STATE.poData||[]).filter(function(po){return po.itemCode===code;});
+    if(!pos.length) return [];
+    return pos.map(function(po){
+      var ovr = (STATE.poOverrides||{})[String(po.docNum)+'_'+po.itemCode] || {};
+      return {docNum:po.docNum, qty:po.openQty, uom:po.uom,
+        prReqDate:po.prReqDate,
+        tglKirim: ovr.date ? ovr.date.split('-').reverse().join('/') : 'belum dijadwal',
+        sudahKonfirmasi: ovr.confDate ? ovr.confDate.split('-').reverse().join('/') : null};
     });
-  var sched=(STATE.scheduleData||[]).slice(0,20).map(function(s){
-    return {supplier:s.supName,tanggal:s.date,status:s.status,items:(s.items||'').substring(0,100)};
+  }
+
+  function getMatcomItem(code) {
+    var mc = STATE.matcomMonthly && STATE.matcomMonthly[code];
+    return mc ? {avgUsg3bln: Math.round((mc.avgUsg||0)*10)/10, uom: mc.uom} : null;
+  }
+
+  function buildDetail(p) {
+    var stok = Math.round(((p.stockBTG||0)+(p.stockSNG||0))*100)/100;
+    var obj = {
+      kode: p.productCode,
+      nama: dispFn(p) || p.productCode,
+      tipe: p.itemType,
+      abc_class: p.abc || '',
+      supplier: p.supplier,
+      site: p.site,
+      uom: p.uom || '',
+      status: p.category,
+      stok_total: stok,
+      stok_BTG: Math.round((p.stockBTG||0)*100)/100,
+      stok_SNG: Math.round((p.stockSNG||0)*100)/100,
+      doi_hari: Math.round(p.doiFC||0),
+      doi_real_matcom: p.doiMatcom && p.doiMatcom!=='\u221e' ? Math.round(p.doiMatcom) : null,
+      coverage_habis: p.coverageDateStr || fmtCov(p.coverageDate),
+      est_pakai_per_hari: Math.round((p.estUsageMRP||p.estUsgDay||0)*100)/100,
+      mrp_bulan_ini: Math.round(p.actualMRP||0),
+      mrp_max_3bln: Math.round(p.max3MRP||0),
+      mrp_bulan_depan: Math.round(p.mrpNextMonth||0),
+      end_stock_bulan_ini: Math.round(p.endStock||0),
+      end_stock_bulan_depan: Math.round(p.endStockNext||0),
+      total_po_open_qty: Math.round(p.totalIncoming||0),
+      total_ospr: Math.round(p.totalOSPR||0),
+      pct_aktual_vs_forecast: p.pctUsageVsForecast ? Math.round(p.pctUsageVsForecast*100)+'%' : null,
+      kebutuhan_per_bulan: getMRPBulanan(p.productCode),
+      po_open: getPOItem(p.productCode),
+      matcom: getMatcomItem(p.productCode),
+      comment: p.comment || null
+    };
+    return obj;
+  }
+
+  // UNDER items - full detail (semua, bukan hanya 30)
+  var underItems = proj.filter(function(p){return p.category==='UNDER';})
+    .sort(function(a,b){return (a.coverageDate||0)-(b.coverageDate||0);});
+
+  // GOOD items mendekati kritis (DOI < 20 hari) - full detail
+  var goodNearCritical = proj.filter(function(p){
+    return p.category==='GOOD' && (p.doiFC||0) < 20;
+  }).sort(function(a,b){return (a.doiFC||0)-(b.doiFC||0);}).slice(0,15);
+
+  // GOOD & OVER items - compact summary
+  var goodItems  = proj.filter(function(p){return p.category==='GOOD' && (p.doiFC||0)>=20;});
+  var overItems  = proj.filter(function(p){return p.category==='OVER';});
+  function compact(p){
+    return {kode:p.productCode,nama:dispFn(p)||p.productCode,
+      doi:Math.round(p.doiFC||0),coverage:p.coverageDateStr||fmtCov(p.coverageDate),
+      supplier:p.supplier,stok:Math.round(((p.stockBTG||0)+(p.stockSNG||0))*100)/100,
+      mrp_bln:Math.round(p.actualMRP||0),po_open:Math.round(p.totalIncoming||0)};
+  }
+
+  // Highlighted items - full detail
+  var hlCodes = Object.keys(PROJ_HIGHLIGHTED||{}).filter(function(k){return PROJ_HIGHLIGHTED[k];});
+  var hlDetails = hlCodes.map(function(k){
+    var it = proj.find(function(p){return p.productCode===k;});
+    return it ? buildDetail(it) : {kode:k,nama:'(tidak ditemukan di proyeksi)'};
   });
+
+  // Jadwal pengiriman - lengkap
+  var sched = (STATE.scheduleData||[]).map(function(s){
+    var entries = (s.entries||[]).slice(0,5).map(function(en){
+      var po = en.pos&&en.pos[0];
+      var ovr = po ? ((STATE.poOverrides||{})[String(po.docNum)+'_'+po.itemCode]||{}) : {};
+      return {
+        item: en.item ? (dispFn(en.item)||en.item.productCode) : '',
+        kode: en.item ? en.item.productCode : '',
+        qty: po ? po.openQty : 0, uom: po ? po.uom : '',
+        konfirmasi_qty: ovr.confQty||null,
+        konfirmasi_tgl: ovr.confDate||null
+      };
+    });
+    return {supplier:s.supName,tanggal:s.date,status:s.status,
+      coverage_tercepat:s.coverageDate||'',items_detail:entries};
+  });
+
+  // GRPO hari ini
+  var td2=new Date(),dd2=String(td2.getDate()).padStart(2,'0'),mm2=String(td2.getMonth()+1).padStart(2,'0');
+  var grpoToday=(STATE.grpoData||[]).filter(function(g){
+    if(!g.grpoDate) return false;
+    var p=g.grpoDate.split('/'); return p[0]===dd2&&p[1]===mm2;
+  }).map(function(g){return {item:g.itemName||g.itemCode,kode:g.itemCode,
+    supplier:g.supplierName,qty:g.qty,uom:g.uom};});
+
+  // Overdue
   var today_iso=new Date().toISOString().split('T')[0];
   var overdue=(STATE.scheduleData||[]).filter(function(s){
     if(s.status!=='confirmed') return false;
@@ -2310,23 +2468,44 @@ function _aiBuildCtx() {
       var ov=k?(STATE.poOverrides[k]||{}):{};
       return ov.confDate&&ov.confDate<today_iso;
     });
-  }).map(function(s){return {supplier:s.supName,items:(s.items||'').substring(0,80)};});
-  var td2=new Date(),dd2=String(td2.getDate()).padStart(2,'0'),mm2=String(td2.getMonth()+1).padStart(2,'0');
-  var grpoToday=(STATE.grpoData||[]).filter(function(g){
-    if(!g.grpoDate) return false;
-    var p=g.grpoDate.split('/'); return p[0]===dd2&&p[1]===mm2;
-  }).slice(0,15).map(function(g){return {item:g.itemName||g.itemCode,supplier:g.supplierName,qty:g.qty,uom:g.uom};});
-  var hl=Object.keys(PROJ_HIGHLIGHTED||{}).filter(function(k){return PROJ_HIGHLIGHTED[k];})
-    .map(function(k){var it=proj.find(function(p){return p.productCode===k;});
-      return it?{kode:k,nama:dispFn(it)||k,doi:Math.round(it.doiFC||0)}:{kode:k};});
-  return {tanggal:today,
-    ringkasan:{totalItem:proj.length,itemUrgent:urgent.length,
-      itemGood:proj.filter(function(p){return p.category==='GOOD';}).length,
-      itemOver:proj.filter(function(p){return p.category==='OVER';}).length,
-      poOpen:(STATE.poData||[]).length,jadwalBelumConfirm:sched.filter(function(j){return j.status!=='confirmed';}).length,
-      overdueCount:overdue.length},
-    itemKritis_top25:urgent,jadwalPengiriman:sched,
-    overdueSupplier:overdue,grpoHariIni:grpoToday,highlightedIssues:hl};
+  }).map(function(s){
+    return {supplier:s.supName,tgl_konfirmasi:s.date,items:s.items||''};
+  });
+
+  // Parameter sistem
+  var fcMonths = typeof FC_MONTHS!=='undefined' ? FC_MONTHS : [];
+  var doiTarget   = typeof _fcDOI!=='undefined'  ? _fcDOI  : 30;
+  var doiImpor    = typeof _fcDOI2!=='undefined' ? _fcDOI2 : 60;
+
+  return {
+    tanggal: today,
+    parameter_sistem: {
+      doi_target_general: doiTarget + ' hari',
+      doi_target_impor: doiImpor + ' hari',
+      urgency_cutoff_wn: (CFG&&CFG.wn||14) + ' hari',
+      bulan_perencanaan: fcMonths
+    },
+    ringkasan: {
+      total_item: proj.length,
+      UNDER_kritis: underItems.length,
+      GOOD_aman: goodItems.length + goodNearCritical.length,
+      GOOD_mendekati_kritis: goodNearCritical.length,
+      OVER_berlebih: overItems.length,
+      po_open_total: (STATE.poData||[]).length,
+      jadwal_aktif: sched.length,
+      jadwal_belum_confirm: sched.filter(function(s){return s.status!=='confirmed';}).length,
+      overdue: overdue.length,
+      highlighted: hlCodes.length
+    },
+    item_UNDER_kritis: underItems.map(buildDetail),
+    item_GOOD_mendekati_kritis: goodNearCritical.map(buildDetail),
+    item_GOOD_aman_ringkas: goodItems.slice(0,50).map(compact),
+    item_OVER_ringkas: overItems.slice(0,30).map(compact),
+    item_highlighted: hlDetails,
+    jadwal_pengiriman: sched,
+    overdue_belum_terima: overdue,
+    grpo_masuk_hari_ini: grpoToday
+  };
 }
 
 function _aiMsgEl(role,text){
@@ -2384,10 +2563,42 @@ async function _aiSend() {
   var sb=document.getElementById('ai-send-btn'); if(sb) sb.disabled=true;
 
   var ctx=_aiBuildCtx();
-  var sys='Kamu adalah asisten PPIC Eka Jaya Internasional (pabrik Bitung/BTG dan Sangiang/SNG).\n\nData aktual:\n'
+  var sys=var sys =
+    'Kamu adalah seorang Material Planner profesional dengan pengalaman 10 tahun di industri manufaktur. Saat ini kamu bekerja sebagai asisten PPIC di Eka Jaya Internasional, perusahaan manufaktur dengan dua pabrik: Bitung (BTG) dan Sangiang (SNG).\n\n'
+    +'== DATA DASHBOARD AKTUAL ==\n'
     +JSON.stringify(ctx,null,2)
-    +'\n\nTerminologi: DOI=hari stok bertahan, Coverage=tgl stok habis, UNDER<14hr, GOOD 14-30hr, OVER>30hr, RM=Raw Material, PM=Packaging, FG=Finished Goods, GRPO=barang masuk gudang, PO=Purchase Order.\n\n'
-    +'Jika diminta melakukan aksi (tandai item, tambah comment, jadwalkan PO), gunakan tools yang tersedia. Cari item dulu dengan search_item jika kode belum diketahui. Konfirmasi dengan menyebut nama + kode item sebelum eksekusi. Bahasa Indonesia profesional.';
+    +'\n\n== KEAHLIANMU ==\n'
+    +'Kamu ahli dalam:\n'
+    +'- Analisis stok dan proyeksi coverage: selalu hitung gap antara (stok+PO open) vs kebutuhan MRP\n'
+    +'- Prioritasi pengadaan berdasarkan: coverage date + nilai MRP + apakah ada PO open\n'
+    +'- Identifikasi risiko: item UNDER tanpa PO open = darurat, UNDER dengan PO = pantau tglKirim\n'
+    +'- Evaluasi performa supplier: cek overdue, ketepatan konfirmasi, dan histori GRPO\n'
+    +'- Rekomendasi tindakan spesifik yang bisa langsung dieksekusi\n\n'
+    +'== CARA MENGANALISIS ==\n'
+    +'1. Coverage < 14 hari (UNDER) = kritis. Cek apakah ada PO open yang akan datang\n'
+    +'2. End stock bulan ini negatif = stok tidak cukup untuk kebutuhan bulan ini\n'
+    +'3. DOI < target = perlu tambah order. DOI >> target = kelebihan stok, tahan PO\n'
+    +'4. Jika PO open ada tapi belum punya tglKirim = harus segera dijadwalkan\n'
+    +'5. Pct aktual vs forecast < 70% = pemakaian lebih rendah dari rencana\n\n'
+    +'== TERMINOLOGI ==\n'
+    +'- doi_hari: Days of Inventory = sisa hari stok bertahan\n'
+    +'- coverage_habis: tanggal stok akan habis jika tidak ada pengiriman baru\n'
+    +'- kebutuhan_per_bulan: rencana kebutuhan MRP per bulan dari jadwal produksi\n'
+    +'- mrp_bulan_ini: kebutuhan bulan berjalan\n'
+    +'- mrp_max_3bln: nilai MRP tertinggi 3 bulan terakhir (basis sizing)\n'
+    +'- end_stock_bulan_ini: sisa stok di akhir bulan ini setelah dikurangi kebutuhan\n'
+    +'- total_po_open_qty: total qty PO yang sudah dibuat tapi barang belum datang\n'
+    +'- tglKirim: tanggal dijadwalkan kirim ke pabrik (dari jadwal pengiriman)\n'
+    +'- UNDER=kritis <14hr | GOOD=aman 14-30hr | OVER=berlebih >30hr\n'
+    +'- RM=Raw Material | PM=Packaging Material | FG=Finished Goods\n'
+    +'- GRPO=barang sudah diterima gudang | OSPR=PR sudah dibuat belum jadi PO\n\n'
+    +'== INSTRUKSI JAWABAN ==\n'
+    +'- Jawab bahasa Indonesia profesional, langsung ke inti\n'
+    +'- Selalu berikan angka aktual dari data (kode, nama, qty, tanggal)\n'
+    +'- Jika item ada di data, WAJIB jawab dengan detail spesifik\n'
+    +'- Jangan bilang tidak ada informasi jika data ada di context\n'
+    +'- Untuk item tidak di context: gunakan tool search_item atau get_item_detail\n'
+    +'- Tutup setiap analisis dengan rekomendasi tindakan yang clear'+'Jika diminta melakukan aksi (tandai item, tambah comment, jadwalkan PO), gunakan tools yang tersedia. Cari item dulu dengan search_item jika kode belum diketahui. Konfirmasi dengan menyebut nama + kode item sebelum eksekusi. Bahasa Indonesia profesional.';
 
   var isCmd=_aiIsCommand(msg);
   var allMsgs=[{role:'system',content:sys}].concat(_aiHistory.slice(-10));
