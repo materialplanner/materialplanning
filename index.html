@@ -453,21 +453,25 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
     <div class="stat" style="position:relative">
       <div class="stat-lbl" style="display:flex;align-items:center;gap:4px">Item Urgent <span id="trend-urgent"></span><span class="_dtip" onclick="_showDashTip('urgent',this)" title="Apa ini?">?</span></div>
       <div class="stat-val red" id="s-urgent">—</div>
-      <div class="stat-sub" id="dash-sub-urgent">coverage ≤ cutoff</div>
+      <div id="s-urgent-unit" style="font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--red);opacity:.65;margin-top:-3px;margin-bottom:1px">kode material (SKU)</div>
+      <div class="stat-sub" id="dash-sub-urgent">semua tipe</div>
     </div>
     <div class="stat" style="position:relative">
       <div class="stat-lbl" style="display:flex;align-items:center;gap:4px">Total Item <span class="_dtip" onclick="_showDashTip('total',this)" title="Apa ini?">?</span></div>
       <div class="stat-val accent" id="s-total">—</div>
-      <div class="stat-sub" id="dash-sub-total">di projection stock</div>
+      <div style="font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--accent);opacity:.65;margin-top:-3px;margin-bottom:1px">kode material (SKU)</div>
+      <div class="stat-sub" id="dash-sub-total">RM + PM + FG</div>
     </div>
     <div class="stat" style="position:relative">
       <div class="stat-lbl" style="display:flex;align-items:center;gap:4px">PO Open <span class="_dtip" onclick="_showDashTip('po',this)" title="Apa ini?">?</span></div>
       <div class="stat-val amber" id="s-po">—</div>
+      <div style="font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--amber);opacity:.65;margin-top:-3px;margin-bottom:1px">dokumen PO</div>
       <div class="stat-sub">menunggu pengiriman</div>
     </div>
     <div class="stat" style="position:relative">
       <div class="stat-lbl" style="display:flex;align-items:center;gap:4px">Jadwal Belum Confirm <span class="_dtip" onclick="_showDashTip('unconf',this)" title="Apa ini?">?</span></div>
       <div class="stat-val purple" id="s-unconfirmed">—</div>
+      <div style="font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--purple);opacity:.65;margin-top:-3px;margin-bottom:1px">jadwal pengiriman</div>
       <div class="stat-sub" id="stat-sub-unconf">minggu ini</div>
     </div>
   </div>
@@ -481,7 +485,7 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
       <span style="font-size:12px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:flex;align-items:center;gap:6px">📌 Highlighted Issues <span class="_dtip" onclick="_showDashTip('highlighted',this)" title="Apa ini?">?</span></span>
     </div>
-    <div id="dash-highlighted"><div style="font-size:12px;color:var(--muted);padding:8px 0">Belum ada item yang di-highlight. Centang checkbox di kolom Projection Stock untuk menambahkan.</div></div>
+    <div id="dash-highlighted"><div style="font-size:12px;color:var(--muted);padding:8px 0">Belum ada item yang dipantau. Centang ☐ di kolom pertama tabel Projection Stock untuk pin item ke sini.</div></div>
   </div>
 
   <!-- Stale data warning -->
@@ -537,63 +541,6 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
 
   <div id="dash-alert-area"></div>
 
-  <!-- ═══ DASHBOARD INFO TIP SYSTEM ═══════════════════════════════════════════ -->
-  <style>
-  ._dtip{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(--bg4);border:1px solid var(--border2);color:var(--muted);font-size:9px;font-weight:700;cursor:pointer;flex-shrink:0;user-select:none;vertical-align:middle;transition:.12s;line-height:1}
-  ._dtip:hover{background:var(--accent-bg);color:var(--accent);border-color:rgba(37,99,235,.35)}
-  #dash-tip-global{display:none;position:fixed;z-index:600;width:290px;background:var(--bg2);border:1.5px solid var(--border2);border-radius:12px;padding:16px 18px;box-shadow:0 10px 32px rgba(0,0,0,.22);pointer-events:auto}
-  #dash-tip-global .tip-title{font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);margin-bottom:9px;padding-bottom:8px;border-bottom:1px solid var(--border)}
-  #dash-tip-global .tip-body{font-size:12.5px;line-height:1.7;color:var(--text)}
-  #dash-tip-global .tip-body b{color:var(--text)}
-  #dash-tip-global .tip-row{display:flex;align-items:flex-start;gap:8px;margin:5px 0}
-  #dash-tip-global .tip-badge{flex-shrink:0;font-size:10px;font-weight:700;padding:1px 8px;border-radius:99px;margin-top:2px}
-  #dash-tip-global .tip-close{display:flex;justify-content:flex-end;margin-top:10px;padding-top:8px;border-top:1px solid var(--border)}
-  #dash-tip-global .tip-close button{font-size:11px;padding:3px 12px;border:1px solid var(--border2);border-radius:6px;background:var(--bg3);color:var(--muted);cursor:pointer}
-  #dash-tip-global .tip-close button:hover{background:var(--bg4);color:var(--text)}
-  </style>
-  <div id="dash-tip-global"></div>
-  <script>
-  var DASH_TIPS = {
-    urgent:{title:'Item Urgent',body:'Item yang stoknya <b>hampir habis</b> dalam waktu dekat.<br><br><b>Coverage</b> = perkiraan stok akan habis kapan. Jika coverage kurang dari batas hari (W+N, default 14 hari), item masuk kategori Urgent.<br><br>Angka ini <b>semakin besar = semakin darurat</b>. Klik angkanya untuk buka daftar lengkap item kritis di bawah.',action:null},
-    total:{title:'Total Item',body:'Jumlah total bahan baku (RM), packaging (PM), dan produk jadi (FG) yang sedang dipantau dalam Projection Stock.<br><br>Gunakan filter tab <b>RM / PM / FG</b> di atas untuk melihat per kategori.',action:null},
-    po:{title:'PO Open',body:'<b>Purchase Order</b> yang sudah dibuat ke supplier, tapi barangnya <b>belum datang</b>.<br><br>PO Open = stok yang sedang "on the way" — sudah dipesan, tinggal menunggu pengiriman.<br><br>Pastikan setiap PO sudah punya <b>tanggal request kirim</b> agar supplier tahu kapan harus kirim. Bisa diatur di menu <b>List Pengiriman (PO)</b>.',action:null},
-    unconf:{title:'Jadwal Belum Dikonfirmasi',body:'Jadwal pengiriman yang sudah <b>dikirim ke supplier via WhatsApp</b>, tapi supplier <b>belum membalas konfirmasi</b> tanggal kirimnya.<br><br>Angka ini perlu dipantau. Semakin banyak = semakin banyak pengiriman yang belum pasti. <b>Follow up ke supplier</b> jika sudah lebih dari 1–2 hari belum ada balasan.',action:null},
-    stockbars:{title:'Kondisi Stok Keseluruhan',body:'Menunjukkan berapa banyak item yang berada di masing-masing kondisi stok.<br><br><div class="tip-row"><span class="tip-badge" style="background:var(--red-bg);color:var(--red);border:1px solid rgba(220,38,38,.2)">UNDER</span><span>Stok <b>kritis</b> — cukup kurang dari 14 hari. Perlu segera dipesan.</span></div><div class="tip-row"><span class="tip-badge" style="background:var(--green-bg);color:var(--green);border:1px solid rgba(5,150,105,.2)">GOOD</span><span>Stok <b>normal</b> — cukup 14–30 hari. Kondisi aman.</span></div><div class="tip-row"><span class="tip-badge" style="background:var(--accent-bg);color:var(--accent);border:1px solid rgba(37,99,235,.2)">OVER</span><span>Stok <b>berlebih</b> — lebih dari 30 hari. Pertimbangkan menunda PO.</span></div>',action:null},
-    highlighted:{title:'Highlighted Issues',body:'Item yang sengaja <b>di-pin</b> untuk dipantau lebih dekat — biasanya item kritis yang sedang dalam pengawasan khusus.<br><br><b>Cara menambahkan:</b><br>Buka menu <b>Projection Stock</b> → centang <b>kotak (☐)</b> di kolom paling kiri pada baris item yang ingin dipantau. Item akan langsung muncul di sini.',action:null},
-    kritis:{title:'Item Kritis',body:'Daftar item yang <b>stoknya akan habis paling cepat</b> berdasarkan proyeksi pemakaian.<br><br><b>Coverage</b> = perkiraan tanggal stok habis jika tidak ada pengiriman baru masuk.<br><b>DOI</b> (Days of Inventory) = berapa hari stok masih bisa bertahan.<br><br>Baris berwarna <span style="color:var(--red)">merah</span> = kondisi darurat. Klik <b>Lihat semua →</b> untuk buka tabel lengkap dengan semua item.',action:null},
-    jadwalminggu:{title:'Jadwal Pengiriman Minggu Ini',body:'Ringkasan pengiriman yang dijadwalkan masuk <b>minggu ini</b>.<br><br><b>Arti status:</b><br>• <b>Pending</b> — belum di-setujui PPIC<br>• <b>Approved</b> — sudah disetujui, siap dikirim ke supplier<br>• <b>Terkirim</b> — notifikasi WA sudah dikirim ke supplier<br>• <b>Konfirmasi</b> — supplier sudah balas dan konfirmasi tanggal kirimnya<br><br>Kelola jadwal lengkap di menu <b>Jadwal Pengiriman</b>.',action:null},
-    grpo:{title:'GRPO Hari Ini',body:'<b>GRPO</b> (Goods Receipt Purchase Order) = barang yang sudah <b>masuk dan diterima gudang hari ini</b> berdasarkan data SAP.<br><br>Angka di badge biru = jumlah baris/item yang diterima hari ini.<br><br>Data ini otomatis diperbarui setiap 10 menit. Klik <b>↺</b> di sebelah kanan untuk refresh manual.',action:null},
-    overdue:{title:'Overdue — Belum Diterima',body:'Pengiriman yang sudah <b>dikonfirmasi oleh supplier</b> (supplier sudah berjanji kirim pada tanggal tertentu), tapi barangnya <b>belum datang</b> melewati tanggal yang dijanjikan.<br><br>Ini perlu <b>ditindaklanjuti segera</b> — hubungi supplier dan tanyakan status pengirimannya. Buka menu <b>Jadwal Pengiriman → tab Konfirmasi</b> untuk lihat detail.',action:null},
-    koneksi:{title:'Status Koneksi Sistem',body:'Menunjukkan apakah dashboard terhubung ke sistem-sistem yang dibutuhkan.<br><br><b>● Hijau</b> = terhubung &amp; berjalan normal<br><b>● Abu / merah</b> = tidak terhubung<br><br><b>SAP API</b> — sumber data stok, PO, dan GRPO. Harus hijau agar Sync Semua bisa berjalan.<br><b>Firebase Cloud</b> — penyimpanan cloud untuk sinkronisasi antar komputer.<br><b>Real-time Sync</b> — update otomatis jika ada perubahan dari perangkat lain.<br><b>Data MRP</b> — data rencana produksi untuk kalkulasi kebutuhan stok.',action:null}
-  };
-  var _dashTipActive = null;
-  function _showDashTip(key, btn) {
-    var box = document.getElementById('dash-tip-global');
-    if(!box) return;
-    if(_dashTipActive === key) { box.style.display='none'; _dashTipActive=null; return; }
-    var tip = DASH_TIPS[key];
-    if(!tip) return;
-    box.innerHTML = '<div class="tip-title">'+tip.title+'</div><div class="tip-body">'+tip.body+'</div><div class="tip-close"><button onclick="document.getElementById('dash-tip-global').style.display='none';_dashTipActive=null">Tutup ✕</button></div>';
-    // Position: below button, right-aligned if near right edge
-    var r = btn.getBoundingClientRect();
-    var boxW = 290, boxH = 260;
-    var left = r.left + window.scrollX - boxW + 20;
-    var top  = r.bottom + window.scrollY + 8;
-    if(left < 8) left = 8;
-    if(left + boxW > window.innerWidth - 8) left = window.innerWidth - boxW - 8;
-    box.style.left = left + 'px';
-    box.style.top  = top  + 'px';
-    box.style.display = 'block';
-    _dashTipActive = key;
-  }
-  document.addEventListener('click', function(e) {
-    if(!_dashTipActive) return;
-    var box = document.getElementById('dash-tip-global');
-    if(box && !box.contains(e.target) && !e.target.classList.contains('_dtip')) {
-      box.style.display='none'; _dashTipActive=null;
-    }
-  });
-  </script>
 </div>
 </div>
 
@@ -1352,6 +1299,31 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
         </div>
       </div>
     </div>
+
+    <!-- AI ASSISTANT -->
+    <div class="card" style="border-color:rgba(124,58,237,.35)">
+      <div class="card-hdr" style="background:var(--purple-bg)">
+        <span class="card-title">🤖 AI Asisten PPIC</span>
+        <span id="ai-dot" class="dot off"></span>
+      </div>
+      <div style="padding:16px">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Masukkan API Key Anthropic untuk mengaktifkan asisten AI di dashboard. AI akan punya akses ke data stok, jadwal, PO, dan GRPO untuk membantu analisis.</div>
+        <div class="fg">
+          <label style="font-size:11px">Anthropic API Key</label>
+          <input id="cfg-ai-key" type="password" placeholder="sk-ant-api03-..." style="width:100%;font-family:var(--mono);font-size:11.5px">
+        </div>
+        <div style="display:flex;gap:8px;margin-top:2px">
+          <button class="btn btn-primary btn-sm" onclick="_aiSaveKey()">Simpan & Aktifkan</button>
+          <button class="btn btn-sm" onclick="window.open('https://console.anthropic.com/','_blank')">Buka Console ↗</button>
+        </div>
+        <div id="ai-key-status" style="margin-top:8px;font-size:11px;color:var(--muted)"></div>
+        <div style="margin-top:10px;padding:8px;background:var(--bg3);border-radius:5px;font-size:10.5px;color:var(--muted);line-height:1.6">
+          Key tersimpan di <b>Firebase</b> (terenkripsi di cloud). Setelah diisi di satu perangkat, perangkat lain langsung aktif.<br>
+          Biaya sangat kecil: ~Rp 50–200 per sesi percakapan (model claude-sonnet-4-6).
+        </div>
+      </div>
+    </div>
+
   </div>
 </div>
 </div>
@@ -1899,6 +1871,471 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
   </div>
 </div>
 
+
+<!-- ═══ DASHBOARD INFO TIP SYSTEM — v2 ════════════════════════════════════════ -->
+<style>
+._dtip{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(--bg4);border:1px solid var(--border2);color:var(--muted);font-size:9px;font-weight:700;cursor:pointer;flex-shrink:0;user-select:none;vertical-align:middle;transition:.12s;line-height:1}
+._dtip:hover{background:var(--accent-bg);color:var(--accent);border-color:rgba(37,99,235,.35)}
+#dash-tip-box{display:none;position:fixed;z-index:9000;width:290px;background:var(--bg2);border:1.5px solid var(--border2);border-radius:12px;padding:16px 18px;box-shadow:0 10px 36px rgba(0,0,0,.28);pointer-events:auto;max-height:80vh;overflow-y:auto}
+#dash-tip-box .dtb-title{font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);margin-bottom:9px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+#dash-tip-box .dtb-body{font-size:12.5px;line-height:1.7;color:var(--text)}
+#dash-tip-box .dtb-body b{color:var(--text);font-weight:600}
+#dash-tip-box .dtb-row{display:flex;align-items:flex-start;gap:8px;margin:5px 0}
+#dash-tip-box .dtb-badge{flex-shrink:0;font-size:10px;font-weight:700;padding:1px 8px;border-radius:99px;margin-top:2px}
+#dash-tip-box .dtb-foot{display:flex;justify-content:flex-end;margin-top:10px;padding-top:8px;border-top:1px solid var(--border)}
+#dash-tip-box .dtb-foot button{font-size:11px;padding:3px 12px;border:1px solid var(--border2);border-radius:6px;background:var(--bg3);color:var(--muted);cursor:pointer}
+#dash-tip-box .dtb-foot button:hover{background:var(--bg4);color:var(--text)}
+</style>
+<div id="dash-tip-box"></div>
+<script>
+(function(){
+var _TIPS = {
+  urgent:{
+    t:'Item Urgent',
+    b:'Item yang stoknya <b>hampir habis</b> dalam waktu dekat.<br><br><b>Coverage</b> = perkiraan stok akan habis kapan. Item masuk Urgent jika coverage kurang dari batas hari (W+N, default 14 hari).<br><br>Angka ini <b>semakin besar = semakin darurat</b>. Segera lakukan pembelian atau percepat jadwal PO yang ada.'
+  },
+  total:{
+    t:'Total Item',
+    b:'Jumlah total bahan baku (RM), packaging (PM), dan produk jadi (FG) yang sedang dipantau dalam Projection Stock.<br><br>Gunakan filter tab <b>RM / PM / FG</b> di atas untuk memisahkan per kategori.'
+  },
+  po:{
+    t:'PO Open',
+    b:'<b>Purchase Order</b> yang sudah dibuat ke supplier, tapi barangnya <b>belum datang</b>.<br><br>PO Open = stok yang sedang "on the way" — sudah dipesan, tinggal menunggu pengiriman.<br><br>Pastikan setiap PO sudah punya <b>tanggal request kirim</b> agar supplier tahu kapan harus kirim. Bisa diatur di menu <b>List Pengiriman (PO)</b>.'
+  },
+  unconf:{
+    t:'Jadwal Belum Dikonfirmasi',
+    b:'Jadwal pengiriman yang sudah <b>dikirim ke supplier via WhatsApp</b>, tapi supplier <b>belum membalas konfirmasi</b> tanggal kirimnya.<br><br>Angka ini perlu dipantau. Semakin banyak = semakin banyak pengiriman yang belum pasti. <b>Follow up ke supplier</b> jika sudah lebih dari 1-2 hari belum ada balasan.'
+  },
+  stockbars:{
+    t:'Kondisi Stok Keseluruhan',
+    b:'Menunjukkan berapa banyak item di tiap kondisi stok berdasarkan <b>coverage</b> (berapa hari stok masih cukup).<br><br><div class="dtb-row"><span class="dtb-badge" style="background:var(--red-bg);color:var(--red);border:1px solid rgba(220,38,38,.2)">UNDER</span><span>Stok <b>kritis</b> — kurang dari 14 hari. Perlu segera dipesan.</span></div><div class="dtb-row"><span class="dtb-badge" style="background:var(--green-bg);color:var(--green);border:1px solid rgba(5,150,105,.2)">GOOD</span><span>Stok <b>normal</b> — 14 sampai 30 hari. Kondisi aman.</span></div><div class="dtb-row"><span class="dtb-badge" style="background:var(--accent-bg);color:var(--accent);border:1px solid rgba(37,99,235,.2)">OVER</span><span>Stok <b>berlebih</b> — lebih dari 30 hari. Pertimbangkan tunda PO.</span></div>'
+  },
+  highlighted:{
+    t:'Highlighted Issues',
+    b:'Item <b>RM / PM yang sudah dijadwalkan kirim</b> namun terhambat di sisi supplier — misalnya supplier belum bisa kirim karena stok kosong, kendala produksi, atau masalah lainnya.<br><br>Item di sini perlu dipantau dan di-follow up aktif sampai barang benar-benar diterima.<br><br><b>Cara menambahkan item:</b><br>1. Buka menu <b>Projection Stock</b><br>2. Cari item yang bermasalah<br>3. Centang kotak <b>☐</b> di kolom paling kiri<br>4. Item langsung muncul di sini'
+  },
+  kritis:{
+    t:'Item Kritis',
+    b:'Daftar item yang <b>stoknya akan habis paling cepat</b> berdasarkan proyeksi pemakaian.<br><br><b>Coverage</b> = perkiraan tanggal stok habis jika tidak ada pengiriman baru masuk.<br><b>DOI</b> (Days of Inventory) = berapa hari stok masih bisa bertahan dari sekarang.<br><br>Baris berwarna <span style="color:var(--red)">merah</span> = kondisi darurat, perlu tindakan segera.'
+  },
+  jadwalminggu:{
+    t:'Jadwal Pengiriman Minggu Ini',
+    b:'Ringkasan pengiriman yang dijadwalkan masuk <b>minggu ini</b>.<br><br><b>Arti status:</b><br><b>Pending</b> — belum disetujui PPIC<br><b>Approved</b> — sudah disetujui, siap dikirim ke supplier<br><b>Terkirim</b> — notifikasi WA sudah dikirim ke supplier<br><b>Konfirmasi</b> — supplier sudah balas dan konfirmasi tanggal kirimnya<br><br>Kelola jadwal lengkap di menu <b>Jadwal Pengiriman</b>.'
+  },
+  grpo:{
+    t:'GRPO Hari Ini',
+    b:'<b>GRPO</b> (Goods Receipt Purchase Order) = barang yang sudah <b>masuk dan diterima gudang hari ini</b> berdasarkan data SAP.<br><br>Angka di badge biru = jumlah item yang diterima hari ini.<br><br>Data diperbarui otomatis tiap 10 menit. Klik <b>&#8635;</b> untuk refresh manual sekarang.'
+  },
+  overdue:{
+    t:'Overdue — Belum Diterima',
+    b:'Pengiriman yang sudah <b>dikonfirmasi supplier</b> (supplier janji kirim pada tanggal tertentu), tapi barangnya <b>belum datang</b> melewati tanggal yang dijanjikan.<br><br>Ini perlu <b>ditindaklanjuti segera</b> — hubungi supplier dan tanyakan status pengirimannya. Detail lengkap ada di menu <b>Jadwal Pengiriman &rarr; tab Konfirmasi</b>.'
+  },
+  koneksi:{
+    t:'Status Koneksi Sistem',
+    b:'Menunjukkan apakah dashboard terhubung ke sistem pendukung.<br><br><b>Dot hijau</b> = terhubung dan berjalan<br><b>Dot abu/merah</b> = tidak terhubung<br><br><b>SAP API</b> &mdash; sumber data stok, PO, dan GRPO. Harus hijau agar Sync Semua bisa jalan.<br><b>Firebase Cloud</b> &mdash; sinkronisasi data antar komputer.<br><b>Real-time Sync</b> &mdash; update otomatis jika ada perubahan dari perangkat lain.<br><b>Data MRP</b> &mdash; data rencana produksi untuk kalkulasi kebutuhan stok.'
+  }
+};
+var _tipActive = null;
+
+window._showDashTip = function(key, el) {
+  var box = document.getElementById('dash-tip-box');
+  if(!box) return;
+  // Toggle off jika klik key yang sama
+  if(_tipActive === key) { box.style.display='none'; _tipActive=null; return; }
+  var tip = _TIPS[key];
+  if(!tip) return;
+
+  // Build content
+  var html = '<div class="dtb-title">'+tip.t+'</div>'
+    + '<div class="dtb-body">'+tip.b+'</div>'
+    + '<div class="dtb-foot"><button id="dash-tip-close-btn">Tutup &times;</button></div>';
+  box.innerHTML = html;
+  document.getElementById('dash-tip-close-btn').onclick = function(){
+    box.style.display='none'; _tipActive=null;
+  };
+
+  // Positioning — fixed = viewport coords, NO scrollX/scrollY needed
+  box.style.display = 'block';
+  var r = el.getBoundingClientRect();
+  var bw = box.offsetWidth || 290;
+  var left = r.right - bw;
+  var top  = r.bottom + 6;
+  // Guard: tidak keluar viewport
+  if(left < 8) left = 8;
+  if(left + bw > window.innerWidth - 8) left = window.innerWidth - bw - 8;
+  if(top + 260 > window.innerHeight - 8) top = r.top - 260 - 6;
+  box.style.left = left + 'px';
+  box.style.top  = top  + 'px';
+  _tipActive = key;
+};
+
+document.addEventListener('click', function(e){
+  if(!_tipActive) return;
+  var box = document.getElementById('dash-tip-box');
+  if(!box) return;
+  var tgt = e.target;
+  // Jangan tutup jika klik di dalam box atau di tombol _dtip
+  var inBox = box.contains(tgt);
+  var isDtip = tgt.classList && tgt.classList.contains('_dtip');
+  if(!inBox && !isDtip) { box.style.display='none'; _tipActive=null; }
+}, true);
+})();
+</script>
+<!-- ═══ END DASHBOARD INFO TIP SYSTEM ══════════════════════════════════════════ -->
+
+<!-- 🤖 AI ASISTEN PPIC -->
+<style>
+#ai-fab{position:fixed;bottom:24px;right:24px;width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,var(--purple),#5b21b6);color:#fff;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:20px;box-shadow:0 4px 16px rgba(124,58,237,.45);z-index:800;transition:.2s;user-select:none}
+#ai-fab:hover{transform:scale(1.1);box-shadow:0 6px 24px rgba(124,58,237,.6)}
+#ai-panel{position:fixed;right:-440px;top:0;width:420px;height:100vh;background:var(--bg2);border-left:1px solid var(--border);z-index:799;display:flex;flex-direction:column;transition:right .25s cubic-bezier(.4,0,.2,1);box-shadow:-8px 0 32px rgba(0,0,0,.15)}
+#ai-panel.open{right:0}
+#ai-panel-hdr{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-shrink:0;background:var(--bg3)}
+.ai-hdr-ico{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,var(--purple),#5b21b6);display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0}
+.ai-hdr-title{font-size:13px;font-weight:600;color:var(--text)}
+.ai-hdr-sub{font-size:10.5px;color:var(--muted);margin-top:1px}
+#ai-ctx-strip{padding:7px 14px;border-bottom:1px solid var(--border);background:var(--bg3);font-size:10.5px;color:var(--muted);display:flex;align-items:center;gap:5px;flex-wrap:wrap;flex-shrink:0}
+.ai-ctx-chip{background:var(--bg4);border:1px solid var(--border);border-radius:99px;padding:1px 8px;font-size:10px;font-weight:600;color:var(--muted)}
+.ai-ctx-chip.red{background:var(--red-bg);border-color:rgba(220,38,38,.2);color:var(--red)}
+.ai-ctx-chip.amber{background:var(--amber-bg);border-color:rgba(217,119,6,.2);color:var(--amber)}
+#ai-messages{flex:1;overflow-y:auto;padding:14px 14px 8px;display:flex;flex-direction:column;gap:10px}
+.ai-msg{display:flex;flex-direction:column;max-width:88%}
+.ai-msg.user{align-self:flex-end;align-items:flex-end}
+.ai-msg.assistant{align-self:flex-start;align-items:flex-start}
+.ai-msg.system{align-self:center;align-items:center;max-width:96%}
+.ai-bubble{padding:9px 13px;border-radius:12px;font-size:12.5px;line-height:1.65;white-space:pre-wrap;word-break:break-word}
+.ai-msg.user .ai-bubble{background:var(--accent);color:#fff;border-bottom-right-radius:3px}
+.ai-msg.assistant .ai-bubble{background:var(--bg3);color:var(--text);border:1px solid var(--border);border-bottom-left-radius:3px}
+.ai-msg.system .ai-bubble{background:var(--amber-bg);color:var(--amber);border:1px solid rgba(217,119,6,.2);font-size:11.5px;text-align:center;border-radius:8px;padding:8px 14px}
+.ai-typing{display:flex;gap:4px;align-items:center;padding:12px 14px}
+.ai-typing span{width:6px;height:6px;background:var(--muted);border-radius:50%;animation:ai-bounce .8s infinite}
+.ai-typing span:nth-child(2){animation-delay:.15s}
+.ai-typing span:nth-child(3){animation-delay:.3s}
+@keyframes ai-bounce{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-6px)}}
+@keyframes ai-blink{0%,100%{opacity:1}50%{opacity:0}}
+#ai-quick{padding:8px 12px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:5px;flex-shrink:0}
+.ai-quick-btn{padding:4px 11px;border:1px solid var(--border2);border-radius:99px;font-size:11px;color:var(--muted);background:var(--bg3);cursor:pointer;transition:.1s;white-space:nowrap}
+.ai-quick-btn:hover{background:var(--purple-bg);color:var(--purple);border-color:rgba(124,58,237,.3)}
+#ai-input-area{padding:10px 12px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:flex-end;flex-shrink:0;background:var(--bg2)}
+#ai-input{flex:1;padding:9px 12px;border:1.5px solid var(--border2);border-radius:10px;font-size:12.5px;font-family:var(--font);background:var(--bg3);color:var(--text);outline:none;resize:none;min-height:40px;max-height:120px;line-height:1.5;transition:.1s}
+#ai-input:focus{border-color:var(--purple);background:var(--bg2)}
+#ai-send-btn{width:36px;height:36px;border-radius:9px;background:var(--purple);border:none;color:#fff;cursor:pointer;font-size:15px;flex-shrink:0;transition:.15s;margin-bottom:2px}
+#ai-send-btn:hover{background:#5b21b6}
+#ai-send-btn:disabled{opacity:.35;cursor:not-allowed}
+.ai-icon-btn{width:28px;height:28px;border-radius:6px;background:transparent;border:1px solid var(--border2);color:var(--muted);cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;transition:.15s}
+.ai-icon-btn:hover{background:var(--bg4);color:var(--text)}
+</style>
+<button id="ai-fab" onclick="_aiTogglePanel()" title="AI Asisten PPIC">&#x1F916;</button>
+
+<div id="ai-panel">
+  <div id="ai-panel-hdr">
+    <div class="ai-hdr-ico">&#x1F916;</div>
+    <div style="flex:1">
+      <div class="ai-hdr-title">AI Asisten PPIC</div>
+      <div class="ai-hdr-sub">Tanya apa saja tentang stok &amp; pengiriman</div>
+    </div>
+    <button class="ai-icon-btn" onclick="_aiClearHistory()" title="Hapus riwayat">&#x1F5D1;</button>
+    <button class="ai-icon-btn" onclick="_aiTogglePanel()" style="margin-left:4px">&#x2715;</button>
+  </div>
+  <div id="ai-ctx-strip">
+    <span style="font-weight:600;color:var(--text);font-size:10.5px">Data aktif:</span>
+    <span id="ai-ctx-urgent" class="ai-ctx-chip red">—</span>
+    <span id="ai-ctx-po" class="ai-ctx-chip amber">—</span>
+    <span id="ai-ctx-jadwal" class="ai-ctx-chip">—</span>
+    <span id="ai-ctx-grpo" class="ai-ctx-chip">—</span>
+  </div>
+  <div id="ai-messages">
+    <div class="ai-msg assistant"><div class="ai-bubble">Halo! Saya asisten PPIC Eka Jaya. Saya punya akses ke data stok, jadwal pengiriman, PO, dan GRPO yang sedang aktif.<br><br>Mau tanya apa? &#x1F44B;</div></div>
+  </div>
+  <div id="ai-quick">
+    <button class="ai-quick-btn" onclick="_aiQuick(this)">&#x1F4CA; Ringkasan kondisi hari ini</button>
+    <button class="ai-quick-btn" onclick="_aiQuick(this)">&#x1F6A8; Item paling kritis sekarang</button>
+    <button class="ai-quick-btn" onclick="_aiQuick(this)">&#x1F4E6; Supplier yang perlu di-follow up</button>
+    <button class="ai-quick-btn" onclick="_aiQuick(this)">&#x1F4EC; Pengiriman masuk minggu ini</button>
+    <button class="ai-quick-btn" onclick="_aiQuick(this)">&#x26A0; Ada yang overdue?</button>
+  </div>
+  <div id="ai-input-area">
+    <textarea id="ai-input" placeholder="Tanya tentang stok, jadwal, supplier..." rows="1"></textarea>
+    <button id="ai-send-btn" onclick="_aiSend()" title="Kirim (Enter)">&#x27A4;</button>
+  </div>
+</div>
+<script>
+var _aiKey = localStorage.getItem('ai_api_key') || '';
+var _aiHistory = [];
+var _aiStreaming = false;
+var _aiPanelOpen = false;
+
+// Init textarea keyboard handler after DOM ready
+document.addEventListener('DOMContentLoaded', function() {
+  var inp = document.getElementById('ai-input');
+  if(inp) {
+    inp.addEventListener('keydown', function(e) {
+      if(e.key==='Enter' && !e.shiftKey) { e.preventDefault(); _aiSend(); }
+    });
+    inp.addEventListener('input', function() {
+      this.style.height = 'auto';
+      this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+    });
+  }
+});
+
+function _aiSaveKey() {
+  var k = (document.getElementById('cfg-ai-key')||{value:''}).value.trim();
+  if(!k) { toast('Masukkan API Key terlebih dahulu','err'); return; }
+  _aiKey = k;
+  localStorage.setItem('ai_api_key', k);
+  cloudSave('ai_api_key', k);
+  var dot = document.getElementById('ai-dot'); if(dot) dot.className = 'dot';
+  var st = document.getElementById('ai-key-status');
+  if(st) st.innerHTML = '<span style="color:var(--green)">&#x2713; API Key aktif</span>';
+  toast('AI API Key disimpan &#x2713;','ok');
+}
+
+function _aiTogglePanel() {
+  _aiPanelOpen = !_aiPanelOpen;
+  var p = document.getElementById('ai-panel');
+  if(p) p.classList.toggle('open', _aiPanelOpen);
+  if(_aiPanelOpen) _aiRefreshCtx();
+}
+
+function _aiRefreshCtx() {
+  var urgent = (STATE.projectionData||[]).filter(function(p){return p.category==='UNDER';}).length;
+  var po = (STATE.poData||[]).length;
+  var jadwal = (STATE.scheduleData||[]).filter(function(s){return s.status!=='confirmed';}).length;
+  var td = new Date();
+  var dd = String(td.getDate()).padStart(2,'0');
+  var mm = String(td.getMonth()+1).padStart(2,'0');
+  var grpoToday = (STATE.grpoData||[]).filter(function(g){
+    if(!g.grpoDate) return false;
+    var pts = g.grpoDate.split('/');
+    return pts[0]===dd && pts[1]===mm;
+  }).length;
+  var setEl = function(id,txt){ var e=document.getElementById(id); if(e) e.textContent=txt; };
+  setEl('ai-ctx-urgent', urgent+' item urgent');
+  setEl('ai-ctx-po', po+' PO open');
+  setEl('ai-ctx-jadwal', jadwal+' jadwal aktif');
+  setEl('ai-ctx-grpo', grpoToday+' GRPO hari ini');
+}
+
+function _aiBuildCtx() {
+  var today = new Date().toLocaleDateString('id-ID',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+  var proj = STATE.projectionData || [];
+  var dispFn = (typeof _dispName==='function') ? _dispName : function(p){return p.description||p.productCode;};
+  var fmtFn  = (typeof fmtDateID==='function')  ? fmtDateID  : function(d){return String(d);};
+
+  var urgent = proj.filter(function(p){return p.category==='UNDER';})
+    .sort(function(a,b){return (a.coverageDate||0)-(b.coverageDate||0);})
+    .slice(0,25).map(function(p){
+      return {kode:p.productCode, nama:dispFn(p)||p.productCode,
+        tipe:p.itemType, doi:Math.round(p.doiFC||0),
+        coverage:p.coverageDate?fmtFn(p.coverageDate):'-',
+        stok:Math.round(((p.stockBTG||0)+(p.stockSNG||0))*10)/10,
+        supplier:p.supplier, site:p.site};
+    });
+
+  var sched = (STATE.scheduleData||[]).slice(0,20).map(function(s){
+    return {supplier:s.supName,tanggal:s.date,status:s.status,items:(s.items||'').substring(0,100)};
+  });
+
+  var today_iso = new Date().toISOString().split('T')[0];
+  var overdue = (STATE.scheduleData||[]).filter(function(s){
+    if(s.status!=='confirmed') return false;
+    return (s.entries||[]).some(function(en){
+      var k=en.pos&&en.pos[0]?en.pos[0].docNum+'_'+en.pos[0].itemCode:'';
+      var ov=k?(STATE.poOverrides[k]||{}):{};
+      return ov.confDate && ov.confDate < today_iso;
+    });
+  }).map(function(s){return {supplier:s.supName,items:(s.items||'').substring(0,80)};});
+
+  var td2=new Date();
+  var dd2=String(td2.getDate()).padStart(2,'0');
+  var mm2=String(td2.getMonth()+1).padStart(2,'0');
+  var grpoToday = (STATE.grpoData||[]).filter(function(g){
+    if(!g.grpoDate) return false;
+    var pts=g.grpoDate.split('/');
+    return pts[0]===dd2 && pts[1]===mm2;
+  }).slice(0,15).map(function(g){
+    return {item:g.itemName||g.itemCode, supplier:g.supplierName, qty:g.qty, uom:g.uom};
+  });
+
+  var hl = Object.keys(PROJ_HIGHLIGHTED||{}).filter(function(k){return PROJ_HIGHLIGHTED[k];})
+    .map(function(k){
+      var it=proj.find(function(p){return p.productCode===k;});
+      return it?{kode:k, nama:dispFn(it)||k, doi:Math.round(it.doiFC||0)}:{kode:k};
+    });
+
+  return {
+    tanggal: today,
+    ringkasan: {
+      totalItem: proj.length,
+      itemUrgent: urgent.length,
+      itemGood: proj.filter(function(p){return p.category==='GOOD';}).length,
+      itemOver: proj.filter(function(p){return p.category==='OVER';}).length,
+      poOpen: (STATE.poData||[]).length,
+      jadwalBelumConfirm: sched.filter(function(j){return j.status!=='confirmed';}).length,
+      overdueCount: overdue.length
+    },
+    itemKritis_top25: urgent,
+    jadwalPengiriman: sched,
+    overdueSupplier: overdue,
+    grpoHariIni: grpoToday,
+    highlightedIssues: hl
+  };
+}
+
+function _aiMsgEl(role, text) {
+  var msgs = document.getElementById('ai-messages');
+  if(!msgs) return null;
+  var div = document.createElement('div');
+  div.className = 'ai-msg ' + role;
+  var bub = document.createElement('div');
+  bub.className = 'ai-bubble';
+  bub.innerHTML = _aiFmt(text);
+  div.appendChild(bub);
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+  return bub;
+}
+
+function _aiFmt(t) {
+  return (t||'')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/\*\*(.+?)\*\*/g,'<b>$1</b>')
+    .replace(/\*([^*]+?)\*/g,'<em>$1</em>')
+    .replace(/`([^`]+)`/g,'<code style="background:var(--bg4);padding:1px 5px;border-radius:3px;font-family:var(--mono);font-size:11px">$1</code>')
+    .replace(/\n/g,'<br>');
+}
+
+function _aiSetStream(bub, t) {
+  if(!bub) return;
+  bub.innerHTML = _aiFmt(t) + '<span style="display:inline-block;width:2px;height:13px;background:var(--purple);margin-left:2px;vertical-align:middle;animation:ai-blink .7s infinite"></span>';
+  var m=document.getElementById('ai-messages'); if(m) m.scrollTop=m.scrollHeight;
+}
+
+function _aiClearHistory() {
+  _aiHistory = [];
+  var m = document.getElementById('ai-messages');
+  if(m) m.innerHTML = '<div class="ai-msg assistant"><div class="ai-bubble">Riwayat dihapus. Ada yang bisa saya bantu? &#x1F44B;</div></div>';
+}
+
+function _aiQuick(btn) {
+  var txt = btn.textContent.replace(/^.\s/, '').trim();
+  var inp = document.getElementById('ai-input');
+  if(inp){ inp.value=txt; inp.style.height='auto'; }
+  _aiSend();
+}
+
+async function _aiSend() {
+  if(_aiStreaming) return;
+  var inp = document.getElementById('ai-input');
+  if(!inp) return;
+  var msg = inp.value.trim();
+  if(!msg) return;
+  inp.value = ''; inp.style.height = 'auto';
+
+  if(!_aiKey) {
+    _aiMsgEl('system', '&#x26A0; API Key belum diisi.\nBuka Settings &#x2192; AI Asisten PPIC untuk menambahkan API Key Anthropic.');
+    return;
+  }
+
+  _aiMsgEl('user', msg);
+  _aiHistory.push({role:'user', content:msg});
+
+  var msgs = document.getElementById('ai-messages');
+  var typDiv = document.createElement('div');
+  typDiv.id = 'ai-typ'; typDiv.className = 'ai-msg assistant';
+  typDiv.innerHTML = '<div class="ai-typing"><span></span><span></span><span></span></div>';
+  if(msgs){ msgs.appendChild(typDiv); msgs.scrollTop = msgs.scrollHeight; }
+
+  _aiStreaming = true;
+  var sb = document.getElementById('ai-send-btn'); if(sb) sb.disabled = true;
+
+  var ctx = _aiBuildCtx();
+  var sys = 'Kamu adalah asisten PPIC untuk Eka Jaya Internasional, perusahaan manufaktur dengan pabrik di Bitung (BTG) dan Sangiang (SNG).\n\nData kondisi aktual saat ini:\n'
+    + JSON.stringify(ctx, null, 2)
+    + '\n\nTerminologi:\n- DOI: Days of Inventory (berapa hari stok bertahan)\n- Coverage: perkiraan tanggal stok habis\n- UNDER <14 hari | GOOD 14-30 hari | OVER >30 hari\n- RM: Raw Material | PM: Packaging Material | FG: Finished Goods\n- GRPO: barang masuk gudang | PO: Purchase Order | MRP: Material Requirement Planning\n\nGunakan bahasa Indonesia profesional. Jawaban spesifik dan actionable. Jika ada daftar item, sebutkan nama dan kode materialnya. Jika data kosong belum sync, sampaikan itu.';
+
+  var fullText = ''; var bub = null;
+  try {
+    var resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': _aiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1024,
+        system: sys,
+        messages: _aiHistory.slice(-10),
+        stream: true
+      })
+    });
+
+    var td2 = document.getElementById('ai-typ'); if(td2) td2.remove();
+
+    if(!resp.ok) {
+      var ed = {}; try{ ed = await resp.json(); }catch(e){}
+      var em = (ed.error && ed.error.message) || ('HTTP ' + resp.status);
+      if(resp.status===401) em = 'API Key tidak valid. Cek di Settings.';
+      if(resp.status===429) em = 'Terlalu banyak request. Tunggu beberapa detik.';
+      _aiMsgEl('system', '&#x274C; ' + em);
+      _aiHistory.pop();
+    } else {
+      var d2 = document.createElement('div');
+      d2.className = 'ai-msg assistant';
+      bub = document.createElement('div');
+      bub.className = 'ai-bubble';
+      d2.appendChild(bub);
+      if(msgs){ msgs.appendChild(d2); msgs.scrollTop = msgs.scrollHeight; }
+
+      var reader = resp.body.getReader();
+      var dec = new TextDecoder();
+      while(true) {
+        var res = await reader.read(); if(res.done) break;
+        var lines = dec.decode(res.value).split('\n');
+        for(var i=0; i<lines.length; i++) {
+          var ln = lines[i];
+          if(!ln.startsWith('data: ')) continue;
+          var dat = ln.slice(6).trim();
+          if(dat==='[DONE]') break;
+          try {
+            var parsed = JSON.parse(dat);
+            if(parsed.type==='content_block_delta' && parsed.delta && parsed.delta.text) {
+              fullText += parsed.delta.text;
+              _aiSetStream(bub, fullText);
+            }
+          } catch(e){}
+        }
+      }
+      if(bub) bub.innerHTML = _aiFmt(fullText);
+      _aiHistory.push({role:'assistant', content:fullText});
+    }
+  } catch(e) {
+    var td3 = document.getElementById('ai-typ'); if(td3) td3.remove();
+    _aiMsgEl('system', '&#x274C; Gagal terhubung: ' + e.message);
+    _aiHistory.pop();
+  }
+
+  _aiStreaming = false;
+  var sb2 = document.getElementById('ai-send-btn'); if(sb2) sb2.disabled = false;
+  var inp2 = document.getElementById('ai-input'); if(inp2) inp2.focus();
+}
+
+// Restore key on load
+(function(){
+  var k = localStorage.getItem('ai_api_key');
+  if(k) {
+    _aiKey = k;
+    var dot = document.getElementById('ai-dot'); if(dot) dot.className = 'dot';
+    var si = document.getElementById('cfg-ai-key'); if(si) si.value = k;
+    var st = document.getElementById('ai-key-status');
+    if(st) st.innerHTML = '<span style="color:var(--green)">&#x2713; API Key aktif</span>';
+  }
+})();
+</script>
+
 <div id="toast"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -2054,7 +2491,8 @@ var CLOUD_KEYS = [
   'fc_autopropose',
   'matcom_monthly','matcom_data','matcom_count','last_matcom_sync',
   'mps_ui_status','bom_ui_status','mrp_last_calc',
-  'email_daily_data'
+  'email_daily_data',
+  'ai_api_key'
 ];
 
 // ── Sync indicator di header ──────────────────────────────────────────────────
@@ -2403,6 +2841,8 @@ function _applyRealtimeChanges(keys) {
         case 'update_deldate_data':
           try { STATE.updateDelDateData = JSON.parse(val || '{}'); if(document.getElementById('pg-po')&&document.getElementById('pg-po').classList.contains('active')) renderPO(); } catch(e) {}
           break;
+        case 'ai_api_key':
+          try { if(val){ _aiKey=val; localStorage.setItem('ai_api_key',val); var _aiDot=document.getElementById('ai-dot'); if(_aiDot)_aiDot.className='dot'; } } catch(e) {} break;
       }
     } catch(e) { console.warn('Realtime apply error for', k, e.message); }
   });
@@ -5348,6 +5788,7 @@ function renderDashboard() {
 
   var subUrg=document.getElementById('dash-sub-urgent'); if(subUrg) subUrg.textContent=_dashType==='ALL'?'semua tipe':_dashType+' only';
   var subTot=document.getElementById('dash-sub-total'); if(subTot) subTot.textContent=_dashType==='ALL'?'RM + PM + FG':_dashType+' items';
+  var urgUnit=document.getElementById('s-urgent-unit'); if(urgUnit) urgUnit.textContent=(_dashType==='ALL'?'kode material (SKU)':_dashType+' · kode material (SKU)');
 
   var types = _dashType==='ALL' ? ['RM','PM','FG'] : [_dashType];
   var barsEl = document.getElementById('dash-stock-bars');
