@@ -2362,10 +2362,14 @@ function _aiBuildCtx() {
     if(!pos.length) return [];
     return pos.map(function(po){
       var ovr = (STATE.poOverrides||{})[String(po.docNum)+'_'+po.itemCode] || {};
-      return {docNum:po.docNum, qty:po.openQty, uom:po.uom,
-        prReqDate:po.prReqDate,
+      return {
+        docNum: po.docNum, qty: po.openQty, uom: po.uom,
+        prReqDate: po.prReqDate,
         tglKirim: ovr.date ? ovr.date.split('-').reverse().join('/') : 'belum dijadwal',
-        sudahKonfirmasi: ovr.confDate ? ovr.confDate.split('-').reverse().join('/') : null};
+        konfirmasi_supplier: ovr.confDate ? ovr.confDate.split('-').reverse().join('/') : null,
+        qty_konfirmasi: ovr.confQty || null,
+        catatan: ovr.confDate ? 'SUDAH DIKONFIRMASI supplier' : (ovr.date ? 'sudah dijadwal, belum konfirmasi' : 'belum dijadwal')
+      };
     });
   }
 
@@ -2401,7 +2405,7 @@ function _aiBuildCtx() {
       total_ospr: Math.round(p.totalOSPR||0),
       pct_aktual_vs_forecast: p.pctUsageVsForecast ? Math.round(p.pctUsageVsForecast*100)+'%' : null,
       kebutuhan_per_bulan: (function(){var m=getMRPBulanan(p.productCode); if(!m) return null; var keys=Object.keys(m).slice(0,6); var out={}; keys.forEach(function(k){out[k]=m[k];}); return out;})(),
-      po_open: getPOItem(p.productCode).slice(0,3),
+      po_open: getPOItem(p.productCode).slice(0,8),
       matcom: getMatcomItem(p.productCode),
       comment: p.comment || null
     };
@@ -2555,7 +2559,6 @@ async function _aiSend() {
   _aiMsgEl('user', msg);
   _aiHistory.push({role:'user',content:msg});
 
-  // Typing indicator
   var msgs=document.getElementById('ai-messages');
   var typDiv=document.createElement('div');
   typDiv.id='ai-typ'; typDiv.className='ai-msg assistant';
@@ -2577,149 +2580,156 @@ async function _aiSend() {
     +'- Identifikasi risiko: item UNDER tanpa PO open = darurat, UNDER dengan PO = pantau tglKirim\n'
     +'- Evaluasi performa supplier: cek overdue, ketepatan konfirmasi, dan histori GRPO\n'
     +'- Rekomendasi tindakan spesifik yang bisa langsung dieksekusi\n\n'
+    +'== PERBEDAAN FIELD PENTING ==\n'
+    +'- coverage_habis: BUKAN tanggal datang barang. Ini tanggal teoritis stok akan habis jika tidak ada barang masuk.\n'
+    +'- po_open[].tglKirim: tanggal REQUEST kirim yang sudah dijadwalkan (belum konfirmasi supplier)\n'
+    +'- po_open[].sudahKonfirmasi: tanggal KONFIRMASI dari supplier — ini tanggal aktual barang akan datang\n'
+    +'- Untuk pertanyaan "dateng kapan / kapan datang": lihat sudahKonfirmasi atau tglKirim di po_open\n\n'
     +'== CARA MENGANALISIS ==\n'
     +'1. Coverage < 14 hari (UNDER) = kritis. Cek apakah ada PO open yang akan datang\n'
     +'2. End stock bulan ini negatif = stok tidak cukup untuk kebutuhan bulan ini\n'
     +'3. DOI < target = perlu tambah order. DOI >> target = kelebihan stok, tahan PO\n'
-    +'4. Jika PO open ada tapi belum punya tglKirim = harus segera dijadwalkan\n'
-    +'5. Pct aktual vs forecast < 70% = pemakaian lebih rendah dari rencana\n\n'
-    +'== TERMINOLOGI ==\n'
-    +'- doi_hari: Days of Inventory = sisa hari stok bertahan\n'
-    +'- coverage_habis: tanggal stok akan habis jika tidak ada pengiriman baru\n'
-    +'- kebutuhan_per_bulan: rencana kebutuhan MRP per bulan dari jadwal produksi\n'
-    +'- mrp_bulan_ini: kebutuhan bulan berjalan\n'
-    +'- mrp_max_3bln: nilai MRP tertinggi 3 bulan terakhir (basis sizing)\n'
-    +'- end_stock_bulan_ini: sisa stok di akhir bulan ini setelah dikurangi kebutuhan\n'
-    +'- total_po_open_qty: total qty PO yang sudah dibuat tapi barang belum datang\n'
-    +'- tglKirim: tanggal dijadwalkan kirim ke pabrik (dari jadwal pengiriman)\n'
-    +'- UNDER=kritis <14hr | GOOD=aman 14-30hr | OVER=berlebih >30hr\n'
-    +'- RM=Raw Material | PM=Packaging Material | FG=Finished Goods\n'
-    +'- GRPO=barang sudah diterima gudang | OSPR=PR sudah dibuat belum jadi PO\n\n'
+    +'4. Jika PO ada tapi tglKirim kosong = harus segera dijadwalkan\n\n'
+    +'== INSTRUKSI TOOLS ==\n'
+    +'Jika item tidak ada di context atau data PO tidak lengkap, WAJIB panggil search_item atau get_item_detail dulu sebelum menjawab. Jangan mengarang data.\n\n'
     +'== INSTRUKSI JAWABAN ==\n'
     +'- Jawab bahasa Indonesia profesional, langsung ke inti\n'
     +'- Selalu berikan angka aktual dari data (kode, nama, qty, tanggal)\n'
-    +'- Jika item ada di data, WAJIB jawab dengan detail spesifik\n'
-    +'- Jangan bilang tidak ada informasi jika data ada di context\n'
-    +'- Untuk item tidak di context: gunakan tool search_item atau get_item_detail\n'
-    +'- Tutup setiap analisis dengan rekomendasi tindakan yang clear'+'Jika diminta melakukan aksi (tandai item, tambah comment, jadwalkan PO), gunakan tools yang tersedia. Cari item dulu dengan search_item jika kode belum diketahui. Konfirmasi dengan menyebut nama + kode item sebelum eksekusi. Bahasa Indonesia profesional.';
+    +'- Tutup setiap analisis dengan rekomendasi tindakan yang clear';
 
-  var isCmd=_aiIsCommand(msg);
   var allMsgs=[{role:'system',content:sys}].concat(_aiHistory.slice(-10));
 
+  // WRITE tools = perlu konfirmasi
+  var WRITE_TOOLS = ['highlight_item','add_comment','schedule_delivery'];
+  // READ tools = auto-execute tanpa konfirmasi
+  var READ_TOOLS  = ['search_item','get_item_detail'];
+
   try {
-    var resp = await _aiGroqCall(allMsgs, isCmd);
+    // Selalu pakai tools (non-streaming) untuk first pass
+    var resp = await _aiGroqCall(allMsgs, true);
     var td2=document.getElementById('ai-typ'); if(td2) td2.remove();
 
     if(!resp.ok){
       var ed={}; try{ed=await resp.json();}catch(e){}
       var em=(ed.error&&ed.error.message)||('HTTP '+resp.status);
-      if(resp.status===401) em='Groq API Key tidak valid. Cek di Settings \u2192 AI Asisten PPIC.';
-      if(resp.status===429) em='Rate limit Groq. Tunggu sebentar lalu coba lagi.';
-      _aiMsgEl('system','&#x274C; '+em);
+      if(resp.status===401) em='Gemini API Key tidak valid. Cek di Settings \u2192 AI Asisten PPIC.';
+      if(resp.status===429) em='Rate limit Gemini tercapai. Tunggu 1 menit lalu coba lagi.';
+      if(resp.status===503) em='Server Gemini sedang sibuk. Coba lagi dalam beberapa detik.';
+      _aiMsgEl('system','\u274C '+em);
       _aiHistory.pop(); _aiStreaming=false;
       var sb2=document.getElementById('ai-send-btn'); if(sb2) sb2.disabled=false; return;
     }
 
-    // ── TOOL CALL mode (non-streaming) ──────────────────────────────────────
-    if(isCmd) {
-      var data=await resp.json();
-      var choice=data.choices&&data.choices[0];
-      if(!choice){_aiMsgEl('system','Tidak ada respons dari AI.');_aiHistory.pop();_aiStreaming=false;var sb3=document.getElementById('ai-send-btn');if(sb3)sb3.disabled=false;return;}
+    var data=await resp.json();
+    var choice=data.choices&&data.choices[0];
+    if(!choice){
+      _aiMsgEl('system','Tidak ada respons dari AI. Coba lagi.');
+      _aiHistory.pop(); _aiStreaming=false;
+      var sb3=document.getElementById('ai-send-btn'); if(sb3) sb3.disabled=false; return;
+    }
 
-      // Jika ada tool calls → tampilkan konfirmasi
-      if(choice.finish_reason==='tool_calls' && choice.message && choice.message.tool_calls) {
-        var toolCalls=choice.message.tool_calls;
-        var confirmed=await _aiShowConfirm(toolCalls);
+    // ── Ada tool calls ──────────────────────────────────────────────────────
+    if(choice.finish_reason==='tool_calls' && choice.message && choice.message.tool_calls) {
+      var toolCalls=choice.message.tool_calls;
 
+      // Pisahkan read vs write tools
+      var readCalls  = toolCalls.filter(function(tc){return READ_TOOLS.indexOf(tc.function.name)>=0;});
+      var writeCalls = toolCalls.filter(function(tc){return WRITE_TOOLS.indexOf(tc.function.name)>=0;});
+
+      // Execute read tools langsung tanpa konfirmasi
+      var toolResults = [];
+      readCalls.forEach(function(tc){
+        var args={}; try{args=JSON.parse(tc.function.arguments);}catch(e){}
+        var result=_aiExecTool(tc.function.name, args);
+        toolResults.push({role:'tool', tool_call_id:tc.id, content:result});
+      });
+
+      // Write tools perlu konfirmasi
+      if(writeCalls.length) {
+        var confirmed=await _aiShowConfirm(writeCalls);
         if(!confirmed){
-          _aiMsgEl('system','&#x2713; Dibatalkan.');
+          _aiMsgEl('system','\u2713 Dibatalkan.');
           _aiHistory.pop(); _aiStreaming=false;
           var sb4=document.getElementById('ai-send-btn'); if(sb4) sb4.disabled=false; return;
         }
-
-        // Eksekusi semua tools
-        var toolResults=[];
-        toolCalls.forEach(function(tc){
+        writeCalls.forEach(function(tc){
           var args={}; try{args=JSON.parse(tc.function.arguments);}catch(e){}
-          var result=_aiExecTool(tc.function.name,args);
-          toolResults.push({role:'tool',tool_call_id:tc.id,content:result});
+          var result=_aiExecTool(tc.function.name, args);
+          toolResults.push({role:'tool', tool_call_id:tc.id, content:result});
         });
+      }
 
-        // Append ke history: assistant msg (tool_calls) + tool results
-        _aiHistory.push(choice.message);
-        toolResults.forEach(function(tr){_aiHistory.push(tr);});
+      // Append ke history
+      _aiHistory.push(choice.message);
+      toolResults.forEach(function(tr){_aiHistory.push(tr);});
 
-        // Streaming call untuk summary
-        var td3=document.createElement('div');
-        td3.id='ai-typ2'; td3.className='ai-msg assistant';
-        td3.innerHTML='<div class="ai-typing"><span></span><span></span><span></span></div>';
-        if(msgs){msgs.appendChild(td3);msgs.scrollTop=msgs.scrollHeight;}
+      // Streaming call untuk final response
+      var td3=document.createElement('div');
+      td3.id='ai-typ2'; td3.className='ai-msg assistant';
+      td3.innerHTML='<div class="ai-typing"><span></span><span></span><span></span></div>';
+      if(msgs){msgs.appendChild(td3);msgs.scrollTop=msgs.scrollHeight;}
 
-        var resp2=await _aiGroqCall([{role:'system',content:sys}].concat(_aiHistory.slice(-14)), false);
-        var td4=document.getElementById('ai-typ2'); if(td4) td4.remove();
+      var resp2=await _aiGroqCall([{role:'system',content:sys}].concat(_aiHistory.slice(-14)), false);
+      var td4=document.getElementById('ai-typ2'); if(td4) td4.remove();
 
-        if(resp2.ok){
-          var d2=document.createElement('div'); d2.className='ai-msg assistant';
-          var bub=document.createElement('div'); bub.className='ai-bubble';
-          d2.appendChild(bub); if(msgs){msgs.appendChild(d2);msgs.scrollTop=msgs.scrollHeight;}
-          var reader=resp2.body.getReader(); var dec=new TextDecoder(); var fullText='';
+      if(resp2.ok){
+        var d2=document.createElement('div'); d2.className='ai-msg assistant';
+        var bub=document.createElement('div'); bub.className='ai-bubble';
+        d2.appendChild(bub); if(msgs){msgs.appendChild(d2);msgs.scrollTop=msgs.scrollHeight;}
+        var reader=resp2.body.getReader(); var dec=new TextDecoder(); var fullText='';
+        while(true){
+          var res=await reader.read(); if(res.done) break;
+          var lines=dec.decode(res.value).split('\n');
+          for(var i=0;i<lines.length;i++){
+            var ln=lines[i]; if(!ln.startsWith('data: ')) continue;
+            var dat=ln.slice(6).trim(); if(dat==='[DONE]') break;
+            try{
+              var p2=JSON.parse(dat);
+              var dlt=p2.choices&&p2.choices[0]&&p2.choices[0].delta;
+              if(dlt&&dlt.content){fullText+=dlt.content;_aiSetStream(bub,fullText);}
+            }catch(e){}
+          }
+        }
+        if(bub){
+          if(!fullText.trim()) bub.innerHTML=_aiFmt('Maaf, tidak ada respons. Coba lagi.');
+          else bub.innerHTML=_aiFmt(fullText);
+        }
+        if(fullText.trim()) _aiHistory.push({role:'assistant',content:fullText});
+      }
+
+    // ── Respons teks biasa (tidak ada tool calls) ───────────────────────────
+    } else {
+      var txt=choice.message&&choice.message.content||'';
+      if(!txt.trim()){
+        // Fallback: coba streaming tanpa tools
+        var resp3=await _aiGroqCall(allMsgs, false);
+        if(resp3.ok){
+          var d3=document.createElement('div'); d3.className='ai-msg assistant';
+          var bub3=document.createElement('div'); bub3.className='ai-bubble';
+          d3.appendChild(bub3); if(msgs){msgs.appendChild(d3);msgs.scrollTop=msgs.scrollHeight;}
+          var reader3=resp3.body.getReader(); var dec3=new TextDecoder(); var ft3='';
           while(true){
-            var res=await reader.read(); if(res.done) break;
-            var lines=dec.decode(res.value).split('\n');
-            for(var i=0;i<lines.length;i++){
-              var ln=lines[i]; if(!ln.startsWith('data: ')) continue;
-              var dat=ln.slice(6).trim(); if(dat==='[DONE]') break;
-              try{
-                var p2=JSON.parse(dat);
-                var dlt=p2.choices&&p2.choices[0]&&p2.choices[0].delta;
-                if(dlt&&dlt.content){fullText+=dlt.content;_aiSetStream(bub,fullText);}
-              }catch(e){}
+            var r3=await reader3.read(); if(r3.done) break;
+            var ll=dec3.decode(r3.value).split('\n');
+            for(var k=0;k<ll.length;k++){
+              var ln3=ll[k]; if(!ln3.startsWith('data: ')) continue;
+              var dat3=ln3.slice(6).trim(); if(dat3==='[DONE]') break;
+              try{var pp=JSON.parse(dat3);var dd=pp.choices&&pp.choices[0]&&pp.choices[0].delta;if(dd&&dd.content){ft3+=dd.content;_aiSetStream(bub3,ft3);}}catch(e){}
             }
           }
-          if(bub) bub.innerHTML=_aiFmt(fullText);
-          _aiHistory.push({role:'assistant',content:fullText});
+          if(bub3){ if(!ft3.trim()) bub3.innerHTML=_aiFmt('Tidak ada respons. Coba lagi.'); else bub3.innerHTML=_aiFmt(ft3); }
+          if(ft3.trim()) _aiHistory.push({role:'assistant',content:ft3});
         }
-
       } else {
-        // Tool mode tapi AI balas teks biasa
-        var txt=choice.message&&choice.message.content||'';
         _aiHistory.push({role:'assistant',content:txt});
         _aiMsgEl('assistant',txt);
       }
-
-    // ── STREAMING mode (pertanyaan biasa) ───────────────────────────────────
-    } else {
-      var d3=document.createElement('div'); d3.className='ai-msg assistant';
-      var bub2=document.createElement('div'); bub2.className='ai-bubble';
-      d3.appendChild(bub2); if(msgs){msgs.appendChild(d3);msgs.scrollTop=msgs.scrollHeight;}
-      var reader2=resp.body.getReader(); var dec2=new TextDecoder(); var fullText2='';
-      while(true){
-        var res2=await reader2.read(); if(res2.done) break;
-        var lines2=dec2.decode(res2.value).split('\n');
-        for(var j=0;j<lines2.length;j++){
-          var ln2=lines2[j]; if(!ln2.startsWith('data: ')) continue;
-          var dat2=ln2.slice(6).trim(); if(dat2==='[DONE]') break;
-          try{
-            var p3=JSON.parse(dat2);
-            var dlt2=p3.choices&&p3.choices[0]&&p3.choices[0].delta;
-            if(dlt2&&dlt2.content){fullText2+=dlt2.content;_aiSetStream(bub2,fullText2);}
-          }catch(e){}
-        }
-      }
-      if(bub2) {
-        if(!fullText2.trim()) {
-          bub2.innerHTML = _aiFmt('Maaf, tidak ada respons dari AI. Coba lagi atau periksa API Key di Settings.');
-        } else {
-          bub2.innerHTML = _aiFmt(fullText2);
-        }
-      }
-      if(fullText2.trim()) _aiHistory.push({role:'assistant',content:fullText2});
     }
 
   } catch(e) {
     var td5=document.getElementById('ai-typ'); if(td5) td5.remove();
     var td6=document.getElementById('ai-typ2'); if(td6) td6.remove();
-    _aiMsgEl('system','&#x274C; Gagal: '+e.message);
+    _aiMsgEl('system','\u274C Gagal: '+e.message);
     _aiHistory.pop();
   }
 
