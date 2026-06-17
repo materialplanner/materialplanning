@@ -2151,12 +2151,13 @@ function _aiToolSearch(query) {
     var mrpBul={};
     if(mrp&&mrp.months){ var months=typeof FC_MONTHS!=='undefined'?FC_MONTHS:[];
       months.forEach(function(m,i){if(mrp.months[i]>0) mrpBul[m]=Math.round(mrp.months[i]);}); }
-    var pos = (STATE.poData||[]).filter(function(po){return po.itemCode===p.productCode;})
-      .map(function(po){
-        var ovr=(STATE.poOverrides||{})[String(po.docNum)+'_'+po.itemCode]||{};
-        return {docNum:po.docNum,qty:po.openQty,uom:po.uom,prReqDate:po.prReqDate,
-          tglKirim:ovr.date?ovr.date.split('-').reverse().join('/'):'belum dijadwal'};
-      });
+    var pos = getPOItem(p.productCode); // pakai helper yg sudah include konfirmasi_supplier
+    // Sort: PO yg sudah punya jadwal/konfirmasi duluan, lalu by prReqDate
+    pos = pos.slice().sort(function(a,b){
+      var aHas = (a.konfirmasi_supplier || a.tglKirim !== 'belum dijadwal') ? 0 : 1;
+      var bHas = (b.konfirmasi_supplier || b.tglKirim !== 'belum dijadwal') ? 0 : 1;
+      return aHas - bHas;
+    });
     var mc = STATE.matcomMonthly&&STATE.matcomMonthly[p.productCode];
     return {
       kode:p.productCode, nama:dispFn2(p)||p.productCode, tipe:p.itemType,
@@ -2170,7 +2171,7 @@ function _aiToolSearch(query) {
       end_stock_bln_ini:Math.round(p.endStock||0),
       total_po_open:Math.round(p.totalIncoming||0),
       kebutuhan_per_bulan:Object.keys(mrpBul).length?mrpBul:null,
-      po_open:pos,
+      po_open:pos.slice(0,8),
       avg_usg_matcom:mc?Math.round((mc.avgUsg||0)*10)/10:null,
       comment:p.comment||null
     };
@@ -2595,6 +2596,7 @@ async function _aiSend() {
     +'== INSTRUKSI JAWABAN ==\n'
     +'- Jawab HANYA apa yang ditanya. Jangan tambahkan rekomendasi, analisis tambahan, atau saran jika tidak diminta.\n'
     +'- Bahasa Indonesia, singkat dan langsung ke inti.\n'
+    +'- Format tanggal selalu dd/mm/yyyy (contoh: 18/06/2026), bukan ISO (bukan 2026-06-18).\n'
     +'- Format jawaban untuk "dateng kapan / kapan datang / kapan kirim":\n'
     +'  * tglKirim ada, konfirmasi_supplier null → "Request kirim [tglKirim], belum dikonfirmasi supplier"\n'
     +'  * tglKirim ada, konfirmasi_supplier ada, SAMA → "Dijadwalkan [tgl], sudah dikonfirmasi supplier ([qty] [uom])"\n'
@@ -2602,7 +2604,7 @@ async function _aiSend() {
     +'  * Tidak ada tglKirim, ada comment → "Belum ada jadwal kirim. Catatan: [isi comment]"\n'
     +'  * Tidak ada tglKirim, tidak ada comment → "Belum ada jadwal kirim. PO ada tapi belum dijadwalkan."\n'
     +'  * Tidak ada PO sama sekali → "Tidak ada PO open untuk item ini."\n'
-    +'- Jika ada banyak PO, sebutkan hanya yang paling relevan (terdekat tanggalnya).\n'
+    +'- Jika ada banyak PO, fokus ke PO yang PALING DEKAT tanggalnya (sudah ada tglKirim atau konfirmasi_supplier). Abaikan PO yang tanggalnya jauh atau belum dijadwal kecuali diminta detail.\n'
     +'- Hanya tambahkan rekomendasi jika user eksplisit minta ("kasih rekomendasi", "apa yang harus dilakukan", "saran kamu", dsb).';
 
   var allMsgs=[{role:'system',content:sys}].concat(_aiHistory.slice(-10));
