@@ -450,20 +450,36 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
 
   <!-- Stat Cards -->
   <div id="dash-stat-cards" style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:14px">
-    <div class="stat"><div class="stat-lbl">Item Urgent <span id="trend-urgent"></span></div><div class="stat-val red" id="s-urgent">—</div><div class="stat-sub" id="dash-sub-urgent">coverage ≤ cutoff</div></div>
-    <div class="stat"><div class="stat-lbl">Total Item</div><div class="stat-val accent" id="s-total">—</div><div class="stat-sub" id="dash-sub-total">di projection stock</div></div>
-    <div class="stat"><div class="stat-lbl">PO Open</div><div class="stat-val amber" id="s-po">—</div><div class="stat-sub">menunggu pengiriman</div></div>
-    <div class="stat"><div class="stat-lbl">Jadwal Belum Confirm</div><div class="stat-val purple" id="s-unconfirmed">—</div><div class="stat-sub" id="stat-sub-unconf">minggu ini</div></div>
+    <div class="stat" style="position:relative">
+      <div class="stat-lbl" style="display:flex;align-items:center;gap:4px">Item Urgent <span id="trend-urgent"></span><span class="_dtip" onclick="_showDashTip('urgent',this)" title="Apa ini?">?</span></div>
+      <div class="stat-val red" id="s-urgent">—</div>
+      <div class="stat-sub" id="dash-sub-urgent">coverage ≤ cutoff</div>
+    </div>
+    <div class="stat" style="position:relative">
+      <div class="stat-lbl" style="display:flex;align-items:center;gap:4px">Total Item <span class="_dtip" onclick="_showDashTip('total',this)" title="Apa ini?">?</span></div>
+      <div class="stat-val accent" id="s-total">—</div>
+      <div class="stat-sub" id="dash-sub-total">di projection stock</div>
+    </div>
+    <div class="stat" style="position:relative">
+      <div class="stat-lbl" style="display:flex;align-items:center;gap:4px">PO Open <span class="_dtip" onclick="_showDashTip('po',this)" title="Apa ini?">?</span></div>
+      <div class="stat-val amber" id="s-po">—</div>
+      <div class="stat-sub">menunggu pengiriman</div>
+    </div>
+    <div class="stat" style="position:relative">
+      <div class="stat-lbl" style="display:flex;align-items:center;gap:4px">Jadwal Belum Confirm <span class="_dtip" onclick="_showDashTip('unconf',this)" title="Apa ini?">?</span></div>
+      <div class="stat-val purple" id="s-unconfirmed">—</div>
+      <div class="stat-sub" id="stat-sub-unconf">minggu ini</div>
+    </div>
   </div>
 
   <!-- Stock Status Bars -->
   <div id="dash-stock-bars" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:4px"></div>
-  <div style="font-size:9px;color:var(--muted);margin-bottom:14px;text-align:right">UNDER: coverage &lt;14 hari · GOOD: 14–30 hari · OVER: &gt;30 hari</div>
+  <div style="font-size:9px;color:var(--muted);margin-bottom:14px;text-align:right;display:flex;align-items:center;justify-content:flex-end;gap:6px">UNDER: coverage &lt;14 hari · GOOD: 14–30 hari · OVER: &gt;30 hari <span class="_dtip" onclick="_showDashTip('stockbars',this)" title="Apa ini?">?</span></div>
 
   <!-- Highlighted Issues -->
   <div class="card" style="padding:14px 16px;margin-bottom:14px">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-      <span style="font-size:12px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">📌 Highlighted Issues</span>
+      <span style="font-size:12px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:flex;align-items:center;gap:6px">📌 Highlighted Issues <span class="_dtip" onclick="_showDashTip('highlighted',this)" title="Apa ini?">?</span></span>
     </div>
     <div id="dash-highlighted"><div style="font-size:12px;color:var(--muted);padding:8px 0">Belum ada item yang di-highlight. Centang checkbox di kolom Projection Stock untuk menambahkan.</div></div>
   </div>
@@ -478,7 +494,7 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
     <div id="dash-left-col" style="overflow:hidden;min-height:0">
       <div class="card" style="padding:14px 16px;display:flex;flex-direction:column;height:100%">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-shrink:0">
-          <span style="font-size:12px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Item Kritis — Coverage Terdekat</span>
+          <span style="font-size:12px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:flex;align-items:center;gap:6px">Item Kritis — Coverage Terdekat <span class="_dtip" onclick="_showDashTip('kritis',this)" title="Apa ini?">?</span></span>
           <button class="btn btn-xs" onclick="showPage('projection',document.querySelectorAll('.ni')[1])">Lihat semua →</button>
         </div>
         <div id="dash-urgent-table" style="flex:1;overflow-y:auto;min-height:0"><div class="loading"><div class="spin"></div>Sync data untuk memuat...</div></div>
@@ -487,13 +503,13 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
     <div id="dash-right-col" style="display:flex;flex-direction:column;gap:10px">
       <!-- Schedule this week -->
       <div class="card" style="padding:14px 16px">
-        <div style="font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">Jadwal Pengiriman Minggu Ini</div>
+        <div style="font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;display:flex;align-items:center;gap:6px">Jadwal Pengiriman Minggu Ini <span class="_dtip" onclick="_showDashTip('jadwalminggu',this)" title="Apa ini?">?</span></div>
         <div id="dash-schedule-week"><div style="font-size:12px;color:var(--muted);padding:4px 0">Generate jadwal terlebih dahulu</div></div>
       </div>
       <!-- GRPO -->
       <div class="card" style="padding:14px 16px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-          <span style="font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">📦 GRPO Hari Ini <span id="s-grpo-today" style="font-size:10px;background:var(--teal);color:#fff;padding:1px 6px;border-radius:8px;margin-left:4px">0</span></span>
+          <span style="font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:flex;align-items:center;gap:5px">📦 GRPO Hari Ini <span id="s-grpo-today" style="font-size:10px;background:var(--teal);color:#fff;padding:1px 6px;border-radius:8px">0</span><span class="_dtip" onclick="_showDashTip('grpo',this)" title="Apa ini?">?</span></span>
           <span style="display:flex;align-items:center;gap:6px"><span style="font-size:10px;color:var(--muted)" id="grpo-poll-status"></span><span onclick="_pollGRPONow()" style="cursor:pointer;font-size:10px;color:var(--accent)" title="Refresh GRPO sekarang">↺</span></span>
         </div>
         <div id="dash-grpo-today-list" style="max-height:320px;overflow-y:auto;font-size:11px"></div>
@@ -501,14 +517,14 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
       <!-- Overdue: confirmed tapi belum diterima -->
       <div class="card" style="padding:14px 16px;border-color:rgba(239,68,68,.3)">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-          <span style="font-size:11px;font-weight:500;color:var(--red);text-transform:uppercase;letter-spacing:.5px">⚠ Overdue — Belum Diterima</span>
+          <span style="font-size:11px;font-weight:500;color:var(--red);text-transform:uppercase;letter-spacing:.5px;display:flex;align-items:center;gap:5px">⚠ Overdue — Belum Diterima <span class="_dtip" onclick="_showDashTip('overdue',this)" title="Apa ini?">?</span></span>
           <span id="s-overdue-count" style="font-size:10px;background:var(--red);color:#fff;padding:1px 6px;border-radius:8px">0</span>
         </div>
         <div id="dash-overdue-list" style="max-height:200px;overflow-y:auto;font-size:11px"></div>
       </div>
       <!-- System status -->
       <div class="card" style="padding:14px 16px">
-        <div style="font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Koneksi Sistem</div>
+        <div style="font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;display:flex;align-items:center;gap:6px">Koneksi Sistem <span class="_dtip" onclick="_showDashTip('koneksi',this)" title="Apa ini?">?</span></div>
         <div style="display:flex;flex-direction:column;gap:6px">
           <div style="display:flex;align-items:center;justify-content:space-between"><span style="font-size:12px">SAP API</span><span class="dot" id="status-sap" title="SAP"></span></div>
           <div style="display:flex;align-items:center;justify-content:space-between"><span style="font-size:12px">Firebase Cloud</span><span class="dot" id="status-fb" title="Firebase"></span></div>
@@ -520,6 +536,64 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
   </div>
 
   <div id="dash-alert-area"></div>
+
+  <!-- ═══ DASHBOARD INFO TIP SYSTEM ═══════════════════════════════════════════ -->
+  <style>
+  ._dtip{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(--bg4);border:1px solid var(--border2);color:var(--muted);font-size:9px;font-weight:700;cursor:pointer;flex-shrink:0;user-select:none;vertical-align:middle;transition:.12s;line-height:1}
+  ._dtip:hover{background:var(--accent-bg);color:var(--accent);border-color:rgba(37,99,235,.35)}
+  #dash-tip-global{display:none;position:fixed;z-index:600;width:290px;background:var(--bg2);border:1.5px solid var(--border2);border-radius:12px;padding:16px 18px;box-shadow:0 10px 32px rgba(0,0,0,.22);pointer-events:auto}
+  #dash-tip-global .tip-title{font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);margin-bottom:9px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+  #dash-tip-global .tip-body{font-size:12.5px;line-height:1.7;color:var(--text)}
+  #dash-tip-global .tip-body b{color:var(--text)}
+  #dash-tip-global .tip-row{display:flex;align-items:flex-start;gap:8px;margin:5px 0}
+  #dash-tip-global .tip-badge{flex-shrink:0;font-size:10px;font-weight:700;padding:1px 8px;border-radius:99px;margin-top:2px}
+  #dash-tip-global .tip-close{display:flex;justify-content:flex-end;margin-top:10px;padding-top:8px;border-top:1px solid var(--border)}
+  #dash-tip-global .tip-close button{font-size:11px;padding:3px 12px;border:1px solid var(--border2);border-radius:6px;background:var(--bg3);color:var(--muted);cursor:pointer}
+  #dash-tip-global .tip-close button:hover{background:var(--bg4);color:var(--text)}
+  </style>
+  <div id="dash-tip-global"></div>
+  <script>
+  var DASH_TIPS = {
+    urgent:{title:'Item Urgent',body:'Item yang stoknya <b>hampir habis</b> dalam waktu dekat.<br><br><b>Coverage</b> = perkiraan stok akan habis kapan. Jika coverage kurang dari batas hari (W+N, default 14 hari), item masuk kategori Urgent.<br><br>Angka ini <b>semakin besar = semakin darurat</b>. Klik angkanya untuk buka daftar lengkap item kritis di bawah.',action:null},
+    total:{title:'Total Item',body:'Jumlah total bahan baku (RM), packaging (PM), dan produk jadi (FG) yang sedang dipantau dalam Projection Stock.<br><br>Gunakan filter tab <b>RM / PM / FG</b> di atas untuk melihat per kategori.',action:null},
+    po:{title:'PO Open',body:'<b>Purchase Order</b> yang sudah dibuat ke supplier, tapi barangnya <b>belum datang</b>.<br><br>PO Open = stok yang sedang "on the way" — sudah dipesan, tinggal menunggu pengiriman.<br><br>Pastikan setiap PO sudah punya <b>tanggal request kirim</b> agar supplier tahu kapan harus kirim. Bisa diatur di menu <b>List Pengiriman (PO)</b>.',action:null},
+    unconf:{title:'Jadwal Belum Dikonfirmasi',body:'Jadwal pengiriman yang sudah <b>dikirim ke supplier via WhatsApp</b>, tapi supplier <b>belum membalas konfirmasi</b> tanggal kirimnya.<br><br>Angka ini perlu dipantau. Semakin banyak = semakin banyak pengiriman yang belum pasti. <b>Follow up ke supplier</b> jika sudah lebih dari 1–2 hari belum ada balasan.',action:null},
+    stockbars:{title:'Kondisi Stok Keseluruhan',body:'Menunjukkan berapa banyak item yang berada di masing-masing kondisi stok.<br><br><div class="tip-row"><span class="tip-badge" style="background:var(--red-bg);color:var(--red);border:1px solid rgba(220,38,38,.2)">UNDER</span><span>Stok <b>kritis</b> — cukup kurang dari 14 hari. Perlu segera dipesan.</span></div><div class="tip-row"><span class="tip-badge" style="background:var(--green-bg);color:var(--green);border:1px solid rgba(5,150,105,.2)">GOOD</span><span>Stok <b>normal</b> — cukup 14–30 hari. Kondisi aman.</span></div><div class="tip-row"><span class="tip-badge" style="background:var(--accent-bg);color:var(--accent);border:1px solid rgba(37,99,235,.2)">OVER</span><span>Stok <b>berlebih</b> — lebih dari 30 hari. Pertimbangkan menunda PO.</span></div>',action:null},
+    highlighted:{title:'Highlighted Issues',body:'Item yang sengaja <b>di-pin</b> untuk dipantau lebih dekat — biasanya item kritis yang sedang dalam pengawasan khusus.<br><br><b>Cara menambahkan:</b><br>Buka menu <b>Projection Stock</b> → centang <b>kotak (☐)</b> di kolom paling kiri pada baris item yang ingin dipantau. Item akan langsung muncul di sini.',action:null},
+    kritis:{title:'Item Kritis',body:'Daftar item yang <b>stoknya akan habis paling cepat</b> berdasarkan proyeksi pemakaian.<br><br><b>Coverage</b> = perkiraan tanggal stok habis jika tidak ada pengiriman baru masuk.<br><b>DOI</b> (Days of Inventory) = berapa hari stok masih bisa bertahan.<br><br>Baris berwarna <span style="color:var(--red)">merah</span> = kondisi darurat. Klik <b>Lihat semua →</b> untuk buka tabel lengkap dengan semua item.',action:null},
+    jadwalminggu:{title:'Jadwal Pengiriman Minggu Ini',body:'Ringkasan pengiriman yang dijadwalkan masuk <b>minggu ini</b>.<br><br><b>Arti status:</b><br>• <b>Pending</b> — belum di-setujui PPIC<br>• <b>Approved</b> — sudah disetujui, siap dikirim ke supplier<br>• <b>Terkirim</b> — notifikasi WA sudah dikirim ke supplier<br>• <b>Konfirmasi</b> — supplier sudah balas dan konfirmasi tanggal kirimnya<br><br>Kelola jadwal lengkap di menu <b>Jadwal Pengiriman</b>.',action:null},
+    grpo:{title:'GRPO Hari Ini',body:'<b>GRPO</b> (Goods Receipt Purchase Order) = barang yang sudah <b>masuk dan diterima gudang hari ini</b> berdasarkan data SAP.<br><br>Angka di badge biru = jumlah baris/item yang diterima hari ini.<br><br>Data ini otomatis diperbarui setiap 10 menit. Klik <b>↺</b> di sebelah kanan untuk refresh manual.',action:null},
+    overdue:{title:'Overdue — Belum Diterima',body:'Pengiriman yang sudah <b>dikonfirmasi oleh supplier</b> (supplier sudah berjanji kirim pada tanggal tertentu), tapi barangnya <b>belum datang</b> melewati tanggal yang dijanjikan.<br><br>Ini perlu <b>ditindaklanjuti segera</b> — hubungi supplier dan tanyakan status pengirimannya. Buka menu <b>Jadwal Pengiriman → tab Konfirmasi</b> untuk lihat detail.',action:null},
+    koneksi:{title:'Status Koneksi Sistem',body:'Menunjukkan apakah dashboard terhubung ke sistem-sistem yang dibutuhkan.<br><br><b>● Hijau</b> = terhubung &amp; berjalan normal<br><b>● Abu / merah</b> = tidak terhubung<br><br><b>SAP API</b> — sumber data stok, PO, dan GRPO. Harus hijau agar Sync Semua bisa berjalan.<br><b>Firebase Cloud</b> — penyimpanan cloud untuk sinkronisasi antar komputer.<br><b>Real-time Sync</b> — update otomatis jika ada perubahan dari perangkat lain.<br><b>Data MRP</b> — data rencana produksi untuk kalkulasi kebutuhan stok.',action:null}
+  };
+  var _dashTipActive = null;
+  function _showDashTip(key, btn) {
+    var box = document.getElementById('dash-tip-global');
+    if(!box) return;
+    if(_dashTipActive === key) { box.style.display='none'; _dashTipActive=null; return; }
+    var tip = DASH_TIPS[key];
+    if(!tip) return;
+    box.innerHTML = '<div class="tip-title">'+tip.title+'</div><div class="tip-body">'+tip.body+'</div><div class="tip-close"><button onclick="document.getElementById('dash-tip-global').style.display='none';_dashTipActive=null">Tutup ✕</button></div>';
+    // Position: below button, right-aligned if near right edge
+    var r = btn.getBoundingClientRect();
+    var boxW = 290, boxH = 260;
+    var left = r.left + window.scrollX - boxW + 20;
+    var top  = r.bottom + window.scrollY + 8;
+    if(left < 8) left = 8;
+    if(left + boxW > window.innerWidth - 8) left = window.innerWidth - boxW - 8;
+    box.style.left = left + 'px';
+    box.style.top  = top  + 'px';
+    box.style.display = 'block';
+    _dashTipActive = key;
+  }
+  document.addEventListener('click', function(e) {
+    if(!_dashTipActive) return;
+    var box = document.getElementById('dash-tip-global');
+    if(box && !box.contains(e.target) && !e.target.classList.contains('_dtip')) {
+      box.style.display='none'; _dashTipActive=null;
+    }
+  });
+  </script>
 </div>
 </div>
 
