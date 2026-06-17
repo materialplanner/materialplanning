@@ -2563,7 +2563,7 @@ async function _aiSend() {
   var sb=document.getElementById('ai-send-btn'); if(sb) sb.disabled=true;
 
   var ctx=_aiBuildCtx();
-  var sys=var sys =
+  var sys =
     'Kamu adalah seorang Material Planner profesional dengan pengalaman 10 tahun di industri manufaktur. Saat ini kamu bekerja sebagai asisten PPIC di Eka Jaya Internasional, perusahaan manufaktur dengan dua pabrik: Bitung (BTG) dan Sangiang (SNG).\n\n'
     +'== DATA DASHBOARD AKTUAL ==\n'
     +JSON.stringify(ctx,null,2)
