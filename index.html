@@ -1307,19 +1307,19 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
         <span id="ai-dot" class="dot off"></span>
       </div>
       <div style="padding:16px">
-        <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Masukkan API Key Anthropic untuk mengaktifkan asisten AI di dashboard. AI akan punya akses ke data stok, jadwal, PO, dan GRPO untuk membantu analisis.</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Masukkan Groq API Key untuk mengaktifkan asisten AI. Groq <b>gratis</b> — tidak perlu kartu kredit. Kalau sudah pakai Groq untuk WA bot, key-nya sama.</div>
         <div class="fg">
-          <label style="font-size:11px">Anthropic API Key</label>
-          <input id="cfg-ai-key" type="password" placeholder="sk-ant-api03-..." style="width:100%;font-family:var(--mono);font-size:11.5px">
+          <label style="font-size:11px">Groq API Key</label>
+          <input id="cfg-ai-key" type="password" placeholder="gsk_..." style="width:100%;font-family:var(--mono);font-size:11.5px">
         </div>
         <div style="display:flex;gap:8px;margin-top:2px">
           <button class="btn btn-primary btn-sm" onclick="_aiSaveKey()">Simpan & Aktifkan</button>
-          <button class="btn btn-sm" onclick="window.open('https://console.anthropic.com/','_blank')">Buka Console ↗</button>
+          <button class="btn btn-sm" onclick="window.open('https://console.groq.com/keys','_blank')">Ambil Key di Groq ↗</button>
         </div>
         <div id="ai-key-status" style="margin-top:8px;font-size:11px;color:var(--muted)"></div>
         <div style="margin-top:10px;padding:8px;background:var(--bg3);border-radius:5px;font-size:10.5px;color:var(--muted);line-height:1.6">
-          Key tersimpan di <b>Firebase</b> (terenkripsi di cloud). Setelah diisi di satu perangkat, perangkat lain langsung aktif.<br>
-          Biaya sangat kecil: ~Rp 50–200 per sesi percakapan (model claude-sonnet-4-6).
+          Key tersimpan di <b>Firebase</b> — setelah diisi di satu perangkat, perangkat lain langsung aktif.<br>
+          <b>Gratis:</b> 1.000 request/hari, 30 request/menit. Lebih dari cukup untuk tim PPIC.
         </div>
       </div>
     </div>
@@ -2031,7 +2031,7 @@ document.addEventListener('click', function(e){
     <div class="ai-hdr-ico">&#x1F916;</div>
     <div style="flex:1">
       <div class="ai-hdr-title">AI Asisten PPIC</div>
-      <div class="ai-hdr-sub">Tanya apa saja tentang stok &amp; pengiriman</div>
+      <div class="ai-hdr-sub">Pakai Groq AI (gratis) — tanya apa saja</div>
     </div>
     <button class="ai-icon-btn" onclick="_aiClearHistory()" title="Hapus riwayat">&#x1F5D1;</button>
     <button class="ai-icon-btn" onclick="_aiTogglePanel()" style="margin-left:4px">&#x2715;</button>
@@ -2256,19 +2256,16 @@ async function _aiSend() {
 
   var fullText = ''; var bub = null;
   try {
-    var resp = await fetch('https://api.anthropic.com/v1/messages', {
+    var resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': _aiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
+        'Authorization': 'Bearer ' + _aiKey
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
+        model: 'llama-3.3-70b-versatile',
         max_tokens: 1024,
-        system: sys,
-        messages: _aiHistory.slice(-10),
+        messages: [{role:'system',content:sys}].concat(_aiHistory.slice(-10)),
         stream: true
       })
     });
@@ -2278,7 +2275,7 @@ async function _aiSend() {
     if(!resp.ok) {
       var ed = {}; try{ ed = await resp.json(); }catch(e){}
       var em = (ed.error && ed.error.message) || ('HTTP ' + resp.status);
-      if(resp.status===401) em = 'API Key tidak valid. Cek di Settings.';
+      if(resp.status===401) em = 'Groq API Key tidak valid. Cek di Settings → AI Asisten PPIC.';
       if(resp.status===429) em = 'Terlalu banyak request. Tunggu beberapa detik.';
       _aiMsgEl('system', '&#x274C; ' + em);
       _aiHistory.pop();
@@ -2302,8 +2299,9 @@ async function _aiSend() {
           if(dat==='[DONE]') break;
           try {
             var parsed = JSON.parse(dat);
-            if(parsed.type==='content_block_delta' && parsed.delta && parsed.delta.text) {
-              fullText += parsed.delta.text;
+            var delta = parsed.choices && parsed.choices[0] && parsed.choices[0].delta;
+            if(delta && delta.content) {
+              fullText += delta.content;
               _aiSetStream(bub, fullText);
             }
           } catch(e){}
