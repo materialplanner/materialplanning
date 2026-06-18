@@ -2039,7 +2039,7 @@ document.addEventListener('click', function(e){
   </div>
     <div style="flex:1">
       <div class="ai-hdr-title">AI Asisten PPIC</div>
-      <div class="ai-hdr-sub">Pakai Gemini 3.5 Flash (gratis) — tanya apa saja</div>
+      <div class="ai-hdr-sub"><span id="ai-panel-sub">gemini-3.5-flash — tanya apa saja</span></div>
     </div>
     <button class="ai-icon-btn" onclick="_aiClearHistory()" title="Hapus riwayat">&#x1F5D1;</button>
     <button class="ai-icon-btn" onclick="_aiTogglePanel()" style="margin-left:4px">&#x2715;</button>
@@ -2320,8 +2320,10 @@ function _aiSaveKey() {
   cloudSave('ai_api_key', k);
   var dot=document.getElementById('ai-dot'); if(dot) dot.className='dot';
   var st=document.getElementById('ai-key-status');
-  if(st) st.innerHTML='<span style="color:var(--green)">&#x2713; API Key aktif</span>';
-  toast('Gemini API Key disimpan &#x2713;','ok');
+  var sel=document.getElementById('cfg-ai-model');
+  if(sel&&sel.value){_aiModel=sel.value;localStorage.setItem('ai_model',_aiModel);cloudSave('ai_model',_aiModel);}
+  if(st) st.innerHTML='<span style="color:var(--green)">✓ API Key aktif &nbsp;·&nbsp; '+_aiModel+'</span>';
+  toast('Gemini API Key disimpan ✓','ok');
 }
 
 function _aiTogglePanel() {
@@ -2758,13 +2760,18 @@ async function _aiSend() {
 
 // Restore key on load
 (function(){
+  var m=localStorage.getItem('ai_model'); if(m){_aiModel=m;}
   var k=localStorage.getItem('ai_api_key');
   if(k){
     _aiKey=k;
     var dot=document.getElementById('ai-dot'); if(dot) dot.className='dot';
     var si=document.getElementById('cfg-ai-key'); if(si) si.value=k;
     var st=document.getElementById('ai-key-status');
-    if(st) st.innerHTML='<span style="color:var(--green)">&#x2713; API Key aktif</span>';
+    var sel=document.getElementById('cfg-ai-model'); if(sel) sel.value=_aiModel;
+    var sub=document.getElementById('ai-panel-sub'); if(sub) sub.textContent=_aiModel+' — tanya apa saja';
+    if(st) st.innerHTML='<span style="color:var(--green)">✓ API Key aktif &nbsp;·&nbsp; '+_aiModel+'</span>';
+  } else if(m){
+    var sel2=document.getElementById('cfg-ai-model'); if(sel2) sel2.value=m;
   }
   // Keyboard handler untuk textarea
   document.addEventListener('DOMContentLoaded', function(){
@@ -3281,6 +3288,10 @@ function _applyRealtimeChanges(keys) {
           } catch(e) {} break;
         case 'update_deldate_data':
           try { STATE.updateDelDateData = JSON.parse(val || '{}'); if(document.getElementById('pg-po')&&document.getElementById('pg-po').classList.contains('active')) renderPO(); } catch(e) {}
+          break;
+        case 'ai_model':
+          if(val){_aiModel=val; var sel3=document.getElementById('cfg-ai-model'); if(sel3) sel3.value=val;
+            var sub2=document.getElementById('ai-panel-sub'); if(sub2) sub2.textContent=val+' — tanya apa saja';}
           break;
         case 'ai_api_key':
           try { if(val){ _aiKey=val; localStorage.setItem('ai_api_key',val); var _aiDot=document.getElementById('ai-dot'); if(_aiDot)_aiDot.className='dot'; } } catch(e) {} break;
