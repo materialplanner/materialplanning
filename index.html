@@ -2950,7 +2950,8 @@ var CLOUD_KEYS = [
   'matcom_monthly','matcom_data','matcom_count','last_matcom_sync',
   'mps_ui_status','bom_ui_status','mrp_last_calc',
   'email_daily_data',
-  'ai_api_key'
+  'ai_api_key',
+  'ai_model'
 ];
 
 // ── Sync indicator di header ──────────────────────────────────────────────────
@@ -3304,7 +3305,13 @@ function _applyRealtimeChanges(keys) {
             var sub2=document.getElementById('ai-panel-sub'); if(sub2) sub2.textContent=val+' — tanya apa saja';}
           break;
         case 'ai_api_key':
-          try { if(val){ _aiKey=val; localStorage.setItem('ai_api_key',val); var _aiDot=document.getElementById('ai-dot'); if(_aiDot)_aiDot.className='dot'; } } catch(e) {} break;
+          try { if(val){
+            _aiKey=val; localStorage.setItem('ai_api_key',val);
+            var _aiDot=document.getElementById('ai-dot'); if(_aiDot)_aiDot.className='dot';
+            var _aiSi=document.getElementById('cfg-ai-key'); if(_aiSi) _aiSi.value=val;
+            var _aiSt=document.getElementById('ai-key-status');
+            if(_aiSt) _aiSt.innerHTML='<span style="color:var(--green)">&#x2713; API Key aktif &nbsp;·&nbsp; '+_aiModel+'</span>';
+          }} catch(e) {} break;
       }
     } catch(e) { console.warn('Realtime apply error for', k, e.message); }
   });
@@ -9121,6 +9128,24 @@ function _appInit() {
   // Capacity globals
   _whCapacityRM = parseInt(localStorage.getItem('wh_capacity_rm') || '0') || 0;
   _whCapacityPM = parseInt(localStorage.getItem('wh_capacity_pm') || '0') || 0;
+  // ── Restore AI key & model dari localStorage (sudah diisi cloudLoad) ────────
+  var _savedKey   = localStorage.getItem('ai_api_key');
+  var _savedModel = localStorage.getItem('ai_model');
+  if(_savedKey)   { _aiKey   = _savedKey; }
+  if(_savedModel) { _aiModel = _savedModel; }
+  // Update UI jika halaman sudah render
+  (function(){
+    var dot = document.getElementById('ai-dot');
+    if(dot && _aiKey) dot.className = 'dot';
+    var si  = document.getElementById('cfg-ai-key');
+    if(si && _aiKey) si.value = _aiKey;
+    var sel = document.getElementById('cfg-ai-model');
+    if(sel && _aiModel) sel.value = _aiModel;
+    var sub = document.getElementById('ai-panel-sub');
+    if(sub && _aiModel) sub.textContent = _aiModel + ' — tanya apa saja';
+    var st  = document.getElementById('ai-key-status');
+    if(st && _aiKey) st.innerHTML = '<span style="color:var(--green)">✓ API Key aktif &nbsp;·&nbsp; ' + _aiModel + '</span>';
+  })();
   console.log('[_appInit] STATE restored');
   } catch(e) { console.error('[_appInit] STATE restore FAIL:', e.message); }
 
