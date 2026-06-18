@@ -6521,27 +6521,25 @@ function renderDashUrgent(urgentItems) {
     var tb=p.itemType==='RM'?'<span class="badge b-blue" style="font-size:9px">RM</span>':p.itemType==='PM'?'<span class="badge b-purple" style="font-size:9px">PM</span>':'<span class="badge b-green" style="font-size:9px">FG</span>';
     var name = _dispName(p);
     var nd = _getNearestDelivery(p.productCode);
-    var delivHtml = '';
-    if(nd) {
-      var icon = nd.confirmed ? '✅' : '🗓';
-      var label = nd.confirmed ? 'Konfirmasi' : 'Req kirim';
-      delivHtml = '<div style="font-size:10.5px;margin-top:3px;color:'+(nd.confirmed?'var(--green)':'var(--accent)')+'">'
-        +icon+' <b>'+label+':</b> '+nd.date+' · '+nd.qty+' '+nd.uom+'</div>';
-    } else {
-      delivHtml = '<div style="font-size:10.5px;margin-top:3px;color:var(--red)">⚠ Belum ada jadwal kirim</div>';
-    }
+    var delivLabel = nd ? ((nd.confirmed?'✅ ':'🗓 ')+nd.date) : '⚠ Belum dijadwal';
+    var delivColor = nd ? (nd.confirmed?'var(--green)':'var(--accent)') : 'var(--red)';
     var commentHtml = p.comment
-      ? '<div style="font-size:11px;color:var(--text);background:var(--bg3);border-left:3px solid var(--teal);padding:3px 7px;border-radius:0 4px 4px 0;margin-top:4px">📝 '+p.comment+'</div>'
+      ? '<div style="font-size:10.5px;color:var(--text);background:var(--bg3);border-left:3px solid var(--teal);padding:3px 7px;border-radius:0 4px 4px 0;margin-top:5px">📝 '+p.comment+'</div>'
       : '';
-    return '<div onclick="_jumpToItem(\''+p.productCode+'\')" style style="display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:0.5px solid var(--border);cursor:pointer" title="Klik untuk lihat detail">'+
+    return '<div onclick="_jumpToItem(\''+p.productCode+'\')" style="display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:0.5px solid var(--border);cursor:pointer" title="Klik untuk lihat detail">'+
       '<span style="width:8px;height:8px;border-radius:50%;background:'+dotColor+';display:inline-block;flex-shrink:0;margin-top:5px"></span>'+
-      '<div style="flex:1;min-width:0">'+
-        '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px">'+
-          '<div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1">'+name+'</div>'+
-          '<span style="font-size:10px;flex-shrink:0;background:var(--red-bg,#fff0f0);color:var(--red);border-radius:4px;padding:1px 6px;font-weight:600" title="Coverage: tanggal stok habis">📅 '+p.coverageDateStr+'</span>'+
+      '<div style="flex:1;min-width:0;overflow:hidden">'+
+        '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:6px">'+
+          '<div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">'+name+'</div>'+
+          '<div style="flex-shrink:0;text-align:right">'+
+            '<div style="font-size:10.5px;color:var(--red);font-weight:700">'+p.coverageDateStr+'</div>'+
+            '<div style="font-size:9px;color:var(--muted);margin-top:0px;text-align:right">coverage</div>'+
+          '</div>'+
         '</div>'+
-        '<div style="font-size:10px;color:var(--muted);margin-top:1px">'+p.productCode+' '+tb+' · '+(p.supplier||'—')+' · DOI: '+Math.round(p.doiFC||0)+' hr</div>'+
-        delivHtml+
+        '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:2px">'+
+          '<div style="font-size:10px;color:var(--muted)">'+p.productCode+' '+tb+' · '+(p.supplier||'—')+' · DOI: '+Math.round(p.doiFC||0)+' hr</div>'+
+          '<div style="font-size:10px;font-weight:500;flex-shrink:0;color:'+delivColor+'">'+delivLabel+'</div>'+
+        '</div>'+
         commentHtml+
       '</div></div>';
   }).join('');
@@ -8951,30 +8949,30 @@ function renderHighlighted() {
     var tb=p.itemType==='RM'?'<span class="badge b-blue" style="font-size:9px">RM</span>':p.itemType==='PM'?'<span class="badge b-purple" style="font-size:9px">PM</span>':'<span class="badge b-green" style="font-size:9px">FG</span>';
     var name = _dispName(p);
     var nd = _getNearestDelivery(p.productCode);
-    var delivHtml = '';
-    if(nd) {
-      var icon = nd.confirmed ? '✅' : '🗓';
-      var label = nd.confirmed ? 'Konfirmasi' : 'Req kirim';
-      delivHtml = '<div style="font-size:10.5px;margin-top:3px;color:'+(nd.confirmed?'var(--green)':'var(--accent)') +'">'+icon+' <b>'+label+':</b> '+nd.date+' · '+nd.qty+' '+nd.uom+'</div>';
-    } else if(p.category==='UNDER') {
-      delivHtml = '<div style="font-size:10.5px;margin-top:3px;color:var(--red)">⚠ Belum ada jadwal kirim</div>';
-    }
+    var delivLabel = ''; var delivColor2 = 'var(--muted)';
+    if(nd){ delivLabel=(nd.confirmed?'✅ ':'🗓 ')+nd.date; delivColor2=nd.confirmed?'var(--green)':'var(--accent)'; }
+    else if(p.category==='UNDER'){ delivLabel='⚠ Belum dijadwal'; delivColor2='var(--red)'; }
     var commentHtml = p.comment
-      ? '<div style="font-size:11px;color:var(--text);background:var(--bg3);border-left:3px solid var(--teal);padding:3px 7px;border-radius:0 4px 4px 0;margin-top:4px">📝 '+p.comment+'</div>'
+      ? '<div style="font-size:10.5px;color:var(--text);background:var(--bg3);border-left:3px solid var(--teal);padding:3px 7px;border-radius:0 4px 4px 0;margin-top:5px">📝 '+p.comment+'</div>'
       : '';
     var covStr = p.coverageDateStr || '—';
     return '<div style="display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:0.5px solid var(--border)">'+
       '<span style="width:8px;height:8px;border-radius:50%;background:'+dotColor+';display:inline-block;flex-shrink:0;margin-top:5px"></span>'+
-      '<div style="flex:1;min-width:0">'+
-        '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px">'+
-          '<div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1">'+name+'</div>'+
-          '<span style="font-size:10px;flex-shrink:0;background:'+covBg+';color:'+covColor+';border-radius:4px;padding:1px 6px;font-weight:600" title="Coverage: tanggal stok habis">📅 '+covStr+'</span>'+
+      '<div style="flex:1;min-width:0;overflow:hidden">'+
+        '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:6px">'+
+          '<div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">'+name+'</div>'+
+          '<div style="flex-shrink:0;text-align:right">'+
+            '<div style="font-size:10.5px;color:'+covColor+';font-weight:700">'+covStr+'</div>'+
+            '<div style="font-size:9px;color:var(--muted);margin-top:0px;text-align:right">coverage</div>'+
+          '</div>'+
         '</div>'+
-        '<div style="font-size:10px;color:var(--muted);margin-top:1px">'+p.productCode+' '+tb+' · '+(p.supplier||'—')+' · DOI: '+Math.round(p.doiFC||0)+' hr</div>'+
-        delivHtml+
+        '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:2px">'+
+          '<div style="font-size:10px;color:var(--muted)">'+p.productCode+' '+tb+' · '+(p.supplier||'—')+' · DOI: '+Math.round(p.doiFC||0)+' hr</div>'+
+          (delivLabel?'<div style="font-size:10px;font-weight:500;flex-shrink:0;color:'+delivColor2+'">'+delivLabel+'</div>':'')+
+        '</div>'+
         commentHtml+
       '</div>'+
-      '<span onclick="toggleHighlight(\''+p.productCode+'\',false)" title="Unpin" style="cursor:pointer;color:var(--muted);font-size:13px;flex-shrink:0;padding-top:2px;line-height:1">✕</span>'+
+      '<span onclick="toggleHighlight(\''+p.productCode+'\',false)" title="Unpin" style="cursor:pointer;color:var(--muted);font-size:14px;flex-shrink:0;padding-top:2px;margin-left:4px">✕</span>'+
     '</div>';
   }).join('');
 }
