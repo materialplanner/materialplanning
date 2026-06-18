@@ -1303,7 +1303,7 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
     <!-- AI ASSISTANT -->
     <div class="card" style="border-color:rgba(124,58,237,.35)">
       <div class="card-hdr" style="background:var(--purple-bg)">
-        <span class="card-title">🤖 AI Asisten PPIC</span>
+        <span class="card-title">✦ AI Asisten PPIC</span>
         <span id="ai-dot" class="dot off"></span>
       </div>
       <div style="padding:16px">
@@ -1985,7 +1985,7 @@ document.addEventListener('click', function(e){
 
 <!-- 🤖 AI ASISTEN PPIC -->
 <style>
-#ai-fab{position:fixed;bottom:24px;right:24px;width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,var(--purple),#5b21b6);color:#fff;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:20px;box-shadow:0 4px 16px rgba(124,58,237,.45);z-index:800;transition:.2s;user-select:none}
+#ai-fab{position:fixed;bottom:24px;right:24px;width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#7c3aed,#5b21b6);color:#fff;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px rgba(124,58,237,.5);z-index:800;transition:.2s;user-select:none}
 #ai-fab:hover{transform:scale(1.1);box-shadow:0 6px 24px rgba(124,58,237,.6)}
 #ai-panel{position:fixed;right:-440px;top:0;width:420px;height:100vh;background:var(--bg2);border-left:1px solid var(--border);z-index:799;display:flex;flex-direction:column;transition:right .25s cubic-bezier(.4,0,.2,1);box-shadow:-8px 0 32px rgba(0,0,0,.15)}
 #ai-panel.open{right:0}
@@ -2024,11 +2024,19 @@ document.addEventListener('click', function(e){
 .ai-icon-btn{width:28px;height:28px;border-radius:6px;background:transparent;border:1px solid var(--border2);color:var(--muted);cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;transition:.15s}
 .ai-icon-btn:hover{background:var(--bg4);color:var(--text)}
 </style>
-<button id="ai-fab" onclick="_aiTogglePanel()" title="AI Asisten PPIC">&#x1F916;</button>
+<button id="ai-fab" onclick="_aiTogglePanel()" title="AI Asisten PPIC">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M20 2H4C2.9 2 2 2.9 2 4V22L6 18H20C21.1 18 22 17.1 22 16V4C22 2.9 21.1 2 20 2ZM8 10H7V9H8V10ZM12 10H11V9H12V10ZM16 10H15V9H16V10Z"/>
+  </svg>
+</button>
 
 <div id="ai-panel">
   <div id="ai-panel-hdr">
-    <div class="ai-hdr-ico">&#x1F916;</div>
+    <div class="ai-hdr-ico">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
+      <path d="M20 2H4C2.9 2 2 2.9 2 4V22L6 18H20C21.1 18 22 17.1 22 16V4C22 2.9 21.1 2 20 2ZM8 10H7V9H8V10ZM12 10H11V9H12V10ZM16 10H15V9H16V10Z"/>
+    </svg>
+  </div>
     <div style="flex:1">
       <div class="ai-hdr-title">AI Asisten PPIC</div>
       <div class="ai-hdr-sub">Pakai Gemini 2.5 Flash Lite (gratis) — tanya apa saja</div>
@@ -6525,7 +6533,7 @@ function renderDashUrgent(urgentItems) {
     var commentHtml = p.comment
       ? '<div style="font-size:11px;color:var(--text);background:var(--bg3);border-left:3px solid var(--teal);padding:3px 7px;border-radius:0 4px 4px 0;margin-top:4px">📝 '+p.comment+'</div>'
       : '';
-    return '<div onclick="_jumpToItem(''+p.productCode+'')" style="display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:0.5px solid var(--border);cursor:pointer" title="Klik untuk lihat detail">'+
+    return '<div onclick="_jumpToItem(\''+p.productCode+'\')" style style="display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:0.5px solid var(--border);cursor:pointer" title="Klik untuk lihat detail">'+
       '<span style="width:8px;height:8px;border-radius:50%;background:'+dotColor+';display:inline-block;flex-shrink:0;margin-top:5px"></span>'+
       '<div style="flex:1;min-width:0">'+
         '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px">'+
@@ -8966,7 +8974,7 @@ function renderHighlighted() {
         delivHtml+
         commentHtml+
       '</div>'+
-      '<span onclick="toggleHighlight(''+p.productCode+'',false)" title="Unpin" style="cursor:pointer;color:var(--muted);font-size:13px;flex-shrink:0;padding-top:2px;line-height:1">✕</span>'+
+      '<span onclick="toggleHighlight(\''+p.productCode+'\',false)" title="Unpin" style="cursor:pointer;color:var(--muted);font-size:13px;flex-shrink:0;padding-top:2px;line-height:1">✕</span>'+
     '</div>';
   }).join('');
 }
