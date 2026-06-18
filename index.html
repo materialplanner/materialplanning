@@ -2039,7 +2039,7 @@ document.addEventListener('click', function(e){
   </div>
     <div style="flex:1">
       <div class="ai-hdr-title">AI Asisten PPIC</div>
-      <div class="ai-hdr-sub">Pakai Gemini 2.5 Flash Lite (gratis) — tanya apa saja</div>
+      <div class="ai-hdr-sub">Pakai Gemini 3.5 Flash (gratis) — tanya apa saja</div>
     </div>
     <button class="ai-icon-btn" onclick="_aiClearHistory()" title="Hapus riwayat">&#x1F5D1;</button>
     <button class="ai-icon-btn" onclick="_aiTogglePanel()" style="margin-left:4px">&#x2715;</button>
@@ -2297,7 +2297,7 @@ function _aiIsCommand(msg) {
 // ─── Helper: Groq API call ────────────────────────────────────────────────────
 async function _aiGroqCall(messages, useTools) {
   var body = {
-    model: 'gemini-2.5-flash-lite',
+    model: 'gemini-3.5-flash',
     max_tokens: 1024,
     messages: messages
   };
