@@ -6530,29 +6530,28 @@ function renderDashUrgent(urgentItems) {
     var tb=p.itemType==='RM'?'<span class="badge b-blue" style="font-size:9px">RM</span>':p.itemType==='PM'?'<span class="badge b-purple" style="font-size:9px">PM</span>':'<span class="badge b-green" style="font-size:9px">FG</span>';
     var name = _dispName(p);
     var nd = _getNearestDelivery(p.productCode);
-    var delivTxt = nd ? ((nd.confirmed?'✅ ':'🗓 ')+_fmtDelivDate(nd.date)) : '—';
-    var delivColor = nd ? (nd.confirmed?'var(--green)':'var(--accent)') : 'var(--muted)';
+    var delivTxt = nd ? ((nd.confirmed?'✅ ':'🗓 ')+_fmtDelivDate(nd.date)+' · '+nd.qty+' '+nd.uom) : (p.category==='UNDER'?'⚠ belum dijadwal':'—');
+    var delivColor = nd ? (nd.confirmed?'var(--green)':'var(--accent)') : (p.category==='UNDER'?'var(--red)':'var(--muted)');
     var commentHtml = p.comment
       ? '<div style="font-size:10.5px;color:var(--text);background:var(--bg3);border-left:3px solid var(--teal);padding:3px 7px;border-radius:0 4px 4px 0;margin-top:5px">📝 '+p.comment+'</div>'
       : '';
-    var qtyTxt = nd ? ' · '+nd.qty+' '+nd.uom : '';
     return '<div onclick="_jumpToItem(\''+p.productCode+'\')" style="display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:0.5px solid var(--border);cursor:pointer">'+
       '<span style="width:8px;height:8px;border-radius:50%;background:'+dotColor+';display:inline-block;flex-shrink:0;margin-top:5px"></span>'+
       '<div style="flex:1;min-width:0;overflow:hidden">'+
-        '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">'+
-          '<div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;padding-top:1px">'+name+'</div>'+
-          '<div style="flex-shrink:0;min-width:120px">'+
-            '<div style="display:flex;align-items:center;justify-content:flex-end;gap:5px">'+
-              '<span style="font-size:9px;color:var(--muted)">coverage</span>'+
-              '<span style="font-size:10.5px;font-weight:700;color:var(--red)">'+p.coverageDateStr+'</span>'+
-            '</div>'+
-            '<div style="display:flex;align-items:center;justify-content:flex-end;gap:5px;margin-top:2px">'+
-              '<span style="font-size:9px;color:var(--muted)">jadwal kirim</span>'+
-              '<span style="font-size:10px;font-weight:500;color:'+delivColor+'">'+delivTxt+qtyTxt+'</span>'+
-            '</div>'+
+        '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">'+
+          '<div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">'+name+'</div>'+
+          '<div style="flex-shrink:0;display:flex;align-items:center;gap:4px">'+
+            '<span style="font-size:9px;color:var(--muted)">coverage</span>'+
+            '<span style="font-size:10.5px;font-weight:700;color:var(--red)">'+p.coverageDateStr+'</span>'+
           '</div>'+
         '</div>'+
-        '<div style="font-size:10px;color:var(--muted);margin-top:2px">'+p.productCode+' '+tb+' · '+(p.supplier||'—')+' · DOI: '+Math.round(p.doiFC||0)+' hr</div>'+
+        '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:2px">'+
+          '<div style="font-size:10px;color:var(--muted)">'+p.productCode+' '+tb+' · '+(p.supplier||'—')+' · DOI: '+Math.round(p.doiFC||0)+' hr</div>'+
+          '<div style="flex-shrink:0;display:flex;align-items:center;gap:4px">'+
+            '<span style="font-size:9px;color:var(--muted)">jadwal kirim</span>'+
+            '<span style="font-size:10px;font-weight:500;color:'+delivColor+'">'+delivTxt+'</span>'+
+          '</div>'+
+        '</div>'+
         commentHtml+
       '</div></div>';
   }).join('');
@@ -8962,9 +8961,8 @@ function renderHighlighted() {
     var tb=p.itemType==='RM'?'<span class="badge b-blue" style="font-size:9px">RM</span>':p.itemType==='PM'?'<span class="badge b-purple" style="font-size:9px">PM</span>':'<span class="badge b-green" style="font-size:9px">FG</span>';
     var name = _dispName(p);
     var nd = _getNearestDelivery(p.productCode);
-    var delivTxt = nd ? ((nd.confirmed?'✅ ':'🗓 ')+_fmtDelivDate(nd.date)) : (p.category==='UNDER'?'⚠ —':'—');
+    var delivTxt = nd ? ((nd.confirmed?'✅ ':'🗓 ')+_fmtDelivDate(nd.date)+' · '+nd.qty+' '+nd.uom) : (p.category==='UNDER'?'⚠ belum dijadwal':'—');
     var delivColor2 = nd ? (nd.confirmed?'var(--green)':'var(--accent)') : (p.category==='UNDER'?'var(--red)':'var(--muted)');
-    var qtyTxt2 = nd ? ' · '+nd.qty+' '+nd.uom : '';
     var commentHtml = p.comment
       ? '<div style="font-size:10.5px;color:var(--text);background:var(--bg3);border-left:3px solid var(--teal);padding:3px 7px;border-radius:0 4px 4px 0;margin-top:5px">📝 '+p.comment+'</div>'
       : '';
@@ -8972,20 +8970,20 @@ function renderHighlighted() {
     return '<div style="display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:0.5px solid var(--border)">'+
       '<span style="width:8px;height:8px;border-radius:50%;background:'+dotColor+';display:inline-block;flex-shrink:0;margin-top:5px"></span>'+
       '<div style="flex:1;min-width:0;overflow:hidden">'+
-        '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">'+
-          '<div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;padding-top:1px">'+name+'</div>'+
-          '<div style="flex-shrink:0;min-width:120px">'+
-            '<div style="display:flex;align-items:center;justify-content:flex-end;gap:5px">'+
-              '<span style="font-size:9px;color:var(--muted)">coverage</span>'+
-              '<span style="font-size:10.5px;font-weight:700;color:'+covColor+'">'+covStr+'</span>'+
-            '</div>'+
-            '<div style="display:flex;align-items:center;justify-content:flex-end;gap:5px;margin-top:2px">'+
-              '<span style="font-size:9px;color:var(--muted)">jadwal kirim</span>'+
-              '<span style="font-size:10px;font-weight:500;color:'+delivColor2+'">'+delivTxt+qtyTxt2+'</span>'+
-            '</div>'+
+        '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">'+
+          '<div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">'+name+'</div>'+
+          '<div style="flex-shrink:0;display:flex;align-items:center;gap:4px">'+
+            '<span style="font-size:9px;color:var(--muted)">coverage</span>'+
+            '<span style="font-size:10.5px;font-weight:700;color:'+covColor+'">'+covStr+'</span>'+
           '</div>'+
         '</div>'+
-        '<div style="font-size:10px;color:var(--muted);margin-top:2px">'+p.productCode+' '+tb+' · '+(p.supplier||'—')+' · DOI: '+Math.round(p.doiFC||0)+' hr</div>'+
+        '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:2px">'+
+          '<div style="font-size:10px;color:var(--muted)">'+p.productCode+' '+tb+' · '+(p.supplier||'—')+' · DOI: '+Math.round(p.doiFC||0)+' hr</div>'+
+          '<div style="flex-shrink:0;display:flex;align-items:center;gap:4px">'+
+            '<span style="font-size:9px;color:var(--muted)">jadwal kirim</span>'+
+            '<span style="font-size:10px;font-weight:500;color:'+delivColor2+'">'+delivTxt+'</span>'+
+          '</div>'+
+        '</div>'+
         commentHtml+
       '</div>'+
       '<span onclick="toggleHighlight(\''+p.productCode+'\',false)" title="Unpin" style="cursor:pointer;color:var(--muted);font-size:14px;flex-shrink:0;padding-top:2px;margin-left:4px">✕</span>'+
