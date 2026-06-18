@@ -1316,6 +1316,16 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
           <button class="btn btn-primary btn-sm" onclick="_aiSaveKey()">Simpan & Aktifkan</button>
           <button class="btn btn-sm" onclick="window.open('https://aistudio.google.com/apikey','_blank')">Ambil Key di Google ↗</button>
         </div>
+        <div class="fg" style="margin-top:8px">
+          <label style="font-size:11px">Model AI</label>
+          <select id="cfg-ai-model" style="width:100%;font-size:12px;padding:5px 8px;border-radius:6px;border:1px solid var(--border2);background:var(--bg2);color:var(--text);cursor:pointer" onchange="_aiSaveModel(this.value)">
+            <option value="gemini-3.5-flash">gemini-3.5-flash — Terbaru &amp; terpintar, gratis ✨</option>
+            <option value="gemini-3.1-pro">gemini-3.1-pro — Reasoning terkuat, berbayar 💳</option>
+            <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite — Tercepat, gratis ⚡</option>
+            <option value="gemini-2.5-flash">gemini-2.5-flash — Stabil, gratis</option>
+            <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite — Paling hemat, gratis</option>
+          </select>
+        </div>
         <div id="ai-key-status" style="margin-top:8px;font-size:11px;color:var(--muted)"></div>
         <div style="margin-top:10px;padding:8px;background:var(--bg3);border-radius:5px;font-size:10.5px;color:var(--muted);line-height:1.6">
           Key tersimpan di <b>Firebase</b> — setelah diisi di satu perangkat, perangkat lain langsung aktif.<br>
