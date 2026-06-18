@@ -2072,7 +2072,7 @@ document.addEventListener('click', function(e){
     <button class="ai-quick-btn" onclick="_aiQuick(this)">&#x26A0; Ada yang overdue?</button>
   </div>
   <div id="ai-input-area">
-    <textarea id="ai-input" placeholder="Tanya tentang stok, jadwal, supplier..." rows="1"></textarea>
+    <textarea id="ai-input" placeholder="Tanya tentang stok, jadwal, supplier... (Enter kirim, Shift+Enter baris baru)" rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();_aiSend();}"></textarea>
     <button id="ai-send-btn" onclick="_aiSend()" title="Kirim (Enter)">&#x27A4;</button>
   </div>
 </div>
