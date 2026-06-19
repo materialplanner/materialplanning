@@ -606,6 +606,8 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
           <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;padding:3px 0;cursor:pointer;color:var(--text);margin:0"><input type="checkbox" checked onchange="toggleProjCol('grpo',this)"> GRPO Bln Ini</label>
           <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;padding:3px 0;cursor:pointer;color:var(--text);margin:0"><input type="checkbox" checked onchange="toggleProjCol('actualusg',this)"> Actual Usg</label>
           <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;padding:3px 0;cursor:pointer;color:var(--text);margin:0"><input type="checkbox" checked onchange="toggleProjCol('coverage',this)"> Est. Coverage</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;padding:3px 0;cursor:pointer;color:var(--text);margin:0"><input type="checkbox" checked onchange="toggleProjCol('doi_incoming',this)"> DOI+Incoming</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;padding:3px 0;cursor:pointer;color:var(--text);margin:0"><input type="checkbox" checked onchange="toggleProjCol('cov_incoming',this)"> Coverage+Incoming</label>
           <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;padding:3px 0;cursor:pointer;color:var(--text);margin:0"><input type="checkbox" checked onchange="toggleProjCol('kategori',this)"> Kategori</label>
           <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;padding:3px 0;cursor:pointer;color:var(--text);margin:0"><input type="checkbox" checked onchange="toggleProjCol('endstock',this)"> End Stock vs MRP</label>
           <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;padding:3px 0;cursor:pointer;color:var(--text);margin:0"><input type="checkbox" checked onchange="toggleProjCol('mrpnext',this)"> MRP Next Month</label>
@@ -4134,6 +4136,8 @@ async function syncAll() {
 
   var results = await Promise.allSettled([loadStock(), loadPO(), loadOSPR(), loadGRPO()]);
   loadOSPO();
+  // Matcom ikut sync otomatis
+  loadMatcomSAP().catch(function(e){ console.warn('[syncAll] matcom gagal:', e.message); });
   var failed = results.filter(function(r){ return r.status === 'rejected'; });
   console.log('[syncAll] API done. Failed:', failed.length, '| Stock:', Object.keys(STATE.stockData||{}).length, '| PO:', (STATE.poData||[]).length);
 
@@ -5651,6 +5655,15 @@ function _doBuildProjection() {
     // Total incoming GRPO bulan ini (semua tgl)
     var totalIncoming = grpoByItem[code] || 0;
     var totalOSPR = osprByItem[code] || 0;
+    // Total PO yang sudah dikonfirmasi supplier = basis DOI after incoming
+    var totalOpenPOQty = 0;
+    (STATE.poData||[]).forEach(function(po){
+      if(po.itemCode !== code) return;
+      var key = String(po.docNum)+'_'+po.itemCode;
+      var ovr = (STATE.poOverrides||{})[key] || {};
+      // Hanya hitung PO yang sudah ada konfirmasi dari supplier (confDate terisi)
+      if(ovr.confDate) totalOpenPOQty += (ovr.confQty || po.openQty || 0);
+    });
 
     // DOI Max = stock / (MRP Max / days) — basis coverage & kategori
     // Pakai totalStock murni dari SAP, bukan termasuk confirmed incoming
@@ -5775,6 +5788,17 @@ function _doBuildProjection() {
       totalIncoming: Math.round(totalIncoming), totalOSPR: Math.round(totalOSPR),
       coverageDate: coverageDate, coverageDateStr: fmtDateID(coverageDate),
       coverageDateISO: coverageDate.toISOString().split('T')[0],
+      totalOpenPOQty: Math.round(totalOpenPOQty),
+      doiAfterIncoming: (function(){
+        var d = estUsgMax > 0 ? (totalStock + totalOpenPOQty) / estUsgMax : (totalStock+totalOpenPOQty > 0 ? 999 : 0);
+        return d >= 999 ? 999 : Math.floor(d);
+      })(),
+      coverageAfterIncoming: (function(){
+        var d = estUsgMax > 0 ? (totalStock + totalOpenPOQty) / estUsgMax : (totalStock+totalOpenPOQty > 0 ? 999 : 0);
+        var dt = new Date(now);
+        dt.setDate(dt.getDate() + Math.floor(Math.min(d, 999)));
+        return fmtDateID(dt);
+      })(),
       category: category, endStock: Math.round(endStock),
       ospoSdApr: Math.round(ospoSdApr), ospoMei: Math.round(ospoMei),
       ospoJuni: Math.round(ospoJuni), ospoJulDst: Math.round(ospoJulDst),
@@ -6010,6 +6034,8 @@ function renderProjection() {
       td('<span class="mono">' + n_id(p.totalIncoming||0) + '</span>','grpo','text-align:right') +
       td('<span class="mono" style="color:var(--amber)">' + n_id(p.actualUsageDaily||0) + '</span>','actualusg','text-align:right') +
       td('<span class="mono ' + covClass + '">' + (p.coverageDateStr||'') + '</span>','coverage') +
+      td('<span class="mono" style="color:' + (p.doiAfterIncoming > (p.doiFCNum||0) ? 'var(--teal)' : 'var(--muted)') + '">' + (p.doiAfterIncoming||'—') + '</span>','doi_incoming','text-align:right') +
+      td('<span class="mono" style="color:' + (p.doiAfterIncoming > (p.doiFCNum||0) ? 'var(--teal)' : 'var(--muted)') + '">' + (p.coverageAfterIncoming||'—') + '</span>','cov_incoming') +
       td(catBadge(p.category),'kategori') +
       td('<span class="mono" style="color:' + ((p.endStock||0) < 0 ? 'var(--red)' : 'var(--text)') + '">' + n_id(p.endStock||0) + '</span>','endstock','text-align:right') +
       td('<span class="mono">' + n_id(p.mrpNextMonth||0) + '</span>','mrpnext','text-align:right') +
@@ -6087,6 +6113,8 @@ function renderProjection() {
     th('GRPO Bln Ini','grpo') +
     th('Actual Usg','actualusg') +
     th('Est. Coverage','coverage') +
+    th('DOI+Incoming','doi_incoming') +
+    th('Coverage+Incoming','cov_incoming') +
     th('Kategori','kategori') +
     th('End Stock vs MRP','endstock') +
     th('MRP Next Month','mrpnext') +
@@ -6639,7 +6667,7 @@ function renderDashUrgent(urgentItems) {
           '</div>'+
         '</div>'+
         '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:2px">'+
-          '<div style="font-size:10px;color:var(--muted)">'+p.productCode+' '+tb+' · '+(p.supplier||'—')+' · DOI: '+Math.round(p.doiFC||0)+' hr</div>'+
+          '<div style="font-size:10px;color:var(--muted)">'+p.productCode+' '+tb+' · '+(p.supplier||'—')+' · DOI: '+Math.round(p.doiFC||0)+' hr'+(p.doiAfterIncoming&&p.doiAfterIncoming>(p.doiFC||0)?' <span style="color:var(--teal);font-size:9px">→ '+p.doiAfterIncoming+' hr</span>':'')+'</div>'+
           '<div style="flex-shrink:0;display:flex;align-items:center;gap:4px">'+
             '<span style="font-size:9px;color:var(--muted)">jadwal kirim</span>'+
             '<span style="font-size:10px;font-weight:500;color:'+delivColor+'">'+delivTxt+'</span>'+
@@ -9071,7 +9099,7 @@ function renderHighlighted() {
           '</div>'+
         '</div>'+
         '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:2px">'+
-          '<div style="font-size:10px;color:var(--muted)">'+p.productCode+' '+tb+' · '+(p.supplier||'—')+' · DOI: '+Math.round(p.doiFC||0)+' hr</div>'+
+          '<div style="font-size:10px;color:var(--muted)">'+p.productCode+' '+tb+' · '+(p.supplier||'—')+' · DOI: '+Math.round(p.doiFC||0)+' hr'+(p.doiAfterIncoming&&p.doiAfterIncoming>(p.doiFC||0)?' <span style="color:var(--teal);font-size:9px">→ '+p.doiAfterIncoming+' hr</span>':'')+'</div>'+
           '<div style="flex-shrink:0;display:flex;align-items:center;gap:4px">'+
             '<span style="font-size:9px;color:var(--muted)">jadwal kirim</span>'+
             '<span style="font-size:10px;font-weight:500;color:'+delivColor2+'">'+delivTxt+'</span>'+
@@ -10298,8 +10326,12 @@ function _calcForecast(code, ospoIdx) {
       for(var nx = am+1; nx < FC_MONTHS.length; nx++) {
         if(ospoPool2[nx] <= 0) continue;
         var step2 = multiple > 0 ? multiple : 1;
-        var pull = Math.ceil(ospoPool2[nx] / step2) * step2;
-        pull = Math.min(pull, ospoPool2[nx]);
+        // Pull hanya sebesar deficit ke target DOI — bukan seluruh PO
+        var stockTarget = req_a * (maxDOI / WD);
+        var deficit = Math.max(0, stockTarget - stockAfterOspo);
+        if(deficit <= 0) break;
+        var pullNeeded = Math.ceil(deficit / step2) * step2;
+        var pull = Math.min(ospoPool2[nx], pullNeeded);
         if(pull <= 0) continue;
         ospoPool2[nx] -= pull;
         ospoPulled[am] += pull;
@@ -10681,7 +10713,7 @@ function _fcDetailRow(code, fc, master) {
 
   // Forecast grid
   var mhdr = FC_MONTHS.map(function(m) {
-    return '<th style="text-align:right;padding:6px 5px;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;color:var(--muted);border-bottom:2px solid var(--border2);white-space:nowrap">'+m.slice(0,3)+" '"+yr2+'</th>';
+    return '<th style="text-align:right;padding:6px 5px;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;color:var(--muted);border-bottom:2px solid var(--border2);white-space:nowrap;min-width:82px">'+m.slice(0,3)+" '"+yr2+'</th>';
   }).join('');
 
   // Editable OSPO row — shows different color when manually edited
@@ -10785,7 +10817,7 @@ function _fcDetailRow(code, fc, master) {
     + '<tbody>'
     + gRow('Requirement', fc.forecast, function(){ return 'color:var(--text)'; })
     + (isFcView
-        ? gRow('Forecast OSPO', fc.forecastOspo, function(v){ return v>0?'color:var(--teal);font-weight:600':'color:var(--hint)'; })
+        ? gRow('Adjusted OSPO', fc.forecastOspo, function(v){ return v>0?'color:var(--teal);font-weight:600':'color:var(--hint)'; })
         : gRowOspo('OSPO', fc.ospo, fc.ospoBase, code, 'ospo')
       )
     + (isFcView
@@ -10800,7 +10832,7 @@ function _fcDetailRow(code, fc, master) {
         var pv=(isFcView?fc.stockFc:fc.stock||[]).map(function(v){return _fcCalcPallet(code,v||0,uom);});
         if(!pv.some(function(v){return v!==null;})) return '';
         return '<tr style="border-top:1px solid var(--border);background:rgba(20,184,166,.04)"><td style="padding:5px 6px;font-size:10.5px;font-weight:700;color:var(--teal);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap">Pallet Usage</td>'
-          +pv.map(function(v){if(v===null)return '<td style="text-align:right;padding:5px 6px;color:var(--hint)">—</td>';return '<td style="text-align:right;padding:5px 6px;'+(v>0?'color:var(--teal);font-weight:600':'color:var(--hint)')+'">'+v+'</td>';}).join('')
+          +pv.map(function(v){if(v===null)return '<td style="text-align:right;padding:5px 6px;min-width:82px;color:var(--hint)">—</td>';return '<td style="text-align:right;padding:5px 6px;'+(v>0?'color:var(--teal);font-weight:600':'color:var(--hint)')+'">'+v+'</td>';}).join('')
           +'<td></td></tr>';
       }())
     + '</tbody></table></div>';
@@ -12315,33 +12347,22 @@ function _fcOspoEdit(input) {
   var mi   = parseInt(input.getAttribute('data-mi'));
   var qty  = parseFloat((input.value||'0').replace(/\./g,'').replace(/,/g,'.')) || 0;
 
-  // Hitung total OSPO original dari SAP
+  // Ambil OSPO original per bulan dari SAP
   var ospoIdx = _buildOSPOIndex();
   var yr = new Date().getFullYear();
   var ospoOrig = FC_MONTH_NUMS.map(function(mn){ return (ospoIdx[code]||{})[yr*100+mn] || 0; });
-  var total = ospoOrig.reduce(function(s,v){ return s+v; }, 0);
 
-  // Clamp
-  qty = Math.max(0, Math.min(qty, total));
+  // Clamp: maksimal = OSPO original bulan ini (tidak bisa melebihi)
+  var maxForMonth = ospoOrig[mi] || 0;
+  qty = Math.max(0, Math.min(qty, maxForMonth));
+  if(qty > maxForMonth) {
+    toast('Nilai melebihi OSPO SAP bulan ini (maks: ' + n_id(maxForMonth) + ')', 'err');
+  }
   input.value = qty > 0 ? n_id(qty) : '0';
 
-  // Reset semua override untuk item ini dulu, lalu set ulang
-  _fcOspoOverride[code] = new Array(FC_MONTHS.length).fill(null);
-
-  // Set override bulan yang diedit
-  _fcOspoOverride[code][mi] = qty;
-
-  // Redistribute: semua bulan lain = 0, sisa semua ke bulan terdekat (pertama selain mi)
-  var sisa = total - qty;
-  var firstOther = -1;
-  for(var oi2 = 0; oi2 < FC_MONTHS.length; oi2++) {
-    if(oi2 === mi) continue;
-    _fcOspoOverride[code][oi2] = 0;
-    if(firstOther < 0) firstOther = oi2;
-  }
-  if(sisa > 0 && firstOther >= 0) {
-    _fcOspoOverride[code][firstOther] = sisa;
-  }
+  // Hanya set override bulan yang diedit — bulan lain tidak berubah
+  if(!_fcOspoOverride[code]) _fcOspoOverride[code] = new Array(FC_MONTHS.length).fill(null);
+  _fcOspoOverride[code][mi] = (qty === maxForMonth) ? null : qty; // null = pakai SAP asli
 
   try { localStorage.setItem('fc_ospo_ovr', JSON.stringify(_fcOspoOverride)); cloudSave('fc_ospo_ovr', JSON.stringify(_fcOspoOverride)); } catch(e){}
   input.style.color = (_fcOspoOverride[code][mi] !== ospoOrig[mi]) ? '#8b5cf6' : (qty > 0 ? 'var(--teal)' : 'var(--muted)');
@@ -12657,7 +12678,7 @@ function _fcExportGSheetsTall() {
       : [fc.forecast, fc.ospo,         fc.ospr, fc.propose, fc.stock,   fc.doi  ];
   };
   var BARIS_LABELS_EXP = isFcExp
-    ? _FC_TALL_ROWS.map(function(r,i){ return i===1 ? {label:'Forecast OSPO',bg:r.bg,color:r.color,bold:r.bold} : r; })
+    ? _FC_TALL_ROWS.map(function(r,i){ return i===1 ? {label:'Adjusted OSPO',bg:r.bg,color:r.color,bold:r.bold} : r; })
     : _FC_TALL_ROWS;
 
   items.forEach(function(code) {
@@ -12755,7 +12776,7 @@ function _fcExportExcelTall() {
       : [fc.forecast, fc.ospo,         fc.ospr, fc.propose, fc.stock,   fc.doi  ];
   };
   var BARIS_NAMES = isFcXls
-    ? ['Requirement','Forecast OSPO','OSPR','Propose PR','Stock Forecast','DOI Forecast']
+    ? ['Requirement','Adjusted OSPO','OSPR','Propose PR','Stock Forecast','DOI Forecast']
     : _FC_TALL_ROWS.map(function(r){ return r.label; });
 
   items.forEach(function(code) {
