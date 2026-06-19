@@ -4882,6 +4882,32 @@ function cleanupStalePoOverrides() {
   if(document.getElementById('pg-po') && document.getElementById('pg-po').classList.contains('active')) renderPO();
 }
 
+function _recalcFreezeLeft() {
+  // After render, fix left positions based on actual column widths to prevent bleed
+  if(!_projFreezeCol) return;
+  var tbl = document.getElementById('proj-tbl'); if(!tbl) return;
+  var frozenSels = ['td:nth-child(1)','td:nth-child(2)','td:nth-child(3)','td:nth-child(4)','td:nth-child(5)','td:nth-child(6)',
+                    'th:nth-child(1)','th:nth-child(2)','th:nth-child(3)','th:nth-child(4)','th:nth-child(5)','th:nth-child(6)'];
+  // Get actual widths from first data row
+  var firstRow = tbl.querySelector('tbody tr');
+  if(!firstRow) return;
+  var cells = firstRow.querySelectorAll('td');
+  var left = 0;
+  var lefts = [];
+  for(var i=0;i<6&&i<cells.length;i++){
+    lefts.push(left);
+    left += cells[i].offsetWidth;
+  }
+  // Apply to all rows
+  var rows = tbl.querySelectorAll('tr');
+  rows.forEach(function(row){
+    var cs = row.querySelectorAll('th,td');
+    for(var i=0;i<6&&i<cs.length;i++){
+      if(cs[i].style.position==='sticky') cs[i].style.left = lefts[i]+'px';
+    }
+  });
+}
+
 function _toggleProjFreeze() {
   _projFreezeCol = !_projFreezeCol;
   localStorage.setItem('proj_freeze_col', _projFreezeCol ? '1' : '0');
@@ -4891,7 +4917,7 @@ function _toggleProjFreeze() {
     btn.style.color = _projFreezeCol ? '#fff' : '';
     btn.textContent = _projFreezeCol ? '❄ Freeze ON' : '❄ Freeze Kolom';
   }
-  if(STATE.projectionData && STATE.projectionData.length) renderProjection();
+  if(STATE.projectionData && STATE.projectionData.length) { renderProjection(); setTimeout(_recalcFreezeLeft, 50); }
 }
 
 function cleanupProjHistory() {
@@ -5953,15 +5979,15 @@ function renderProjection() {
     })();
     var typeBadge = p.itemType === 'RM' ? '<span class="badge b-blue" style="font-size:9px">RM</span>' : (p.itemType === 'PM' ? '<span class="badge b-purple" style="font-size:9px">PM</span>' : (p.itemType === 'FG' ? '<span class="badge b-green" style="font-size:9px">FG</span>' : ''));
     return '<tr>' +
-      td('<span class="mono" style="font-size:10.5px">' + p.productCode + ' ' + typeBadge + '</span>','kode', (_projFreezeCol?'position:sticky;left:0;z-index:1;background:var(--bg2)':'')) +
+      td('<span class="mono" style="font-size:10.5px">' + p.productCode + ' ' + typeBadge + '</span>','kode', (_projFreezeCol?'position:sticky;left:0;min-width:110px;z-index:1;background:var(--bg2)':'')) +
       (function(){
         var a=p.abc||''; var ac=a==='A'?'var(--red)':a==='B'?'var(--amber)':a==='C'?'var(--teal)':'var(--muted)';
-        return td('<span style="font-weight:700;font-size:11px;color:'+ac+'">'+(a||'—')+'</span>','abc','text-align:center'+(_projFreezeCol?';position:sticky;left:80px;z-index:1;background:var(--bg2)':''));
+        return td('<span style="font-weight:700;font-size:11px;color:'+ac+'">'+(a||'—')+'</span>','abc','text-align:center'+(_projFreezeCol?';position:sticky;left:110px;min-width:45px;z-index:1;background:var(--bg2)':''));
       })() +
-      td((p.description||''),'desc','max-width:140px;overflow:hidden;text-overflow:ellipsis'+(_projFreezeCol?';position:sticky;left:120px;z-index:1;background:var(--bg2)':'')) +
-      td(_isAdmin ? (p.realName||'—') : '🔒','realname','max-width:130px;overflow:hidden;text-overflow:ellipsis;color:var(--teal);font-size:11px'+(_projFreezeCol?';position:sticky;left:280px;z-index:1;background:var(--bg2)':'')) +
-      td((p.uom||''),'uom',(_projFreezeCol?'position:sticky;left:420px;z-index:1;background:var(--bg2)':'')) +
-      td((p.supplier||'—'),'supplier','max-width:130px;overflow:hidden;text-overflow:ellipsis'+(_projFreezeCol?';position:sticky;left:460px;z-index:1;background:var(--bg2);box-shadow:2px 0 4px rgba(0,0,0,.08)':'')) +
+      td((p.description||''),'desc','max-width:140px;overflow:hidden;text-overflow:ellipsis'+(_projFreezeCol?';position:sticky;left:155px;min-width:160px;z-index:1;background:var(--bg2)':'')) +
+      td(_isAdmin ? (p.realName||'—') : '🔒','realname','max-width:130px;overflow:hidden;text-overflow:ellipsis;color:var(--teal);font-size:11px'+(_projFreezeCol?';position:sticky;left:315px;min-width:145px;z-index:1;background:var(--bg2)':'')) +
+      td((p.uom||''),'uom',(_projFreezeCol?'position:sticky;left:460px;min-width:45px;z-index:1;background:var(--bg2)':'')) +
+      td((p.supplier||'—'),'supplier','max-width:130px;overflow:hidden;text-overflow:ellipsis'+(_projFreezeCol?';position:sticky;left:505px;min-width:140px;z-index:1;background:var(--bg2);box-shadow:3px 0 6px rgba(0,0,0,.12)':'')) +
       td((p.site||'—'),'site') +
       td('<span class="mono td-right" style="display:block">' + n_id(p.stockBTG||0) + '</span>','stockbtg') +
       td('<span class="mono td-right" style="display:block">' + n_id(p.stockSNG||0) + '</span>','stocksng') +
@@ -6022,11 +6048,13 @@ function renderProjection() {
 
   var _freezeClass = _projFreezeCol ? ' proj-freeze' : '';
   // Sticky left positions untuk 6 kolom pertama (kode,abc,desc,realname,uom,supplier)
-  var _sPos = [0, 80, 120, 280, 420, 460];
+  var _sPos = [0, 110, 155, 315, 460, 505];
   function thS(label, col, idx) {
     if(!_projFreezeCol || idx === undefined) return th(label, col);
     var shadow = idx === 5 ? ';box-shadow:2px 0 4px rgba(0,0,0,.1)' : '';
-    return th(label, col).replace('style="position:sticky;top:0;z-index:2;background:var(--bg3)"', 'style="position:sticky;top:0;left:'+_sPos[idx]+'px;z-index:5;background:var(--bg3)'+shadow+'"');
+    var widths=[110,45,160,145,45,140];
+    var mw = idx<widths.length ? ';min-width:'+widths[idx]+'px' : '';
+    return th(label, col).replace('style="position:sticky;top:0;z-index:2;background:var(--bg3)"', 'style="position:sticky;top:0;left:'+_sPos[idx]+'px;z-index:5;background:var(--bg3)'+mw+shadow+'"');
   }
   document.getElementById('proj-table').innerHTML = histBanner + '<div class="card"><div class="tbl-wrap"><table class="resizable-table'+_freezeClass+'" id="proj-tbl">' +
     '<thead>' +
@@ -11405,6 +11433,7 @@ function _mrpApplyToState(result) {
     if(STATE.masterData) {
       buildProjection();
       if(document.getElementById('proj-tbody') || document.getElementById('proj-table')) renderProjection();
+  if(_projFreezeCol) setTimeout(_recalcFreezeLeft, 150);
     }
   }, 200);
   toast('MRP diterapkan + Projection direbuild ✓', 'ok');
