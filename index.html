@@ -2645,6 +2645,26 @@ async function _aiSend() {
       if(resp.status===401) em='Gemini API Key tidak valid. Cek di Settings \u2192 AI Asisten PPIC.';
       if(resp.status===429) em='Rate limit Gemini tercapai. Tunggu 1 menit lalu coba lagi.';
       if(resp.status===503) em='Server Gemini sedang sibuk. Coba lagi dalam beberapa detik.';
+      // HTTP 400: model mungkin tidak support tools via endpoint ini — fallback
+      if(resp.status===400){
+        console.warn('[AI] HTTP 400, fallback ke streaming tanpa tools...');
+        var td2x=document.getElementById('ai-typ'); if(td2x) td2x.remove();
+        var respFb=await _aiGroqCall(allMsgs, false);
+        if(respFb.ok){
+          var dFb=document.createElement('div'); dFb.className='ai-msg assistant';
+          var bubFb=document.createElement('div'); bubFb.className='ai-bubble';
+          dFb.appendChild(bubFb); if(msgs){msgs.appendChild(dFb);msgs.scrollTop=msgs.scrollHeight;}
+          var rdFb=respFb.body.getReader(); var dcFb=new TextDecoder(); var ftFb='';
+          while(true){var rFb=await rdFb.read(); if(rFb.done) break;
+            var llFb=dcFb.decode(rFb.value).split('\n');
+            for(var iFb=0;iFb<llFb.length;iFb++){var lnFb=llFb[iFb]; if(!lnFb.startsWith('data: ')) continue;
+              var dtFb=lnFb.slice(6).trim(); if(dtFb==='[DONE]') break;
+              try{var pFb=JSON.parse(dtFb);var dltFb=pFb.choices&&pFb.choices[0]&&pFb.choices[0].delta;if(dltFb&&dltFb.content){ftFb+=dltFb.content;_aiSetStream(bubFb,ftFb);}}catch(e){}}}
+          if(bubFb){if(!ftFb.trim())bubFb.innerHTML=_aiFmt('Model '+_aiModel+' tidak support tool calling di endpoint ini. Coba ganti ke gemini-3.5-flash di Settings.');else bubFb.innerHTML=_aiFmt(ftFb);}
+          if(ftFb.trim()) _aiHistory.push({role:'assistant',content:ftFb});
+        } else { _aiMsgEl('system','\u274C '+em+' \u2014 coba ganti model ke gemini-3.5-flash di Settings.'); _aiHistory.pop(); }
+        _aiStreaming=false; var sbFb=document.getElementById('ai-send-btn'); if(sbFb) sbFb.disabled=false; return;
+      }
       _aiMsgEl('system','\u274C '+em);
       _aiHistory.pop(); _aiStreaming=false;
       var sb2=document.getElementById('ai-send-btn'); if(sb2) sb2.disabled=false; return;
