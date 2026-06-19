@@ -485,6 +485,11 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
       <span style="font-size:12px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:flex;align-items:center;gap:6px">📌 Highlighted Issues <span class="_dtip" onclick="_showDashTip('highlighted',this)" title="Apa ini?">?</span></span>
     </div>
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;font-size:10px;color:var(--muted);flex-shrink:0">
+            <span style="display:flex;align-items:center;gap:4px"><span style="color:var(--green);font-weight:600">✅</span> sudah konfirmasi supplier</span>
+            <span style="display:flex;align-items:center;gap:4px"><span style="color:var(--accent);font-weight:600">🗓</span> sudah dijadwal, belum konfirmasi</span>
+            <span style="display:flex;align-items:center;gap:4px"><span style="color:var(--red);font-weight:600">⚠</span> belum dijadwal</span>
+          </div>
     <div id="dash-highlighted"><div style="font-size:12px;color:var(--muted);padding:8px 0">Belum ada item yang dipantau. Centang ☐ di kolom pertama tabel Projection Stock untuk pin item ke sini.</div></div>
   </div>
 
@@ -501,6 +506,11 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
           <span style="font-size:12px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:flex;align-items:center;gap:6px">Item Kritis — Coverage Terdekat <span class="_dtip" onclick="_showDashTip('kritis',this)" title="Apa ini?">?</span></span>
           <button class="btn btn-xs" onclick="showPage('projection',document.querySelectorAll('.ni')[1])">Lihat semua →</button>
         </div>
+        <div style="display:flex;align-items:center;gap:12px;font-size:10px;color:var(--muted);flex-shrink:0">
+            <span style="display:flex;align-items:center;gap:4px"><span style="color:var(--green);font-weight:600">✅</span> sudah konfirmasi supplier</span>
+            <span style="display:flex;align-items:center;gap:4px"><span style="color:var(--accent);font-weight:600">🗓</span> sudah dijadwal, belum konfirmasi</span>
+            <span style="display:flex;align-items:center;gap:4px"><span style="color:var(--red);font-weight:600">⚠</span> belum dijadwal</span>
+          </div>
         <div id="dash-urgent-table" style="flex:1;overflow-y:auto;min-height:0"><div class="loading"><div class="spin"></div>Sync data untuk memuat...</div></div>
       </div>
     </div>
@@ -4854,7 +4864,8 @@ function setPODate(el, isManual) {
 function savePOChanges() {
   if(!_requireAdmin('simpan perubahan')) return;
   localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
-  toast('Perubahan PO disimpan ✓', 'ok');
+  cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
+  toast('Perubahan PO disimpan ke Firebase ✓', 'ok');
 }
 
 function cleanupStalePoOverrides() {
@@ -6569,6 +6580,12 @@ function _fmtDelivDate(ddmmyyyy) {
   return d+'-'+(mon[m]||parts[1])+'-'+y;
 }
 
+function _isAutoComment(comment) {
+  // Auto-generated: "22/06/2026 Qty:50" atau "15/06/2026,22/06/2026 Qty:1.000"
+  // Pattern: dimulai dengan tanggal dd/mm/yyyy dan mengandung "Qty:"
+  return comment && /^\d{2}\/\d{2}\/\d{4}/.test(comment.trim()) && comment.includes('Qty:');
+}
+
 function _getNearestDelivery(code) {
   // Returns {date, confirmed, qty, uom} for the nearest scheduled PO
   var pos = (STATE.poData||[]).filter(function(po){return po.itemCode===code;});
@@ -6608,7 +6625,7 @@ function renderDashUrgent(urgentItems) {
     var nd = _getNearestDelivery(p.productCode);
     var delivTxt = nd ? ((nd.confirmed?'✅ ':'🗓 ')+_fmtDelivDate(nd.date)+' · '+nd.qty+' '+nd.uom) : (p.category==='UNDER'?'⚠ belum dijadwal':'—');
     var delivColor = nd ? (nd.confirmed?'var(--green)':'var(--accent)') : (p.category==='UNDER'?'var(--red)':'var(--muted)');
-    var commentHtml = p.comment
+    var commentHtml = (p.comment && !_isAutoComment(p.comment))
       ? '<div style="font-size:10.5px;color:var(--text);background:var(--bg3);border-left:3px solid var(--teal);padding:3px 7px;border-radius:0 4px 4px 0;margin-top:5px">📝 '+p.comment+'</div>'
       : '';
     return '<div onclick="_jumpToItem(\''+p.productCode+'\')" style="display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:0.5px solid var(--border);cursor:pointer">'+
@@ -9039,7 +9056,7 @@ function renderHighlighted() {
     var nd = _getNearestDelivery(p.productCode);
     var delivTxt = nd ? ((nd.confirmed?'✅ ':'🗓 ')+_fmtDelivDate(nd.date)+' · '+nd.qty+' '+nd.uom) : (p.category==='UNDER'?'⚠ belum dijadwal':'—');
     var delivColor2 = nd ? (nd.confirmed?'var(--green)':'var(--accent)') : (p.category==='UNDER'?'var(--red)':'var(--muted)');
-    var commentHtml = p.comment
+    var commentHtml = (p.comment && !_isAutoComment(p.comment))
       ? '<div style="font-size:10.5px;color:var(--text);background:var(--bg3);border-left:3px solid var(--teal);padding:3px 7px;border-radius:0 4px 4px 0;margin-top:5px">📝 '+p.comment+'</div>'
       : '';
     var covStr = p.coverageDateStr || '—';
