@@ -384,7 +384,7 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
   </div>
   <div class="ni" data-label="Settings" onclick="showPage('settings',this)"><span class="ni-ico">⚙</span><span class="nav-label">Settings </span><span id="lock-settings" style="font-size:10px">🔒</span></div>
   <div class="ni" data-label="How to Use" onclick="showPage('howto',this)"><span class="ni-ico">📖</span><span class="nav-label">How to Use</span></div>
-  <div class="ni" data-label="<span id="login-label">Login</" id="nav-login" onclick="_isAdmin?doLogout():showLoginModal()" style="border-top:0.5px solid var(--border);margin-top:4px">
+  <div class="ni" id="nav-login" onclick="_isAdmin?doLogout():showLoginModal()" style="border-top:0.5px solid var(--border);margin-top:4px">
     <span class="ni-ico" id="login-ico">🔒</span><span id="login-label">Login</span>
   </div>
 </nav>
