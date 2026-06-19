@@ -111,14 +111,14 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:13
 /* Table */
 .tbl-wrap{overflow-x:auto;max-height:520px;overflow-y:auto}
 .proj-freeze th.sticky,.proj-freeze td.sticky{position:sticky;background:var(--bg2);z-index:2}
-.proj-freeze th.sticky{z-index:3;background:var(--bg3)}
+.proj-freeze th.sticky{z-index:5;background:var(--bg3)}
 .proj-freeze td.sticky:last-child,.proj-freeze th.sticky:last-child{box-shadow:2px 0 4px rgba(0,0,0,.08)}
 /* Resizable columns */
 table th{position:relative}
 .col-resize{position:absolute;right:0;top:0;bottom:0;width:4px;cursor:col-resize;background:transparent;z-index:2}
 .col-resize:hover,.col-resize.active{background:var(--accent)}
 table{width:100%;border-collapse:collapse;font-size:12px}
-thead{position:sticky;top:0;z-index:2}
+thead{position:static}
 th{background:var(--bg3);padding:8px 12px;text-align:left;font-weight:500;color:var(--muted);font-size:10.5px;text-transform:uppercase;letter-spacing:.4px;white-space:nowrap;border-bottom:1px solid var(--border)}
 td{padding:9px 12px;border-bottom:1px solid rgba(36,45,64,.6);white-space:nowrap}
 tr:last-child td{border-bottom:none}
@@ -240,7 +240,7 @@ label{font-size:11.5px;color:var(--muted);display:block;margin-bottom:4px}
 thead.filterable th{padding-bottom:6px}
 
 /* Perf: GPU-accelerated sticky header */
-thead{position:sticky;top:0;z-index:2;will-change:transform}
+thead{position:static;}
 .tbl-wrap{contain:strict;height:520px}
 
 /* Theme toggle */
@@ -5058,7 +5058,7 @@ function renderGRPO() {
   });
   if(!f.length){document.getElementById('grpo-table').innerHTML='<div class="empty"><div class="empty-ico">📦</div><h3>Tidak ada GRPO</h3></div>';return;}
   document.getElementById('grpo-table').innerHTML = '<div class="card"><div class="tbl-wrap"><table>' +
-    '<thead>' +
+    '<thead style="position:static">' +
     '<tr><th>GRPO Date</th><th>Item Code</th><th>Item Name</th><th>Supplier</th><th>Qty</th><th>UOM</th></tr>' +
     '<tr style="background:var(--bg4)">' +
     '<th><input class="th-filter" id="gf-date" oninput="renderGRPO()" placeholder="filter..."></th>' +
@@ -6026,7 +6026,7 @@ function renderProjection() {
   function thS(label, col, idx) {
     if(!_projFreezeCol || idx === undefined) return th(label, col);
     var shadow = idx === 5 ? ';box-shadow:2px 0 4px rgba(0,0,0,.1)' : '';
-    return th(label, col).replace('<th ', '<th style="position:sticky;left:'+_sPos[idx]+'px;top:0;z-index:4;background:var(--bg3)'+shadow+'" ');
+    return th(label, col).replace('style="position:sticky;top:0;z-index:2;background:var(--bg3)"', 'style="position:sticky;top:0;left:'+_sPos[idx]+'px;z-index:5;background:var(--bg3)'+shadow+'"');
   }
   document.getElementById('proj-table').innerHTML = histBanner + '<div class="card"><div class="tbl-wrap"><table class="resizable-table'+_freezeClass+'" id="proj-tbl">' +
     '<thead>' +
@@ -9087,7 +9087,7 @@ function resetProjCols() {
 }
 function colHidden(col) { return PROJ_HIDDEN_COLS.indexOf(col) >= 0; }
 function th(label, col) {
-  return colHidden(col) ? '' : '<th>' + label + '<div class="col-resizer"></div></th>';
+  return colHidden(col) ? '' : '<th style="position:sticky;top:0;z-index:2;background:var(--bg3)">' + label + '<div class="col-resizer"></div></th>';
 }
 function td(content, col, extraStyle) {
   if(colHidden(col)) return '';
