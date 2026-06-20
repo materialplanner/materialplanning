@@ -4688,7 +4688,7 @@ function renderPO() {
     + '<colgroup><col style="width:90px"><col style="width:150px"><col style="width:100px"><col style="width:170px"><col style="width:75px">'
     + '<col style="width:80px"><col style="width:50px"><col style="width:95px"><col style="width:125px">'
     + '<col style="width:80px"><col style="width:120px"><col style="width:85px"><col style="width:110px"><col style="width:150px"></colgroup>'
-    + '<thead>'
+    + '<thead style="position:sticky;top:0;z-index:2;background:var(--bg3)">'
     + '<tr><th>Doc Num<div class="col-resize" data-col="0"></div></th><th>Supplier<div class="col-resize" data-col="1"></div></th><th>Item Code<div class="col-resize" data-col="2"></div></th><th>Item Name<div class="col-resize" data-col="3"></div></th><th>Site<div class="col-resize" data-col="4"></div></th>'
     + '<th>Open Qty<div class="col-resize" data-col="5"></div></th><th>UOM<div class="col-resize" data-col="6"></div></th><th>PR Req Date<div class="col-resize" data-col="7"></div></th><th>Tgl Request Kirim<div class="col-resize" data-col="8"></div></th>'
     + '<th>Qty Konfirm<div class="col-resize" data-col="9"></div></th><th>Tgl Konfirmasi<div class="col-resize" data-col="10"></div></th><th>Tgl Update<div class="col-resize" data-col="11"></div></th><th title="Update DelDate: kapan PO ini harus datang berdasarkan forecast">Update DelDate<div class="col-resize" data-col="12"></div></th><th>Notes</th></tr>'
@@ -6034,14 +6034,16 @@ function renderProjection() {
       td('<span class="mono">' + n_id(p.totalIncoming||0) + '</span>','grpo','text-align:right') +
       td('<span class="mono" style="color:var(--amber)">' + n_id(p.actualUsageDaily||0) + '</span>','actualusg','text-align:right') +
       td('<span class="mono ' + covClass + '">' + (p.coverageDateStr||'') + '</span>','coverage') +
-      td('<span class="mono" style="color:' + (p.doiAfterIncoming > (p.doiFCNum||0) ? 'var(--teal)' : 'var(--muted)') + '">' + (p.doiAfterIncoming||'—') + '</span>','doi_incoming','text-align:right') +
-      td('<span class="mono" style="color:' + (p.doiAfterIncoming > (p.doiFCNum||0) ? 'var(--teal)' : 'var(--muted)') + '">' + (p.coverageAfterIncoming||'—') + '</span>','cov_incoming') +
-      td(catBadge(p.category),'kategori') +
       td('<span class="mono" style="color:' + ((p.endStock||0) < 0 ? 'var(--red)' : 'var(--text)') + '">' + n_id(p.endStock||0) + '</span>','endstock','text-align:right') +
       td('<span class="mono">' + n_id(p.mrpNextMonth||0) + '</span>','mrpnext','text-align:right') +
       td('<span class="mono" style="color:' + ((p.endStockNext||0) < 0 ? 'var(--red)' : 'var(--text)') + '">' + n_id(p.endStockNext||0) + '</span>','endstocknext','text-align:right') +
       ospoStr +
       td('<span class="mono">' + n_id(p.totalOSPR||0) + '</span>','ospr','text-align:right') +
+      td('<span class="mono" style="color:var(--teal)">' + (p.tglIncoming||'—') + '</span>','tgl_incoming') +
+      td('<span class="mono" style="color:var(--teal);font-weight:600">' + (p.qtyIncoming > 0 ? n_id(p.qtyIncoming) : '—') + '</span>','qty_incoming','text-align:right') +
+      td('<span class="mono" style="color:' + (p.totalOpenPOQty > 0 ? 'var(--teal)' : 'var(--muted)') + '">' + (p.doiAfterIncoming > 0 ? p.doiAfterIncoming : '—') + '</span>','doi_incoming','text-align:right') +
+      td('<span class="mono" style="color:' + (p.totalOpenPOQty > 0 ? 'var(--teal)' : 'var(--muted)') + '">' + (p.coverageAfterIncoming||'—') + '</span>','cov_incoming') +
+      td(catBadge(p.category),'kategori') +
       pctStr +
       (colHidden('comment') ? '' : (function(){
         var cmtVal = (p.comment||'');
@@ -6091,7 +6093,7 @@ function renderProjection() {
     var shadow = idx === 5 ? ';box-shadow:2px 0 4px rgba(0,0,0,.1)' : '';
     var widths=[110,45,160,145,45,140];
     var mw = idx<widths.length ? ';min-width:'+widths[idx]+'px' : '';
-    return th(label, col).replace('style="position:sticky;top:0;z-index:2;background:var(--bg3)"', 'style="position:sticky;top:0;left:'+_sPos[idx]+'px;z-index:5;background:var(--bg3)'+mw+shadow+'"');
+    if(colHidden(col)) return ''; var widths=[110,45,160,145,45,140]; var mw = idx<widths.length ? ';min-width:'+widths[idx]+'px' : ''; return '<th style="position:sticky;top:0;left:'+_sPos[idx]+'px;z-index:5;background:var(--bg3)'+mw+shadow+'">'+label+'<div class="col-resizer"></div></th>';
   }
   document.getElementById('proj-table').innerHTML = histBanner + '<div class="card"><div class="tbl-wrap"><table class="resizable-table'+_freezeClass+'" id="proj-tbl">' +
     '<thead>' +
@@ -6667,7 +6669,7 @@ function renderDashUrgent(urgentItems) {
           '</div>'+
         '</div>'+
         '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:2px">'+
-          '<div style="font-size:10px;color:var(--muted)">'+p.productCode+' '+tb+' · '+(p.supplier||'—')+' · DOI: '+Math.round(p.doiFC||0)+' hr'+(p.doiAfterIncoming&&p.doiAfterIncoming>(p.doiFC||0)?' <span style="color:var(--teal);font-size:9px">→ '+p.doiAfterIncoming+' hr</span>':'')+'</div>'+
+          '<div style="font-size:10px;color:var(--muted)">'+p.productCode+' '+tb+' · '+(p.supplier||'—')+' · DOI: '+Math.round(p.doiFC||0)+' hr'+(p.totalOpenPOQty > 0 ? ' <span style="color:var(--teal);font-size:9.5px;font-weight:600"> → '+p.doiAfterIncoming+' hr</span>' : '')+'</div>'+
           '<div style="flex-shrink:0;display:flex;align-items:center;gap:4px">'+
             '<span style="font-size:9px;color:var(--muted)">jadwal kirim</span>'+
             '<span style="font-size:10px;font-weight:500;color:'+delivColor+'">'+delivTxt+'</span>'+
@@ -7799,7 +7801,7 @@ function openFbModal(idx) {
   document.getElementById('fb-note').value = e.note || '';
 
   // Build per-item table
-  var html = '<table style="width:100%;border-collapse:collapse;font-size:12px">'
+  var html = '<table style="width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed">'
     + '<thead><tr style="background:var(--bg3)">'
     + '<th style="padding:7px 10px;text-align:left;font-size:10.5px;color:var(--muted);border-bottom:1px solid var(--border)">Item</th>'
     + '<th style="padding:7px 10px;font-size:10.5px;color:var(--muted);border-bottom:1px solid var(--border)">PO</th>'
@@ -9099,7 +9101,7 @@ function renderHighlighted() {
           '</div>'+
         '</div>'+
         '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:2px">'+
-          '<div style="font-size:10px;color:var(--muted)">'+p.productCode+' '+tb+' · '+(p.supplier||'—')+' · DOI: '+Math.round(p.doiFC||0)+' hr'+(p.doiAfterIncoming&&p.doiAfterIncoming>(p.doiFC||0)?' <span style="color:var(--teal);font-size:9px">→ '+p.doiAfterIncoming+' hr</span>':'')+'</div>'+
+          '<div style="font-size:10px;color:var(--muted)">'+p.productCode+' '+tb+' · '+(p.supplier||'—')+' · DOI: '+Math.round(p.doiFC||0)+' hr'+(p.totalOpenPOQty > 0 ? ' <span style="color:var(--teal);font-size:9.5px;font-weight:600"> → '+p.doiAfterIncoming+' hr</span>' : '')+'</div>'+
           '<div style="flex-shrink:0;display:flex;align-items:center;gap:4px">'+
             '<span style="font-size:9px;color:var(--muted)">jadwal kirim</span>'+
             '<span style="font-size:10px;font-weight:500;color:'+delivColor2+'">'+delivTxt+'</span>'+
@@ -9160,7 +9162,7 @@ function resetProjCols() {
 }
 function colHidden(col) { return PROJ_HIDDEN_COLS.indexOf(col) >= 0; }
 function th(label, col) {
-  return colHidden(col) ? '' : '<th style="position:sticky;top:0;z-index:2;background:var(--bg3)">' + label + '<div class="col-resizer"></div></th>';
+  return colHidden(col) ? '' : '<th>' + label + '<div class="col-resizer"></div></th>';
 }
 function td(content, col, extraStyle) {
   if(colHidden(col)) return '';
@@ -10316,14 +10318,18 @@ function _calcForecast(code, ospoIdx) {
     var ospr_a = ospr[am];
 
     // Step 1: pull-forward OSPO dari bulan berikutnya jika DOI < target
+    // Jika bulan ini di-override manual → pakai nilai as-is, skip pull-forward
     var _amOverridden = _fcOspoOverride[code] && _fcOspoOverride[code][am] != null;
     var stockAfterOspo = prevSt + ospoPool2[am] + ospoPulled[am] + ospr_a - req_a;
     var _pfSt = stockAktualFw.slice();
     _pfSt[am] = stockAfterOspo;
     for(var _pz = am+1; _pz < FC_MONTHS.length; _pz++) _pfSt[_pz] = 0;
     var _pfD = calcDOI(_pfSt)[am];
-    if(_pfD >= 0 && _pfD < maxDOI) {
+    if(!_amOverridden && _pfD >= 0 && _pfD < maxDOI) {
       for(var nx = am+1; nx < FC_MONTHS.length; nx++) {
+        // Skip bulan yang sudah di-override manual — jangan ambil dari sana
+        var _nxOverridden = _fcOspoOverride[code] && _fcOspoOverride[code][nx] != null;
+        if(_nxOverridden) continue;
         if(ospoPool2[nx] <= 0) continue;
         var step2 = multiple > 0 ? multiple : 1;
         // Pull hanya sebesar deficit ke target DOI — bukan seluruh PO
@@ -10713,7 +10719,7 @@ function _fcDetailRow(code, fc, master) {
 
   // Forecast grid
   var mhdr = FC_MONTHS.map(function(m) {
-    return '<th style="text-align:right;padding:6px 5px;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;color:var(--muted);border-bottom:2px solid var(--border2);white-space:nowrap;min-width:82px">'+m.slice(0,3)+" '"+yr2+'</th>';
+    return '<th style="text-align:right;padding:4px 5px;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;color:var(--muted);border-bottom:2px solid var(--border2);white-space:nowrap;width:92px;overflow:hidden">'+m.slice(0,3)+" '"+yr2+'</th>';
   }).join('');
 
   // Editable OSPO row — shows different color when manually edited
@@ -10730,12 +10736,12 @@ function _fcDetailRow(code, fc, master) {
       var inp_clr  = isEdited ? 'var(--purple,#8b5cf6)' : (haVal ? 'var(--teal)' : 'var(--muted)');
       var inp_wt   = haVal ? '600' : '400';
       var inp_bg   = isEdited ? 'rgba(139,92,246,.08)' : (haVal ? 'rgba(20,184,166,.06)' : 'var(--bg3)');
-      return '<td style="padding:2px 3px" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()">'
+      return '<td style="padding:2px;width:92px;overflow:hidden" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()">'
         + '<div style="display:inline-flex;align-items:stretch;border:1px solid '+bdr+';border-radius:4px;overflow:hidden;background:'+inp_bg+'">'
         + '<input type="text" inputmode="numeric" value="'+(cur>0?n_id(cur):'0')+'"'
         +   ' data-code="'+itemCode+'" data-mi="'+i+'" data-base="'+base+'" data-rowtype="'+(rowType||'ospo')+'"'
         +   ' onchange="_fcOspoRowEdit(this)" oninput="_fcOspoRowEditLive(this)" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()"'
-        +   ' style="width:62px;text-align:right;font-family:var(--mono);font-size:11px;font-weight:'+inp_wt+';color:'+inp_clr+';background:transparent;border:none;padding:3px 6px 3px 4px;outline:none"'
+        +   ' style="width:58px;text-align:right;font-family:var(--mono);font-size:11px;font-weight:'+inp_wt+';color:'+inp_clr+';background:transparent;border:none;padding:3px 4px 3px 3px;outline:none"'
         +   ' title="'+(isEdited ? 'SAP: '+n_id(base)+' (diedit manual)' : 'Klik untuk edit')+'">'
         + '</div></td>';
     }).join('');
@@ -10758,7 +10764,7 @@ function _fcDetailRow(code, fc, master) {
         var inp_color = haVal ? 'var(--amber)' : 'var(--muted)';
         var inp_weight = haVal ? '700' : '400';
         var inp_bg = haVal ? 'var(--amber-bg)' : 'var(--bg3)';
-        return '<td style="padding:2px 3px" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()">'
+        return '<td style="padding:2px;width:92px;overflow:hidden" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()">'
           + '<div style="display:inline-flex;align-items:stretch;border:1px solid '+bdr+';border-radius:4px;overflow:hidden;background:'+inp_bg+'">'
           + '<input type="text" inputmode="numeric" value="'+(cur>0?n_id(cur):'0')+'"'
           +   ' data-code="'+fieldCode+'" data-mi="'+i+'" data-moq="'+moqV+'"'
@@ -10806,7 +10812,7 @@ function _fcDetailRow(code, fc, master) {
   var grid = '<div style="overflow-x:auto;margin-top:10px">'
     + '<table style="width:100%;border-collapse:collapse;font-size:12px">'
     + '<thead><tr>'
-    + '<th style="text-align:left;padding:6px;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;color:var(--muted);border-bottom:2px solid var(--border2);min-width:120px">Baris</th>'
+    + '<th style="text-align:left;padding:6px;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;color:var(--muted);border-bottom:2px solid var(--border2);width:130px;white-space:nowrap">Baris</th>'
     + mhdr
     + '<th style="border-bottom:2px solid var(--border2);padding:4px 6px;text-align:right;white-space:nowrap;vertical-align:middle">'
     + '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">'
@@ -10832,7 +10838,7 @@ function _fcDetailRow(code, fc, master) {
         var pv=(isFcView?fc.stockFc:fc.stock||[]).map(function(v){return _fcCalcPallet(code,v||0,uom);});
         if(!pv.some(function(v){return v!==null;})) return '';
         return '<tr style="border-top:1px solid var(--border);background:rgba(20,184,166,.04)"><td style="padding:5px 6px;font-size:10.5px;font-weight:700;color:var(--teal);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap">Pallet Usage</td>'
-          +pv.map(function(v){if(v===null)return '<td style="text-align:right;padding:5px 6px;min-width:82px;color:var(--hint)">—</td>';return '<td style="text-align:right;padding:5px 6px;'+(v>0?'color:var(--teal);font-weight:600':'color:var(--hint)')+'">'+v+'</td>';}).join('')
+          +pv.map(function(v){if(v===null)return '<td style="text-align:right;padding:5px 4px;width:92px;overflow:hidden;color:var(--hint)">—</td>';return '<td style="text-align:right;padding:5px 6px;'+(v>0?'color:var(--teal);font-weight:600':'color:var(--hint)')+'">'+v+'</td>';}).join('')
           +'<td></td></tr>';
       }())
     + '</tbody></table></div>';
