@@ -3148,7 +3148,23 @@ function _applyRealtimeChanges(keys) {
           renderFlags.sched = true; renderFlags.dash = true;
           break;
         case 'po_overrides':
-          STATE.poOverrides = JSON.parse(val || '{}');
+          var cloudPO = JSON.parse(val || '{}');
+          // Merge: per-key, lebih banyak data menang
+          // Kalau local punya data manual (date/confDate) dan cloud tidak → pakai local
+          if(!STATE.poOverrides) STATE.poOverrides = {};
+          Object.keys(cloudPO).forEach(function(k){
+            var cOvr = cloudPO[k];
+            var lOvr = STATE.poOverrides[k];
+            if(!lOvr) { STATE.poOverrides[k] = cOvr; return; }
+            // Local sudah ada — ambil value yang lebih lengkap per field
+            var hasLocalData  = lOvr.date || lOvr.confDate || lOvr.confQty;
+            var hasCloudData  = cOvr.date || cOvr.confDate || cOvr.confQty;
+            var cloudUpdated  = (cOvr.confUpd||'') > (lOvr.confUpd||'');
+            if(hasCloudData && (cloudUpdated || !hasLocalData)) {
+              STATE.poOverrides[k] = cOvr;
+            }
+          });
+          // Tambah key cloud yang tidak ada di local
           renderFlags.po = true; renderFlags.sched = true;
           break;
         case 'proj_comments':
@@ -3923,7 +3939,8 @@ async function loadPO() {
         status: r.DocStatus, lineStatus: r.PO_LineStatus };
     }));
     var spo = document.getElementById('s-po'); if(spo) spo.textContent = STATE.poData.length;
-    _cleanupStalePoOverridesOnLoad();
+    // Cleanup hanya kalau SAP return data penuh — hindari hapus data saat partial load
+    if(STATE.poData.length > 50) _cleanupStalePoOverridesOnLoad();
     renderPO();
     _setSyncItem('po', 'ok');
     toast(STATE.poData.length + ' PO aktif ✓', 'ok');
@@ -3978,19 +3995,34 @@ function _cleanupStalePoOverridesOnLoad() {
   if(!STATE.poData || !STATE.poOverrides) return;
   var activePO = {};
   STATE.poData.forEach(function(po){ activePO[String(po.docNum)+'_'+po.itemCode] = true; });
+  var now = Date.now();
+  var STALE_DAYS = 14; // hapus data PO yang sudah tidak ada di SAP selama 14 hari
   var cleaned = 0;
   Object.keys(STATE.poOverrides).forEach(function(key){
-    if(activePO[key]) return; // masih aktif, skip
+    if(activePO[key]) {
+      // PO masih aktif — clear tanda stale
+      if(STATE.poOverrides[key]._staleFrom) delete STATE.poOverrides[key]._staleFrom;
+      return;
+    }
     var ovr = STATE.poOverrides[key];
     if(!ovr) return;
-    // PO tidak ada di SAP — hapus semua data override
-    delete STATE.poOverrides[key];
-    cleaned++;
+    // PO tidak ada di SAP — tandai pertama kali tidak terlihat
+    if(!ovr._staleFrom) {
+      ovr._staleFrom = now; // catat kapan pertama kali hilang
+      return;
+    }
+    // Hapus hanya kalau sudah 14 hari tidak ada di SAP
+    var staleDays = (now - ovr._staleFrom) / (1000*60*60*24);
+    if(staleDays > STALE_DAYS) {
+      delete STATE.poOverrides[key];
+      cleaned++;
+    }
   });
+  // Selalu save untuk update _staleFrom
+  localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
   if(cleaned > 0) {
-    localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
     cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
-    console.log('[cleanup] Removed stale confQty for', cleaned, 'PO keys');
+    console.log('[cleanup] Removed', cleaned, 'PO override keys stale >' + STALE_DAYS + 'd');
   }
 }
 
