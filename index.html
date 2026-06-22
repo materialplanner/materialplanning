@@ -5655,14 +5655,18 @@ function _doBuildProjection() {
     // Total incoming GRPO bulan ini (semua tgl)
     var totalIncoming = grpoByItem[code] || 0;
     var totalOSPR = osprByItem[code] || 0;
-    // Total PO yang sudah dikonfirmasi supplier = basis DOI after incoming
+    // Total incoming PO (konfirmasi supplier ATAU sudah ada jadwal request)
     var totalOpenPOQty = 0;
     (STATE.poData||[]).forEach(function(po){
       if(po.itemCode !== code) return;
       var key = String(po.docNum)+'_'+po.itemCode;
       var ovr = (STATE.poOverrides||{})[key] || {};
-      // Hanya hitung PO yang sudah ada konfirmasi dari supplier (confDate terisi)
-      if(ovr.confDate) totalOpenPOQty += (ovr.confQty || po.openQty || 0);
+      if(ovr.confDate) {
+        totalOpenPOQty += (parseFloat(ovr.confQty) || po.openQty || 0);
+      } else if(ovr.date) {
+        // Belum dikonfirmasi tapi sudah ada jadwal request kirim
+        totalOpenPOQty += (po.openQty || 0);
+      }
     });
 
     // DOI Max = stock / (MRP Max / days) — basis coverage & kategori
@@ -5746,9 +5750,15 @@ function _doBuildProjection() {
       if(kp.length >= 2 && kp.slice(1).join('_') === code) {
         if(!_activePOKeys[k]) return; // PO sudah datang/hilang — skip
         var ovr = STATE.poOverrides[k];
+        var po  = (STATE.poData||[]).find(function(p){ return p.docNum+'_'+p.itemCode === k; });
         if(ovr) {
-          if(ovr.confQty) confQtyTotal += parseFloat(ovr.confQty) || 0;
-          if(ovr.confDate && confDateList.indexOf(ovr.confDate) < 0) confDateList.push(ovr.confDate);
+          // Pakai confDate (konfirmasi supplier) jika ada, fallback ke date (request kirim)
+          var useDate = ovr.confDate || ovr.date || null;
+          var useQty  = ovr.confDate
+            ? (parseFloat(ovr.confQty) || 0)   // sudah dikonfirmasi → pakai confQty
+            : (po ? (po.openQty||0) : 0);       // baru request → pakai openQty
+          if(useDate && confDateList.indexOf(useDate) < 0) confDateList.push(useDate);
+          if(useQty > 0) confQtyTotal += useQty;
         }
       }
     });
