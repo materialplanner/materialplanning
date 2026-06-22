@@ -3254,16 +3254,7 @@ function _applyRealtimeChanges(keys) {
           } catch(e) {}
           break;
         case 'fc_ospo_ovr':
-          try {
-              var rawOvr = JSON.parse(val || '{}');
-              // Migration: clear stale old-redistribution zeros
-              Object.keys(rawOvr).forEach(function(code) {
-                var arr = rawOvr[code];
-                if(Array.isArray(arr) && arr.filter(function(v){return v===0;}).length > 1) delete rawOvr[code];
-              });
-              _fcOspoOverride = rawOvr;
-              localStorage.setItem('fc_ospo_ovr', JSON.stringify(rawOvr));
-            } catch(e) {}
+          try { _fcOspoOverride = JSON.parse(val || '{}'); localStorage.setItem('fc_ospo_ovr', val); } catch(e) {}
           break;
         case 'fc_ospr_ovr':
           try { _fcOsprOverride = JSON.parse(val || '{}'); localStorage.setItem('fc_ospr_ovr', val); } catch(e) {}
@@ -8315,10 +8306,10 @@ function fmtSAPDate(val) {
   if(!sep) return val;
   var parts = val.split(sep);
   if(parts.length === 3) {
-    // If first part is 4 digits = YYYY/MM/DD or YYYY-MM-DD → convert to DD-MM-YYYY
-    if(parts[0].length === 4) return parts[2].padStart(2,'0') + '-' + parts[1].padStart(2,'0') + '-' + parts[0];
-    // Already DD/MM/YYYY or DD-MM-YYYY → normalize to DD-MM-YYYY
-    return parts[0].padStart(2,'0') + '-' + parts[1].padStart(2,'0') + '-' + parts[2];
+    // If first part is 4 digits = YYYY/MM/DD or YYYY-MM-DD → convert to DD/MM/YYYY (internal format)
+    if(parts[0].length === 4) return parts[2].padStart(2,'0') + '/' + parts[1].padStart(2,'0') + '/' + parts[0];
+    // Already in correct order DD/MM/YYYY → return as-is
+    return parts[0].padStart(2,'0') + '/' + parts[1].padStart(2,'0') + '/' + parts[2];
   }
   return val;
 }
@@ -9230,13 +9221,7 @@ function _appInit() {
   try {
     _fcPropose      = JSON.parse(localStorage.getItem('fc_propose')       || '{}');
     _fcAutoPropose  = localStorage.getItem('fc_autopropose') === '1';
-    _fcOspoOverride = (function(){
-    try {
-      var raw = JSON.parse(localStorage.getItem('fc_ospo_ovr') || '{}');
-      Object.keys(raw).forEach(function(c){ var a=raw[c]; if(Array.isArray(a)&&a.filter(function(v){return v===0;}).length>1) delete raw[c]; });
-      return raw;
-    } catch(e){ return {}; }
-  })();
+    _fcOspoOverride = JSON.parse(localStorage.getItem('fc_ospo_ovr')      || '{}');
     _fcOsprOverride = JSON.parse(localStorage.getItem('fc_ospr_ovr')      || '{}');
     _fcDOI2         = parseInt(localStorage.getItem('fc_doi2') || '60')   || 60;
     _fcDOI2Suppliers= JSON.parse(localStorage.getItem('fc_doi2_suppliers')|| '[]');
@@ -9979,26 +9964,7 @@ var _fcExpanded  = {};
 var _fcGridViewMode = 'aktual'; // 'aktual' | 'forecast' — global
 var _fcPropose       = (function(){ try{ return JSON.parse(localStorage.getItem('fc_propose')||'{}'); }catch(e){return {};} })();
 var _fcAutoPropose   = localStorage.getItem('fc_autopropose') === '1';
-var _fcOspoOverride  = (function(){
-  try {
-    var raw = JSON.parse(localStorage.getItem('fc_ospo_ovr') || '{}');
-    // Migration: clear stale override arrays from old code
-    // Old code set all months to 0 when editing one — pattern: array with >1 exact zeros
-    Object.keys(raw).forEach(function(code) {
-      var arr = raw[code];
-      if(!Array.isArray(arr)) return;
-      var zeroCount = arr.filter(function(v){ return v === 0; }).length;
-      if(zeroCount > 1) {
-        // Stale data from old redistribution — clear it
-        delete raw[code];
-      }
-    });
-    if(Object.keys(raw).length < JSON.parse(localStorage.getItem('fc_ospo_ovr')||'{}').length) {
-      localStorage.setItem('fc_ospo_ovr', JSON.stringify(raw));
-    }
-    return raw;
-  } catch(e) { return {}; }
-})();
+var _fcOspoOverride  = (function(){ try{ return JSON.parse(localStorage.getItem('fc_ospo_ovr')||'{}'); }catch(e){return {};} })();
 var _fcOsprOverride  = (function(){ try{ return JSON.parse(localStorage.getItem('fc_ospr_ovr')||'{}'); }catch(e){return {};} })();
 var _fcDOI       = 30;
 var _fcDOI2      = (function(){ return parseInt(localStorage.getItem('fc_doi2')||'60')||60; })();
@@ -12396,22 +12362,33 @@ function _fcOspoEdit(input) {
   var mi   = parseInt(input.getAttribute('data-mi'));
   var qty  = parseFloat((input.value||'0').replace(/\./g,'').replace(/,/g,'.')) || 0;
 
-  // Ambil OSPO original per bulan dari SAP
+  // Hitung total OSPO original dari SAP
   var ospoIdx = _buildOSPOIndex();
   var yr = new Date().getFullYear();
   var ospoOrig = FC_MONTH_NUMS.map(function(mn){ return (ospoIdx[code]||{})[yr*100+mn] || 0; });
+  var total = ospoOrig.reduce(function(s,v){ return s+v; }, 0);
 
-  // Clamp: maksimal = OSPO original bulan ini (tidak bisa melebihi)
-  var maxForMonth = ospoOrig[mi] || 0;
-  qty = Math.max(0, Math.min(qty, maxForMonth));
-  if(qty > maxForMonth) {
-    toast('Nilai melebihi OSPO SAP bulan ini (maks: ' + n_id(maxForMonth) + ')', 'err');
-  }
+  // Clamp ke total semua bulan
+  qty = Math.max(0, Math.min(qty, total));
   input.value = qty > 0 ? n_id(qty) : '0';
 
-  // Hanya set override bulan yang diedit — bulan lain tidak berubah
-  if(!_fcOspoOverride[code]) _fcOspoOverride[code] = new Array(FC_MONTHS.length).fill(null);
-  _fcOspoOverride[code][mi] = (qty === maxForMonth) ? null : qty; // null = pakai SAP asli
+  // Reset semua override untuk item ini dulu, lalu set ulang
+  _fcOspoOverride[code] = new Array(FC_MONTHS.length).fill(null);
+
+  // Set override bulan yang diedit
+  _fcOspoOverride[code][mi] = qty;
+
+  // Redistribute: semua bulan lain = 0, sisa ke bulan terdekat (pertama selain mi)
+  var sisa = total - qty;
+  var firstOther = -1;
+  for(var oi2 = 0; oi2 < FC_MONTHS.length; oi2++) {
+    if(oi2 === mi) continue;
+    _fcOspoOverride[code][oi2] = 0;
+    if(firstOther < 0) firstOther = oi2;
+  }
+  if(sisa > 0 && firstOther >= 0) {
+    _fcOspoOverride[code][firstOther] = sisa;
+  }
 
   try { localStorage.setItem('fc_ospo_ovr', JSON.stringify(_fcOspoOverride)); cloudSave('fc_ospo_ovr', JSON.stringify(_fcOspoOverride)); } catch(e){}
   input.style.color = (_fcOspoOverride[code][mi] !== ospoOrig[mi]) ? '#8b5cf6' : (qty > 0 ? 'var(--teal)' : 'var(--muted)');
