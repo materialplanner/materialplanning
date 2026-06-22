@@ -6033,18 +6033,18 @@ function renderProjection() {
       td('<span class="mono">' + n_id(p.max3MRP||0) + '</span>','mrp21','text-align:right') +
       td('<span class="mono">' + n_id(p.totalIncoming||0) + '</span>','grpo','text-align:right') +
       td('<span class="mono" style="color:var(--amber)">' + n_id(p.actualUsageDaily||0) + '</span>','actualusg','text-align:right') +
+      pctStr +
       td('<span class="mono ' + covClass + '">' + (p.coverageDateStr||'') + '</span>','coverage') +
       td('<span class="mono" style="color:' + ((p.endStock||0) < 0 ? 'var(--red)' : 'var(--text)') + '">' + n_id(p.endStock||0) + '</span>','endstock','text-align:right') +
       td('<span class="mono">' + n_id(p.mrpNextMonth||0) + '</span>','mrpnext','text-align:right') +
       td('<span class="mono" style="color:' + ((p.endStockNext||0) < 0 ? 'var(--red)' : 'var(--text)') + '">' + n_id(p.endStockNext||0) + '</span>','endstocknext','text-align:right') +
+      td(catBadge(p.category),'kategori') +
       ospoStr +
       td('<span class="mono">' + n_id(p.totalOSPR||0) + '</span>','ospr','text-align:right') +
       td('<span class="mono" style="color:var(--teal)">' + (p.tglIncoming||'—') + '</span>','tgl_incoming') +
       td('<span class="mono" style="color:var(--teal);font-weight:600">' + (p.qtyIncoming > 0 ? n_id(p.qtyIncoming) : '—') + '</span>','qty_incoming','text-align:right') +
       td('<span class="mono" style="color:' + (p.totalOpenPOQty > 0 ? 'var(--teal)' : 'var(--muted)') + '">' + (p.doiAfterIncoming > 0 ? p.doiAfterIncoming : '—') + '</span>','doi_incoming','text-align:right') +
       td('<span class="mono" style="color:' + (p.totalOpenPOQty > 0 ? 'var(--teal)' : 'var(--muted)') + '">' + (p.coverageAfterIncoming||'—') + '</span>','cov_incoming') +
-      td(catBadge(p.category),'kategori') +
-      pctStr +
       (colHidden('comment') ? '' : (function(){
         var cmtVal = (p.comment||'');
         var cmtObj = STATE.projComments && STATE.projComments[p.productCode];
@@ -6114,16 +6114,18 @@ function renderProjection() {
     th('MRP Max','mrp21') +
     th('GRPO Bln Ini','grpo') +
     th('Actual Usg','actualusg') +
+    th('% Usg vs FC','pctusage') +
     th('Est. Coverage','coverage') +
-    th('DOI+Incoming','doi_incoming') +
-    th('Coverage+Incoming','cov_incoming') +
-    th('Kategori','kategori') +
     th('End Stock vs MRP','endstock') +
     th('MRP Next Month','mrpnext') +
     th('End Stock Next','endstocknext') +
+    th('Kategori','kategori') +
     ospoHeaders +
     th('OSPR','ospr') +
-    th('% Usg vs FC','pctusage') +
+    th('Tgl Incoming','tgl_incoming') +
+    th('Qty Incoming','qty_incoming') +
+    th('DOI+Incoming','doi_incoming') +
+    th('Coverage+Incoming','cov_incoming') +
     th('Comment','comment') +
     '<th style="min-width:36px;text-align:center" title="Highlight">📌</th>' +
     '</tr>' + filterRow +
