@@ -10389,10 +10389,10 @@ function _calcForecast(code, ospoIdx) {
   // ── Single pass: pull-forward + propose generator bersama ──────────────────
   // Kedua logika pakai prevStock yang sama supaya konsisten dengan display
   var ospoPool2  = ospo.slice();
-  // Kalau ada override, pastikan ospoPool2 tidak diubah oleh pull-forward
-  // Inisialisasi ospoPulled dengan 0 untuk bulan yang di-override
+  var osprPool2  = ospr.slice();
   var pullNotifs = [];
   var ospoPulled = new Array(FC_MONTHS.length).fill(0);
+  var osprPulled = new Array(FC_MONTHS.length).fill(0);
   var _step      = multiple > 0 ? multiple : 1;
   var proposeAuto = new Array(FC_MONTHS.length).fill(0);
   var stockAktualFw = new Array(FC_MONTHS.length).fill(0);
@@ -10400,7 +10400,7 @@ function _calcForecast(code, ospoIdx) {
 
   for(var am = snapMoIdx; am < FC_MONTHS.length; am++) {
     var req_a  = forecast[am];
-    var ospr_a = ospr[am];
+    var ospr_a = (osprPool2[am]||0) + (osprPulled[am]||0);
 
     // Step 1: pull-forward OSPO dari bulan berikutnya jika DOI < target
     // Jika bulan ini di-override manual → pakai nilai as-is, skip pull-forward
@@ -10430,6 +10430,24 @@ function _calcForecast(code, ospoIdx) {
         pullNotifs.push({ fromMonth: FC_MONTHS[nx], toMonth: FC_MONTHS[am], qty: pull });
         _pfSt[am] = stockAfterOspo;
         _pfD = calcDOI(_pfSt)[am];
+        if(_pfD >= maxDOI) break;
+      }
+    }
+
+    // Step 1.5: pull OSPR dari bulan berikutnya jika DOI masih kurang
+    if(!_amOverridden && _pfD >= 0 && _pfD < maxDOI) {
+      for(var nxr = am+1; nxr < FC_MONTHS.length; nxr++) {
+        if((osprPool2[nxr]||0) <= 0) continue;
+        var deficit2 = Math.max(0, req_a * (maxDOI / WD) - stockAfterOspo);
+        if(deficit2 <= 0) break;
+        var pullR = Math.min(osprPool2[nxr], Math.ceil(deficit2 / _step) * _step);
+        if(pullR <= 0) continue;
+        osprPool2[nxr] -= pullR;
+        osprPulled[am] = (osprPulled[am]||0) + pullR;
+        stockAfterOspo += pullR;
+        ospr_a += pullR;
+        pullNotifs.push({ fromMonth: FC_MONTHS[nxr], toMonth: FC_MONTHS[am], qty: pullR, type:'OSPR' });
+        _pfSt[am] = stockAfterOspo; _pfD = calcDOI(_pfSt)[am];
         if(_pfD >= maxDOI) break;
       }
     }
