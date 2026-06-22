@@ -10898,7 +10898,8 @@ function _fcRenderRekap(el, items, fcData, fStatus) {
     var master = STATE.masterData[code] || {};
     var mrp    = STATE.mrpData[code] || {};
     var iType  = /^3/.test(code)?'RM':'PM';
-    var name   = master.desc || mrp.desc || '';
+    var realN  = _isAdmin && _rmDisplayMode === 'realname' && (STATE.realNameData||{})[code];
+    var name   = realN ? STATE.realNameData[code] : (master.desc || mrp.desc || '');
     var site   = (STATE.stockData && STATE.stockData[code])
                  ? ((STATE.stockData[code].btg>0?'BITUNG':'')+(STATE.stockData[code].sng>0?(STATE.stockData[code].btg>0?' & SANGIANG':'SANGIANG'):''))
                  : '';
@@ -10989,6 +10990,91 @@ function _fcRenderRekap(el, items, fcData, fStatus) {
 
 // ─── Forecast Supplier view ───────────────────────────────────────────────────
 // Shows: Requirement, OSPO, OSPR per item — for sharing to supplier
+
+// ─── Forecast tab: simple 2-button export menu ───────────────────────────────
+function _fcForecastExportMenu() {
+  var items = window._fcSupplierItems || [];
+  if(!items.length) { toast('Tidak ada data','err'); return; }
+
+  var existing = document.getElementById('fc-forecast-export-menu');
+  if(existing) existing.remove();
+
+  var overlay = document.createElement('div');
+  overlay.id = 'fc-forecast-export-menu';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center';
+  var closeMenu = function(){ var el=document.getElementById('fc-forecast-export-menu'); if(el) el.remove(); };
+
+  var box = document.createElement('div');
+  box.style.cssText = 'background:var(--bg2);border-radius:12px;padding:28px 32px;min-width:320px;box-shadow:0 8px 40px rgba(0,0,0,.3)';
+  box.innerHTML = '<div style="font-size:15px;font-weight:700;margin-bottom:6px;color:var(--text)">Export Forecast</div>'
+    + '<div style="font-size:11.5px;color:var(--muted);margin-bottom:20px">'+items.length+' item - Adjusted OSPO, OSPR, Propose PR per bulan</div>';
+
+  var b1 = document.createElement('button');
+  b1.textContent = 'Download Excel (.xlsx)';
+  b1.style.cssText = 'width:100%;padding:11px;margin-bottom:10px;background:#1e4d6b;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;display:block';
+  b1.onclick = function(){ _fcExportForecastXlsx(); closeMenu(); };
+
+  var b2 = document.createElement('button');
+  b2.textContent = 'Salin ke Google Sheets';
+  b2.style.cssText = 'width:100%;padding:11px;margin-bottom:16px;background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;display:block';
+  b2.onclick = function(){ _fcExportGSheets('supplier'); closeMenu(); };
+
+  var b3 = document.createElement('button');
+  b3.textContent = 'Batal';
+  b3.style.cssText = 'width:100%;padding:8px;background:transparent;color:var(--muted);border:none;font-size:12px;cursor:pointer;display:block';
+  b3.onclick = closeMenu;
+
+  box.appendChild(b1); box.appendChild(b2); box.appendChild(b3);
+  overlay.appendChild(box);
+  overlay.addEventListener('click', function(e){ if(e.target===overlay) closeMenu(); });
+  document.body.appendChild(overlay);
+}
+
+// ─── Forecast XLSX export ─────────────────────────────────────────────────────
+function _fcExportForecastXlsx() {
+  var items  = window._fcSupplierItems || [];
+  var fcData = window._fcSupplierData  || {};
+  if(!items.length || typeof XLSX === 'undefined') { toast('Tidak ada data','err'); return; }
+
+  var yr2 = String(new Date().getFullYear()).slice(-2);
+  var hdr = ['Item No','Description','Baris'].concat(FC_MONTHS.map(function(m){ return m.slice(0,3)+" '"+yr2; }));
+  var data = [hdr];
+
+  items.forEach(function(code) {
+    var m   = STATE.masterData[code] || {};
+    var fc  = fcData[code];
+    var desc = m.desc || '';
+    var ospoVals = fc.forecastOspo && fc.forecastOspo.some(function(v){return v>0;}) ? fc.forecastOspo : fc.ospo;
+    data.push([code, desc, 'Adjusted OSPO'].concat(ospoVals.map(function(v){ return Math.round(v||0); })));
+    data.push([code, desc, 'OSPR'         ].concat(fc.ospr.map(function(v){ return Math.round(v||0); })));
+    data.push([code, desc, 'Propose PR'   ].concat(fc.propose.map(function(v){ return Math.round(v||0); })));
+  });
+
+  var ws = XLSX.utils.aoa_to_sheet(data);
+  // Header row style
+  var range = XLSX.utils.decode_range(ws['!ref']);
+  for(var c=range.s.c; c<=range.e.c; c++) {
+    var cell = XLSX.utils.encode_cell({r:0,c:c});
+    if(ws[cell]) ws[cell].s = {font:{bold:true,color:{rgb:'FFFFFF'}},fill:{fgColor:{rgb:'1E4D6B'}},alignment:{horizontal:'center'}};
+  }
+  // Row colors: OSPO=teal tint, OSPR=purple tint, Propose=amber tint
+  var rowColors = ['D1F0F0','EDE7F6','FFF8E1'];
+  for(var ri=1; ri<data.length; ri++) {
+    var colorIdx = (ri-1) % 3;
+    for(var ci=range.s.c; ci<=range.e.c; ci++) {
+      var cell2 = XLSX.utils.encode_cell({r:ri,c:ci});
+      if(ws[cell2]) ws[cell2].s = {fill:{fgColor:{rgb:rowColors[colorIdx]}}};
+    }
+  }
+  var colWidths = [{wch:14},{wch:30},{wch:16}].concat(FC_MONTHS.map(function(){ return {wch:10}; }));
+  ws['!cols'] = colWidths;
+
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Forecast');
+  XLSX.writeFile(wb, 'forecast_supplier_'+new Date().toISOString().slice(0,10)+'.xlsx');
+  toast('Forecast exported ✓','ok');
+}
+
 function _fcRenderSupplier(el, items, fcData) {
   var yr2 = String(new Date().getFullYear()).slice(-2);
 
@@ -11002,7 +11088,7 @@ function _fcRenderSupplier(el, items, fcData) {
 
   var html = '<div style="margin-bottom:10px;display:flex;justify-content:space-between;align-items:center">'
     + '<div style="font-size:11px;color:var(--muted)"><b>'+fcItems.length+'</b> item · Forecast, OSPO, OSPR per bulan</div>'
-    + '<button class="btn btn-sm" onclick="_fcExportModal(\'supplier\')" style="font-size:11px">↓ Export</button>'
+    + '<button class="btn btn-sm" onclick="_fcForecastExportMenu()" style="font-size:11px">↓ Export</button>'
     + '</div>'
     + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:880px">'
     + '<thead><tr>'
@@ -11500,7 +11586,9 @@ function _mrpShowResult() {
     var m = master[code] || mrpMaster[code] || {};
     var iT = /^3/.test(code)?'RM':'PM';
     var clr = iT==='RM'?'var(--teal)':'var(--purple)';
-    var rowDesc = m.desc || (matcom[code] && matcom[code].sapName) || '\u2014';
+    var rowDesc = (_isAdmin && _rmDisplayMode === 'realname' && (STATE.realNameData||{})[code])
+      ? STATE.realNameData[code]
+      : (m.desc || (matcom[code] && matcom[code].sapName) || '\u2014');
     html += '<tr data-code="'+code+'" data-name="'+rowDesc.toLowerCase().replace(/"/g,"'")+'" style="border-bottom:1px solid var(--border);'+(i%2?'background:var(--bg3)':'')+'">'
       + '<td style="padding:8px;font-family:var(--mono);font-size:11px">'
       +   '<span style="font-size:9.5px;font-weight:700;color:'+clr+';margin-right:4px">'+iT+'</span>'
