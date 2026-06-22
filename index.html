@@ -10941,7 +10941,7 @@ function _fcRenderRekap(el, items, fcData, fStatus) {
   var thStyle = 'padding:9px 10px;font-size:10px;font-weight:700;color:#fff;background:#1e4d6b;white-space:nowrap;border-right:1px solid rgba(255,255,255,.15)';
   var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
     + '<div style="font-size:11px;color:var(--muted)"><b>'+propRows.length+'</b> baris propose PR</div>'
-    + '<button class="btn btn-sm btn-primary" onclick="_fcExportModal(\'rekap\')" style="font-size:11px">↓ Export Rekap PR</button>'
+    + '<button class="btn btn-sm btn-primary" onclick="_fcRekapExportMenu()" style="font-size:11px">↓ Export Rekap PR</button>'
     + '</div>'
     + '<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;min-width:900px;width:100%">'
     + '<thead><tr>'
@@ -11034,7 +11034,7 @@ function _fcRenderSupplier(el, items, fcData) {
         + cells + '</tr>';
     }
 
-    html += supRow('OSPO', fc.ospo, 'var(--teal)', 0);
+    html += supRow('Adjusted OSPO', fc.forecastOspo && fc.forecastOspo.some(function(v){return v>0;}) ? fc.forecastOspo : fc.ospo, 'var(--teal)', 0);
     html += supRow('OSPR', fc.ospr, 'var(--accent)', 1);
     html += '<tr style="border-bottom:2px solid var(--border);' + bgBase + '">'
       + '<td style="padding:5px 8px;font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--amber);white-space:nowrap">Propose PR</td>'
@@ -11060,7 +11060,8 @@ function _fcExportSupplier() {
     var master = STATE.masterData[code] || {};
     var fc     = fcData[code];
     var desc   = '"'+(master.desc||'').replace(/"/g,"'")+'"';
-    rows.push([code, desc, 'Adjusted PO'].concat(fc.ospo.map(function(v){return Math.round(v||0);})).join(','));
+    var ospoVals2 = fc.forecastOspo && fc.forecastOspo.some(function(v){return v>0;}) ? fc.forecastOspo : fc.ospo;
+    rows.push([code, desc, 'Adjusted OSPO'].concat(ospoVals2.map(function(v){return Math.round(v||0);})).join(','));
     rows.push([code, desc, 'OSPR'      ].concat(fc.ospr.map(function(v){return Math.round(v||0);})).join(','));
     rows.push([code, desc, 'Propose PR'].concat(fc.propose.map(function(v){return Math.round(v||0);})).join(','));
   });
@@ -11072,6 +11073,67 @@ function _fcExportSupplier() {
 }
 
 // ─── Export Rekap CSV ─────────────────────────────────────────────────────────
+
+// ─── Rekap PR: simple 2-button export menu ───────────────────────────────────
+function _fcRekapExportMenu() {
+  var rows = window._fcRekapRows || [];
+  if(!rows.length) { toast('Generate Propose PR dulu','err'); return; }
+
+  // Build inline mini-modal
+  var existing = document.getElementById('rekap-export-menu');
+  if(existing) existing.remove();
+
+  var overlay = document.createElement('div');
+  overlay.id = 'rekap-export-menu';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center';
+  var closeMenu = function(){ var el=document.getElementById('rekap-export-menu'); if(el) el.remove(); };
+  var box = document.createElement('div');
+  box.style.cssText = 'background:var(--bg2);border-radius:12px;padding:28px 32px;min-width:320px;box-shadow:0 8px 40px rgba(0,0,0,.3)';
+  box.innerHTML = '<div style="font-size:15px;font-weight:700;margin-bottom:6px;color:var(--text)">Export Rekap PR</div><div style="font-size:11.5px;color:var(--muted);margin-bottom:20px">'+rows.length+' baris - format sama dengan tampilan web</div>';
+  var b1 = document.createElement('button');
+  b1.textContent = 'Download Excel (.xlsx)';
+  b1.style.cssText = 'width:100%;padding:11px;margin-bottom:10px;background:#1e4d6b;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;display:block';
+  b1.onclick = function(){ _fcExportRekap(); closeMenu(); };
+  var b2 = document.createElement('button');
+  b2.textContent = 'Salin ke Google Sheets';
+  b2.style.cssText = 'width:100%;padding:11px;margin-bottom:16px;background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;display:block';
+  b2.onclick = function(){ _fcExportRekapGSheet(); closeMenu(); };
+  var b3 = document.createElement('button');
+  b3.textContent = 'Batal';
+  b3.style.cssText = 'width:100%;padding:8px;background:transparent;color:var(--muted);border:none;font-size:12px;cursor:pointer;display:block';
+  b3.onclick = closeMenu;
+  box.appendChild(b1); box.appendChild(b2); box.appendChild(b3);
+  overlay.appendChild(box);
+  overlay.addEventListener('click', function(e){ if(e.target===overlay) closeMenu(); });
+  document.body.appendChild(overlay);
+}
+
+// ─── Rekap PR: copy to GSheets (TSV format, same columns as web table) ────────
+function _fcExportRekapGSheet() {
+  var rows = window._fcRekapRows || [];
+  if(!rows.length) { toast('Tidak ada data rekap','err'); return; }
+  var fmt = function(d){ return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear(); };
+  var header = ['Site','Item No','Description','UoM','L.T (hari)','Supplier','Kebutuhan Bulan','Qty','PR Harus Dibuka','Status Buka'];
+  var data = [header];
+  rows.forEach(function(r) {
+    var stTxt = r.isOverdue||r.daysLeft<=7 ? 'URGENT' : 'BELUM - Buka: '+fmt(r.createPRBy)+' ('+r.daysLeft+' hari)';
+    data.push([r.site||'', r.code, r.name, r.uom, r.lt||'', r.supplier||'', r.proposeMonth,
+               Math.round(r.qty), fmt(r.createPRBy), stTxt]);
+  });
+  var tsv = data.map(function(row){
+    return row.map(function(v){
+      var s = String(v==null?'':v);
+      return s.indexOf('	')>=0 ? '"'+s+'"' : s;
+    }).join('	');
+  }).join('\n');
+  if(navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(tsv).then(function() {
+      window.open('https://sheets.new','_blank');
+      toast('Data Rekap PR disalin! Buka Sheets → klik A1 → Ctrl+V','ok');
+    }).catch(function(){ _fcFallbackCopy(tsv); });
+  } else { _fcFallbackCopy(tsv); }
+}
+
 function _fcExportRekap() {
   var rows = window._fcRekapRows || [];
   if(!rows.length) { toast('Tidak ada data rekap', 'err'); return; }
@@ -12548,7 +12610,7 @@ function _fcDoExport(fmt) {
 // ── Row colors for tall format ───────────────────────────────────────────────
 var _FC_TALL_ROWS = [
   { label:'Requirement', bg:'#f8f9fa', color:'#212529', bold:true  },
-  { label:'OSPO',        bg:'#d1f0f0', color:'#007a7a', bold:false },
+  { label:'Adjusted OSPO', bg:'#d1f0f0', color:'#007a7a', bold:false },
   { label:'OSPR',        bg:'#ede7f6', color:'#5e35b1', bold:false },
   { label:'Propose PR',  bg:'#fff8e1', color:'#b8860b', bold:true  },
   { label:'Stock',       bg:'#e8f5e9', color:'#2e7d32', bold:false },
@@ -12592,7 +12654,8 @@ function _fcBuildRows(target) {
       var m=STATE.masterData[code]||{}, fc=fcD[code];
       if(!fc.ospo.some(function(v){return v>0;}) && !fc.ospr.some(function(v){return v>0;}) && !fc.propose.some(function(v){return v>0;})) return;
       var desc=m.desc||'';
-      rows.push([code,desc,'OSPO'      ].concat(fc.ospo.map(function(v){return v||0;})));
+      var fcOspoV2 = fc.forecastOspo && fc.forecastOspo.some(function(v){return v>0;}) ? fc.forecastOspo : fc.ospo;
+      rows.push([code,desc,'Adjusted OSPO'].concat(fcOspoV2.map(function(v){return v||0;})));
       rows.push([code,desc,'OSPR'      ].concat(fc.ospr.map(function(v){return v||0;})));
       rows.push([code,desc,'Propose PR'].concat(fc.propose.map(function(v){return v||0;})));
     });
