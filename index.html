@@ -10507,7 +10507,8 @@ function _calcForecast(code, ospoIdx) {
   var _ospoOvr2 = _fcOspoOverride[code] || null;
   for(var dp = snapMoIdx; dp < FC_MONTHS.length; dp++) {
     var req_d  = forecast[dp];
-    var ospr_d = ospr[dp];
+    // Pakai OSPR post-pull (sudah dikurangi/ditambah dari pull-forward)
+    var ospr_d = (osprPool2[dp]||0) + (osprPulled[dp]||0);
     // Kalau bulan ini di-override user, pakai nilai override langsung
     var ospo_d = (_ospoOvr2 && _ospoOvr2[dp] != null) ? _ospoOvr2[dp] : (ospoPool2[dp] + ospoPulled[dp]);
     var prop_d = totalProp[dp] || 0;
@@ -10523,7 +10524,7 @@ function _calcForecast(code, ospoIdx) {
   var prevStFc   = soh;
   for(var fm2 = snapMoIdx; fm2 < FC_MONTHS.length; fm2++) {
     var req_f  = forecast[fm2];
-    var ospr_f = ospr[fm2];
+    var ospr_f = (osprPool2[fm2]||0) + (osprPulled[fm2]||0);
     var minStF = req_f > 0 ? req_f * (maxDOI / WD) : 0;
     var needF  = Math.max(0, minStF + req_f - prevStFc - ospr_f);
     var fromPool = Math.min(needF > 0 ? Math.max(moq, Math.ceil(needF/_step)*_step) : 0, ospoPoolFc);
