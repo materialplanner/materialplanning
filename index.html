@@ -5758,7 +5758,7 @@ function _doBuildProjection() {
             ? (parseFloat(ovr.confQty) || 0)   // sudah dikonfirmasi → pakai confQty
             : (po ? (po.openQty||0) : 0);       // baru request → pakai openQty
           if(useDate && confDateList.indexOf(useDate) < 0) confDateList.push(useDate);
-          if(useQty > 0) confQtyTotal += useQty;
+          if(useDate && useQty > 0) confQtyTotal += useQty; // hanya tambah qty jika ada tanggal
         }
       }
     });
