@@ -5752,10 +5752,12 @@ function _doBuildProjection() {
         }
       }
     });
-    if(confQtyTotal > 0 || confDateList.length > 0) {
-      comment = (confDateList.length ? confDateList.map(function(d){return d.split('-').reverse().join('/')}).join(',') : '') +
-        (confQtyTotal > 0 ? ' Qty:' + n_id(confQtyTotal) : '');
-    }
+    // Auto-generated date+qty → separate fields, NOT comment
+    var tglIncoming = confDateList.length
+      ? confDateList.map(function(d){return d.split('-').reverse().join('/')}).join(', ')
+      : '';
+    var qtyIncoming = confQtyTotal > 0 ? Math.round(confQtyTotal) : 0;
+    // comment field = manual notes only (do NOT set from confDate/confQty)
     // Manual comment (_manual:true) selalu menang — auto lama (_manual:false) diabaikan
     if(STATE.projComments && STATE.projComments[code]) {
       var pc = STATE.projComments[code];
@@ -5802,6 +5804,8 @@ function _doBuildProjection() {
       category: category, endStock: Math.round(endStock),
       ospoSdApr: Math.round(ospoSdApr), ospoMei: Math.round(ospoMei),
       ospoJuni: Math.round(ospoJuni), ospoJulDst: Math.round(ospoJulDst),
+      tglIncoming: tglIncoming,
+      qtyIncoming: qtyIncoming,
       comment: comment,
       pctUsageVsForecast: pctUsageVsForecast,
       mrpNextMonth: mrpNextMonth,
