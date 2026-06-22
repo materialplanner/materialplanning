@@ -6620,6 +6620,21 @@ function _fmtDelivDate(ddmmyyyy) {
   return ddmmyyyy;
 }
 
+function _getGrpoTodayQty(code) {
+  // Returns total qty received today (GRPO) for this item
+  var now = new Date();
+  var dd = String(now.getDate()).padStart(2,'0');
+  var mm = String(now.getMonth()+1).padStart(2,'0');
+  var total = 0;
+  (STATE.grpoData||[]).forEach(function(g) {
+    if(g.itemCode !== code) return;
+    if(!g.grpoDate) return;
+    var p = g.grpoDate.split('/');
+    if(p[0]===dd && p[1]===mm) total += (g.qty||0);
+  });
+  return Math.round(total);
+}
+
 function _isAutoComment(comment) {
   // Auto-generated: "22/06/2026 Qty:50" atau "15/06/2026,22/06/2026 Qty:1.000"
   // Pattern: dimulai dengan tanggal dd/mm/yyyy dan mengandung "Qty:"
@@ -6658,13 +6673,25 @@ function renderDashUrgent(urgentItems) {
     return ai.localeCompare(bi);
   });
   if(!items.length){ el.innerHTML=STATE.projectionData.length?'<div class="empty" style="padding:24px"><div class="empty-ico">✅</div><h3>Semua item aman</h3></div>':'<div class="loading"><div class="spin"></div>Sync & Build projection...</div>'; return; }
+  var DOI_SAFE = 7; // hari — item dianggap selesai jika DOI baru >= ini
   el.innerHTML = items.map(function(p){
+    // GRPO hari ini
+    var grpoQty = _getGrpoTodayQty(p.productCode);
+    var estUsg  = p.estUsageMax || p.estUsageMRP || 1;
+    var doiNow  = grpoQty > 0 ? Math.floor((p.totalStockFC||0) + grpoQty) / Math.max(estUsg,1) : (p.doiFC||0);
+    // Kalau DOI baru >= aman, item sudah selesai — skip dari list
+    if(grpoQty > 0 && doiNow >= DOI_SAFE) return '';
+
     var isRed=(p.doiFC||0)<5; var dotColor=isRed?'var(--red)':'var(--amber)';
     var tb=p.itemType==='RM'?'<span class="badge b-blue" style="font-size:9px">RM</span>':p.itemType==='PM'?'<span class="badge b-purple" style="font-size:9px">PM</span>':'<span class="badge b-green" style="font-size:9px">FG</span>';
     var name = _dispName(p);
     var nd = _getNearestDelivery(p.productCode);
     var delivTxt = nd ? ((nd.confirmed?'✅ ':'🗓 ')+_fmtDelivDate(nd.date)+' · '+nd.qty+' '+nd.uom) : (p.category==='UNDER'?'⚠ belum dijadwal':'—');
     var delivColor = nd ? (nd.confirmed?'var(--green)':'var(--accent)') : (p.category==='UNDER'?'var(--red)':'var(--muted)');
+    // Badge GRPO hari ini (kalau masih kritis tapi sudah ada yang masuk)
+    var grpoBadge = grpoQty > 0
+      ? '<span style="font-size:9.5px;background:#d1f5e0;color:#1a7a3a;border-radius:4px;padding:1px 6px;font-weight:600;margin-left:4px">✅ Masuk '+n_id(grpoQty)+' hari ini</span>'
+      : '';
     var commentHtml = (p.comment && !_isAutoComment(p.comment))
       ? '<div style="font-size:10.5px;color:var(--text);background:var(--bg3);border-left:3px solid var(--teal);padding:3px 7px;border-radius:0 4px 4px 0;margin-top:5px">📝 '+p.comment+'</div>'
       : '';
@@ -6672,7 +6699,7 @@ function renderDashUrgent(urgentItems) {
       '<span style="width:8px;height:8px;border-radius:50%;background:'+dotColor+';display:inline-block;flex-shrink:0;margin-top:5px"></span>'+
       '<div style="flex:1;min-width:0;overflow:hidden">'+
         '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">'+
-          '<div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">'+name+'</div>'+
+          '<div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">'+name+grpoBadge+'</div>'+
           '<div style="flex-shrink:0;display:flex;align-items:center;gap:4px">'+
             '<span style="font-size:9px;color:var(--muted)">coverage</span>'+
             '<span style="font-size:10.5px;font-weight:700;color:var(--red)">'+p.coverageDateStr+'</span>'+
@@ -9087,9 +9114,16 @@ function renderHighlighted() {
     return;
   }
   el.innerHTML = items.map(function(p){
+    var grpoQty2 = _getGrpoTodayQty(p.productCode);
+    var estUsg2  = p.estUsageMax || p.estUsageMRP || 1;
+    var doiNew2  = grpoQty2 > 0 ? Math.floor(((p.totalStockFC||0) + grpoQty2) / Math.max(estUsg2,1)) : (p.doiFC||0);
+    // Kalau item kritis dan sudah GRPO dengan DOI cukup → tetap tampil di highlighted dengan badge
+    var grpoBadge2 = grpoQty2 > 0
+      ? '<span style="font-size:9.5px;background:#d1f5e0;color:#1a7a3a;border-radius:4px;padding:1px 6px;font-weight:600;margin-left:4px">✅ Masuk '+n_id(grpoQty2)+' hari ini</span>'
+      : '';
     var covColor = p.category==='UNDER' ? 'var(--red)' : (p.category==='GOOD' ? 'var(--accent)' : 'var(--muted)');
     var covBg    = p.category==='UNDER' ? 'var(--red-bg,#fff0f0)' : (p.category==='GOOD' ? 'var(--bg3)' : 'var(--bg3)');
-    var dotColor = p.isUrgent ? 'var(--red)' : (p.category==='UNDER' ? 'var(--amber)' : 'var(--green)');
+    var dotColor = (grpoQty2>0 && doiNew2>=7) ? 'var(--green)' : (p.isUrgent ? 'var(--red)' : (p.category==='UNDER' ? 'var(--amber)' : 'var(--green)'));
     var tb=p.itemType==='RM'?'<span class="badge b-blue" style="font-size:9px">RM</span>':p.itemType==='PM'?'<span class="badge b-purple" style="font-size:9px">PM</span>':'<span class="badge b-green" style="font-size:9px">FG</span>';
     var name = _dispName(p);
     var nd = _getNearestDelivery(p.productCode);
@@ -9103,7 +9137,7 @@ function renderHighlighted() {
       '<span style="width:8px;height:8px;border-radius:50%;background:'+dotColor+';display:inline-block;flex-shrink:0;margin-top:5px"></span>'+
       '<div style="flex:1;min-width:0;overflow:hidden">'+
         '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">'+
-          '<div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">'+name+'</div>'+
+          '<div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">'+name+grpoBadge2+'</div>'+
           '<div style="flex-shrink:0;display:flex;align-items:center;gap:4px">'+
             '<span style="font-size:9px;color:var(--muted)">coverage</span>'+
             '<span style="font-size:10.5px;font-weight:700;color:'+covColor+'">'+covStr+'</span>'+
@@ -10463,7 +10497,7 @@ function _calcForecast(code, ospoIdx) {
   var ospoEffective = ospo.map(function(v, i) { return ospoPool2[i] + ospoPulled[i]; });
 
   return {
-    forecast: forecast, ospo: ospoEffective, ospoRaw: ospo, ospoBase: ospoBase, ospr: ospr, ospr_base: ospr_base,
+    forecast: forecast, ospo: ospoEffective, ospoRaw: ospo, ospoBase: ospoBase, ospr: osprPool2.map(function(v,i){ return v + osprPulled[i]; }), ospr_base: ospr_base,
     stock: stockWithProp, doi: doiAktual, stockBase: stockProj,
     forecastOspo: forecastOspo, stockFc: stockFc, doiFc: doiFc,
     propose: totalProp, pullNotifs: pullNotifs,
