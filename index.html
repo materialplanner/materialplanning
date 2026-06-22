@@ -2263,7 +2263,7 @@ function _aiToolSchedule(date, item_code, po_number) {
   if(typeof renderPO==='function' &&
      document.getElementById('pg-po') &&
      document.getElementById('pg-po').classList.contains('active')) renderPO();
-  var d = date.split('-').reverse().join('/');
+  var dp=date.split('-'); var d = dp[2]+'-'+dp[1]+'-'+dp[0];
   return 'Tanggal request kirim diset '+d+' untuk '+affected.length+' PO:\n'+affected.join('\n')+' ✓';
 }
 
@@ -2398,8 +2398,8 @@ function _aiBuildCtx() {
       return {
         docNum: po.docNum, qty: po.openQty, uom: po.uom,
         prReqDate: po.prReqDate,
-        tglKirim: ovr.date ? ovr.date.split('-').reverse().join('/') : 'belum dijadwal',
-        konfirmasi_supplier: ovr.confDate ? ovr.confDate.split('-').reverse().join('/') : null,
+        tglKirim: ovr.date ? (function(s){var p=s.split('-');return p[2]+'-'+p[1]+'-'+p[0];})(ovr.date) : 'belum dijadwal',
+        konfirmasi_supplier: ovr.confDate ? (function(s){var p=s.split('-');return p[2]+'-'+p[1]+'-'+p[0];})(ovr.confDate) : null,
         qty_konfirmasi: ovr.confQty || null,
         catatan: ovr.confDate ? 'SUDAH DIKONFIRMASI supplier' : (ovr.date ? 'sudah dijadwal, belum konfirmasi' : 'belum dijadwal')
       };
@@ -4469,7 +4469,7 @@ function exportPOExcel() {
       p.openQty||0, p.uom||'', p.prReqDate||'',
       ovr.date ? ovr.date.split('-').reverse().join('/') : '',
       ovr.confQty||'',
-      ovr.confDate ? ovr.confDate.split('-').reverse().join('/') : '',
+      ovr.confDate ? (function(s){var p=s.split('-');return p[2]+'-'+p[1]+'-'+p[0];})(ovr.confDate) : '',
       ovr.notes||'', uddDisp
     ];
   });
@@ -4525,7 +4525,7 @@ function _doExportPOGSheet() {
       p.openQty||0, p.uom||'', p.prReqDate||'',
       ovr.date ? ovr.date.split('-').reverse().join('/') : '',
       ovr.confQty||'',
-      ovr.confDate ? ovr.confDate.split('-').reverse().join('/') : '',
+      ovr.confDate ? (function(s){var p=s.split('-');return p[2]+'-'+p[1]+'-'+p[0];})(ovr.confDate) : '',
       ovr.notes||'', uddDisp
     ];
   });
@@ -5754,7 +5754,7 @@ function _doBuildProjection() {
     });
     // Auto-generated date+qty → separate fields, NOT comment
     var tglIncoming = confDateList.length
-      ? confDateList.map(function(d){return d.split('-').reverse().join('/')}).join(', ')
+      ? confDateList.map(function(d){var p=d.split('-');return p.length===3&&p[0].length===4?p[2]+'-'+p[1]+'-'+p[0]:d;}).join(', ')
       : '';
     var qtyIncoming = confQtyTotal > 0 ? Math.round(confQtyTotal) : 0;
     // comment field = manual notes only (do NOT set from confDate/confQty)
@@ -6608,12 +6608,16 @@ function renderDashSchedule() {
 }
 
 function _fmtDelivDate(ddmmyyyy) {
-  // Convert "18/06/2026" → "18-Jun-26" to match coverage format
-  if(!ddmmyyyy || ddmmyyyy==='—' || ddmmyyyy.length<8) return ddmmyyyy;
-  var mon=['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
-  var parts = ddmmyyyy.includes('/') ? ddmmyyyy.split('/') : ddmmyyyy.split('-').reverse();
-  var d=parts[0], m=parseInt(parts[1],10)-1, y=String(parts[2]).slice(-2);
-  return d+'-'+(mon[m]||parts[1])+'-'+y;
+  // Convert "18/06/2026" or ISO "2026-06-18" → "18-06-2026"
+  if(!ddmmyyyy || ddmmyyyy==='—') return ddmmyyyy;
+  if(ddmmyyyy.includes('/')) {
+    var p=ddmmyyyy.split('/');
+    if(p.length===3) return p[0].padStart(2,'0')+'-'+p[1].padStart(2,'0')+'-'+(p[2].length===2?'20'+p[2]:p[2]);
+  }
+  if(/^\d{4}-\d{2}-\d{2}/.test(ddmmyyyy)) {
+    var iso=ddmmyyyy.split('-'); return iso[2]+'-'+iso[1]+'-'+iso[0];
+  }
+  return ddmmyyyy;
 }
 
 function _isAutoComment(comment) {
@@ -6634,7 +6638,7 @@ function _getNearestDelivery(code) {
     if(!best || dateStr < best.dateISO) {
       best = {
         dateISO: dateStr,
-        date: dateStr.split('-').reverse().join('/'),
+        date: (function(s){var p=s.split('-');return p.length===3&&p[0].length===4?p[2]+'-'+p[1]+'-'+p[0]:s;})(dateStr),
         confirmed: !!ovr.confDate,
         qty: ovr.confQty || po.openQty,
         uom: po.uom
@@ -8292,8 +8296,7 @@ function _perfFmtDate(d) {
   return String(d.getDate()).padStart(2,'0') + '/' + String(d.getMonth()+1).padStart(2,'0') + '/' + d.getFullYear();
 }
 function fmtDateID(d) {
-  var months = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
-  return d.getDate() + '-' + months[d.getMonth()] + '-' + String(d.getFullYear()).slice(-2);
+  return String(d.getDate()).padStart(2,'0') + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + d.getFullYear();
 }
 function fmtSAPDate(val) {
   if(!val) return '';
@@ -8303,10 +8306,10 @@ function fmtSAPDate(val) {
   if(!sep) return val;
   var parts = val.split(sep);
   if(parts.length === 3) {
-    // If first part is 4 digits = YYYY/MM/DD or YYYY-MM-DD → convert to DD/MM/YYYY
-    if(parts[0].length === 4) return parts[2] + '/' + parts[1] + '/' + parts[0];
-    // Already DD/MM/YYYY or DD-MM-YYYY
-    return parts[0] + '/' + parts[1] + '/' + parts[2];
+    // If first part is 4 digits = YYYY/MM/DD or YYYY-MM-DD → convert to DD-MM-YYYY
+    if(parts[0].length === 4) return parts[2].padStart(2,'0') + '-' + parts[1].padStart(2,'0') + '-' + parts[0];
+    // Already DD/MM/YYYY or DD-MM-YYYY → normalize to DD-MM-YYYY
+    return parts[0].padStart(2,'0') + '-' + parts[1].padStart(2,'0') + '-' + parts[2];
   }
   return val;
 }
@@ -10742,7 +10745,7 @@ function _fcDetailRow(code, fc, master) {
       var inp_clr  = isEdited ? 'var(--purple,#8b5cf6)' : (haVal ? 'var(--teal)' : 'var(--muted)');
       var inp_wt   = haVal ? '600' : '400';
       var inp_bg   = isEdited ? 'rgba(139,92,246,.08)' : (haVal ? 'rgba(20,184,166,.06)' : 'var(--bg3)');
-      return '<td style="padding:2px;width:92px;overflow:hidden" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()">'
+      return '<td style="padding:2px;width:92px;overflow:hidden;text-align:right" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()">'
         + '<div style="display:inline-flex;align-items:stretch;border:1px solid '+bdr+';border-radius:4px;overflow:hidden;background:'+inp_bg+'">'
         + '<input type="text" inputmode="numeric" value="'+(cur>0?n_id(cur):'0')+'"'
         +   ' data-code="'+itemCode+'" data-mi="'+i+'" data-base="'+base+'" data-rowtype="'+(rowType||'ospo')+'"'
@@ -10754,7 +10757,7 @@ function _fcDetailRow(code, fc, master) {
     var rowLabel = label==='Stock (Ending)'?'stock':label==='DOI (hari)'?'doi':label==='OSPO'?'ospo':label==='OSPR'?'ospr':'';
     var rowAttr  = rowLabel ? ' data-rowlabel="'+rowLabel+'"' : '';
     return '<tr style="border-bottom:1px dotted var(--border)"'+rowAttr+'>'
-      + '<td style="padding:5px 6px;font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--text);white-space:nowrap;min-width:120px">'+label+'</td>'
+      + '<td style="padding:5px 8px;font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--text);white-space:nowrap;width:140px">'+label+'</td>'
       + cells + '</tr>';
   }
 
@@ -10770,7 +10773,7 @@ function _fcDetailRow(code, fc, master) {
         var inp_color = haVal ? 'var(--amber)' : 'var(--muted)';
         var inp_weight = haVal ? '700' : '400';
         var inp_bg = haVal ? 'var(--amber-bg)' : 'var(--bg3)';
-        return '<td style="padding:2px;width:92px;overflow:hidden" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()">'
+        return '<td style="padding:2px;width:92px;overflow:hidden;text-align:right" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()">'
           + '<div style="display:inline-flex;align-items:stretch;border:1px solid '+bdr+';border-radius:4px;overflow:hidden;background:'+inp_bg+'">'
           + '<input type="text" inputmode="numeric" value="'+(cur>0?n_id(cur):'0')+'"'
           +   ' data-code="'+fieldCode+'" data-mi="'+i+'" data-moq="'+moqV+'"'
@@ -10795,7 +10798,7 @@ function _fcDetailRow(code, fc, master) {
     var rowLabel = label==='Stock (Ending)'?'stock':label==='DOI (hari)'?'doi':label==='Propose PR'?'propose':'';
     var rowAttr  = rowLabel ? ' data-rowlabel="'+rowLabel+'"' : '';
     return '<tr style="border-bottom:1px dotted var(--border)"'+rowAttr+'>'
-      + '<td style="padding:5px 6px;font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--text);white-space:nowrap;min-width:120px">'+label+'</td>'
+      + '<td style="padding:5px 8px;font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--text);white-space:nowrap;width:140px">'+label+'</td>'
       + cells + '</tr>';
   }
 
@@ -10844,7 +10847,7 @@ function _fcDetailRow(code, fc, master) {
         var pv=(isFcView?fc.stockFc:fc.stock||[]).map(function(v){return _fcCalcPallet(code,v||0,uom);});
         if(!pv.some(function(v){return v!==null;})) return '';
         return '<tr style="border-top:1px solid var(--border);background:rgba(20,184,166,.04)"><td style="padding:5px 6px;font-size:10.5px;font-weight:700;color:var(--teal);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap">Pallet Usage</td>'
-          +pv.map(function(v){if(v===null)return '<td style="text-align:right;padding:5px 4px;width:92px;overflow:hidden;color:var(--hint)">—</td>';return '<td style="text-align:right;padding:5px 6px;'+(v>0?'color:var(--teal);font-weight:600':'color:var(--hint)')+'">'+v+'</td>';}).join('')
+          +pv.map(function(v){if(v===null)return '<td style="text-align:right;padding:5px 6px;width:92px;overflow:hidden;color:var(--hint)">—</td>';return '<td style="text-align:right;padding:5px 6px;'+(v>0?'color:var(--teal);font-weight:600':'color:var(--hint)')+'">'+v+'</td>';}).join('')
           +'<td></td></tr>';
       }())
     + '</tbody></table></div>';
