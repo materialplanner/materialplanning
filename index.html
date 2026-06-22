@@ -3254,7 +3254,16 @@ function _applyRealtimeChanges(keys) {
           } catch(e) {}
           break;
         case 'fc_ospo_ovr':
-          try { _fcOspoOverride = JSON.parse(val || '{}'); localStorage.setItem('fc_ospo_ovr', val); } catch(e) {}
+          try {
+              var rawOvr = JSON.parse(val || '{}');
+              // Migration: clear stale old-redistribution zeros
+              Object.keys(rawOvr).forEach(function(code) {
+                var arr = rawOvr[code];
+                if(Array.isArray(arr) && arr.filter(function(v){return v===0;}).length > 1) delete rawOvr[code];
+              });
+              _fcOspoOverride = rawOvr;
+              localStorage.setItem('fc_ospo_ovr', JSON.stringify(rawOvr));
+            } catch(e) {}
           break;
         case 'fc_ospr_ovr':
           try { _fcOsprOverride = JSON.parse(val || '{}'); localStorage.setItem('fc_ospr_ovr', val); } catch(e) {}
@@ -9221,7 +9230,13 @@ function _appInit() {
   try {
     _fcPropose      = JSON.parse(localStorage.getItem('fc_propose')       || '{}');
     _fcAutoPropose  = localStorage.getItem('fc_autopropose') === '1';
-    _fcOspoOverride = JSON.parse(localStorage.getItem('fc_ospo_ovr')      || '{}');
+    _fcOspoOverride = (function(){
+    try {
+      var raw = JSON.parse(localStorage.getItem('fc_ospo_ovr') || '{}');
+      Object.keys(raw).forEach(function(c){ var a=raw[c]; if(Array.isArray(a)&&a.filter(function(v){return v===0;}).length>1) delete raw[c]; });
+      return raw;
+    } catch(e){ return {}; }
+  })();
     _fcOsprOverride = JSON.parse(localStorage.getItem('fc_ospr_ovr')      || '{}');
     _fcDOI2         = parseInt(localStorage.getItem('fc_doi2') || '60')   || 60;
     _fcDOI2Suppliers= JSON.parse(localStorage.getItem('fc_doi2_suppliers')|| '[]');
@@ -9964,7 +9979,26 @@ var _fcExpanded  = {};
 var _fcGridViewMode = 'aktual'; // 'aktual' | 'forecast' — global
 var _fcPropose       = (function(){ try{ return JSON.parse(localStorage.getItem('fc_propose')||'{}'); }catch(e){return {};} })();
 var _fcAutoPropose   = localStorage.getItem('fc_autopropose') === '1';
-var _fcOspoOverride  = (function(){ try{ return JSON.parse(localStorage.getItem('fc_ospo_ovr')||'{}'); }catch(e){return {};} })();
+var _fcOspoOverride  = (function(){
+  try {
+    var raw = JSON.parse(localStorage.getItem('fc_ospo_ovr') || '{}');
+    // Migration: clear stale override arrays from old code
+    // Old code set all months to 0 when editing one — pattern: array with >1 exact zeros
+    Object.keys(raw).forEach(function(code) {
+      var arr = raw[code];
+      if(!Array.isArray(arr)) return;
+      var zeroCount = arr.filter(function(v){ return v === 0; }).length;
+      if(zeroCount > 1) {
+        // Stale data from old redistribution — clear it
+        delete raw[code];
+      }
+    });
+    if(Object.keys(raw).length < JSON.parse(localStorage.getItem('fc_ospo_ovr')||'{}').length) {
+      localStorage.setItem('fc_ospo_ovr', JSON.stringify(raw));
+    }
+    return raw;
+  } catch(e) { return {}; }
+})();
 var _fcOsprOverride  = (function(){ try{ return JSON.parse(localStorage.getItem('fc_ospr_ovr')||'{}'); }catch(e){return {};} })();
 var _fcDOI       = 30;
 var _fcDOI2      = (function(){ return parseInt(localStorage.getItem('fc_doi2')||'60')||60; })();
