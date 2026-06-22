@@ -10906,6 +10906,8 @@ function _fcRenderRekap(el, items, fcData, fStatus) {
       propRows.push({
         code: code, name: name, iType: iType,
         site: site, uom: master.uom||'',
+        supplier: master.supplier||master.sup||'',
+        lt: master.lt||0,
         qty: s.qty,
         delivDate: s.delivDate,
         createPRBy: s.createPRBy,
@@ -10913,6 +10915,7 @@ function _fcRenderRekap(el, items, fcData, fStatus) {
         isUrgent: s.isUrgent,
         isOverdue: s.isOverdue,
         proposeMonth: s.proposeMonth,
+        proposeIdx: s.proposeIdx,
         abc: master.abc||''
       });
     });
@@ -10924,7 +10927,7 @@ function _fcRenderRekap(el, items, fcData, fStatus) {
   }
 
   // Sort by createPRBy (ascending)
-  propRows.sort(function(a,b){ return a.createPRBy - b.createPRBy; });
+  propRows.sort(function(a,b){ var di = (a.proposeIdx||0)-(b.proposeIdx||0); return di !== 0 ? di : a.createPRBy - b.createPRBy; });
 
   // Apply status filter
   if(fStatus === 'overdue') propRows = propRows.filter(function(r){ return r.isOverdue; });
@@ -10935,42 +10938,44 @@ function _fcRenderRekap(el, items, fcData, fStatus) {
     return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();
   };
 
+  var thStyle = 'padding:9px 10px;font-size:10px;font-weight:700;color:#fff;background:#1e4d6b;white-space:nowrap;border-right:1px solid rgba(255,255,255,.15)';
   var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
     + '<div style="font-size:11px;color:var(--muted)"><b>'+propRows.length+'</b> baris propose PR</div>'
     + '<button class="btn btn-sm btn-primary" onclick="_fcExportModal(\'rekap\')" style="font-size:11px">↓ Export Rekap PR</button>'
     + '</div>'
-    + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:700px">'
-    + '<thead><tr style="border-bottom:2px solid var(--border2)">'
-    + '<th style="text-align:left;padding:8px 10px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;font-weight:700;color:var(--muted)">Item No.</th>'
-    + '<th style="text-align:left;padding:8px 10px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;font-weight:700;color:var(--muted)">Item Description</th>'
-    + '<th style="text-align:center;padding:8px 10px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;font-weight:700;color:var(--muted)">ABC</th>'
-    + '<th style="text-align:left;padding:8px 10px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;font-weight:700;color:var(--muted)">Whse</th>'
-    + '<th style="text-align:right;padding:8px 10px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;font-weight:700;color:var(--muted)">Required Qty</th>'
-    + '<th style="text-align:center;padding:8px 10px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;font-weight:700;color:var(--muted)">Required Date</th>'
-    + '<th style="text-align:center;padding:8px 10px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;font-weight:700;color:var(--muted)">Tgl Create PR</th>'
-    + '<th style="text-align:center;padding:8px 10px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;font-weight:700;color:var(--muted)">Status</th>'
+    + '<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;min-width:900px;width:100%">'
+    + '<thead><tr>'
+    + '<th style="'+thStyle+';text-align:center">Site</th>'
+    + '<th style="'+thStyle+'">Item No</th>'
+    + '<th style="'+thStyle+'">Description</th>'
+    + '<th style="'+thStyle+';text-align:center">UoM</th>'
+    + '<th style="'+thStyle+';text-align:center">L.T (hari)</th>'
+    + '<th style="'+thStyle+'">Supplier</th>'
+    + '<th style="'+thStyle+';text-align:center">Kebutuhan Bulan</th>'
+    + '<th style="'+thStyle+';text-align:right">Qty</th>'
+    + '<th style="'+thStyle+';text-align:center">PR Harus Dibuka</th>'
+    + '<th style="'+thStyle+';text-align:center;border-right:none">Status Buka</th>'
     + '</tr></thead><tbody>';
 
   propRows.forEach(function(r, idx) {
-    var abcClr  = r.abc==='A'?'var(--red)':r.abc==='B'?'var(--amber)':r.abc==='C'?'var(--teal)':'var(--muted)';
-    var badge   = r.iType==='RM'?'<span class="badge b-blue" style="font-size:8px">RM</span>':'<span class="badge b-purple" style="font-size:8px">PM</span>';
-    var stDot   = r.isOverdue ? '●' : (r.isUrgent ? '◑' : '○');
-    var stClr   = r.isOverdue ? 'var(--red)' : (r.isUrgent ? 'var(--amber)' : 'var(--text)');
-    var stLabel = r.isOverdue ? 'Terlambat' : (r.isUrgent ? 'Segera' : 'Oke');
-    var stSub   = r.isOverdue ? '⚠ lewat' : (r.daysLeft + 'h lagi');
-    var rowBg   = idx%2===0?'':'background:rgba(30,37,53,.12)';
-    html += '<tr style="border-bottom:1px solid var(--border);'+rowBg+'">'
-      + '<td style="padding:9px 10px;font-family:var(--mono);font-size:11px;white-space:nowrap">'+r.code+' '+badge+'</td>'
-      + '<td style="padding:9px 10px;font-size:12px;font-weight:500;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+r.name+'</td>'
-      + '<td style="padding:9px 10px;text-align:center;font-family:var(--mono);font-size:12px;font-weight:700;color:'+abcClr+'">'+(r.abc||'—')+'</td>'
-      + '<td style="padding:9px 10px;font-size:11.5px;color:var(--muted)">'+(r.site||'—')+'</td>'
-      + '<td style="padding:9px 10px;text-align:right;font-family:var(--mono);font-size:12px;font-weight:600">'+n_id(r.qty)+'<span style="font-size:10px;color:var(--muted);margin-left:3px">'+r.uom+'</span></td>'
-      + '<td style="padding:9px 10px;text-align:center;font-family:var(--mono);font-size:11.5px;color:var(--muted)">'+fmt(r.delivDate)+'</td>'
-      + '<td style="padding:9px 10px;text-align:center;font-family:var(--mono);font-size:11.5px;color:var(--text);font-weight:500">'+fmt(r.createPRBy)+'</td>'
-      + '<td style="padding:7px 10px;text-align:center">'
-      + '<div style="font-size:12px;color:'+stClr+';font-weight:600">'+stDot+' '+stLabel+'</div>'
-      + '<div style="font-size:10px;color:var(--muted)">'+stSub+'</div>'
-      + '</td>'
+    var rowBg = r.isOverdue ? 'background:#ffe4e4' : (r.isUrgent ? 'background:#fff3cd' : (idx%2===0?'':'background:rgba(0,0,0,.02)'));
+    var tdS  = 'padding:8px 10px;font-size:11.5px;border-bottom:1px solid #e0e0e0;border-right:1px solid #e8e8e8;';
+    var stTxt = r.isOverdue
+      ? '<span style="color:#c00;font-weight:700">⛔ URGENT</span>'
+      : (r.daysLeft <= 7
+          ? '<span style="color:#c00;font-weight:700">⛔ URGENT</span>'
+          : '<span style="color:#856404">🟡 BELUM - Buka: '+fmt(r.createPRBy)+' ('+r.daysLeft+' hari)</span>');
+    html += '<tr style="'+rowBg+'">'
+      + '<td style="'+tdS+'text-align:center;color:var(--muted);font-size:11px">'+(r.site||'—')+'</td>'
+      + '<td style="'+tdS+'font-family:var(--mono);font-size:11px;white-space:nowrap">'+r.code+'</td>'
+      + '<td style="'+tdS+'font-weight:500;max-width:220px">'+r.name+'</td>'
+      + '<td style="'+tdS+'text-align:center;color:var(--muted)">'+r.uom+'</td>'
+      + '<td style="'+tdS+'text-align:center;font-family:var(--mono)">'+(r.lt||'—')+'</td>'
+      + '<td style="'+tdS+'max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:11px">'+(r.supplier||'—')+'</td>'
+      + '<td style="'+tdS+'text-align:center;font-weight:600">'+r.proposeMonth+'</td>'
+      + '<td style="'+tdS+'text-align:right;font-family:var(--mono);font-weight:600">'+n_id(r.qty)+' '+r.uom+'</td>'
+      + '<td style="'+tdS+'text-align:center;font-family:var(--mono);font-weight:600">'+fmt(r.createPRBy)+'</td>'
+      + '<td style="'+tdS+'border-right:none">'+stTxt+'</td>'
       + '</tr>';
   });
 
@@ -11055,7 +11060,7 @@ function _fcExportSupplier() {
     var master = STATE.masterData[code] || {};
     var fc     = fcData[code];
     var desc   = '"'+(master.desc||'').replace(/"/g,"'")+'"';
-    rows.push([code, desc, 'OSPO'      ].concat(fc.ospo.map(function(v){return Math.round(v||0);})).join(','));
+    rows.push([code, desc, 'Adjusted PO'].concat(fc.ospo.map(function(v){return Math.round(v||0);})).join(','));
     rows.push([code, desc, 'OSPR'      ].concat(fc.ospr.map(function(v){return Math.round(v||0);})).join(','));
     rows.push([code, desc, 'Propose PR'].concat(fc.propose.map(function(v){return Math.round(v||0);})).join(','));
   });
@@ -11073,27 +11078,39 @@ function _fcExportRekap() {
   var fmt = function(d) {
     return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();
   };
-  var header = ['Item No.','Item Description','ABC','Whse','Required Qty','UoM','Required Date','Tgl Create PR','Tipe','Status'];
-  var lines  = [header.join(',')];
+  if(typeof XLSX === 'undefined') { toast('SheetJS belum siap','err'); return; }
+  var headers = ['Site','Item No','Description','UoM','L.T (hari)','Supplier','Kebutuhan Bulan','Qty','PR Harus Dibuka','Status Buka'];
+  var data = [headers];
   rows.forEach(function(r) {
-    lines.push([
-      r.code,
-      '"'+r.name.replace(/"/g,"'")+'"',
-      r.abc||'',
-      '"'+(r.site||'')+'"',
-      Math.round(r.qty),
-      r.uom,
-      fmt(r.delivDate),
-      fmt(r.createPRBy),
-      r.iType,
-      r.isOverdue?'Terlambat':r.isUrgent?'Segera':'OK'
-    ].join(','));
+    var stTxt = r.isOverdue||r.daysLeft<=7 ? 'URGENT' : 'BELUM - Buka: '+fmt(r.createPRBy)+' ('+r.daysLeft+' hari)';
+    data.push([
+      r.site||'', r.code, r.name, r.uom, r.lt||'',
+      r.supplier||'', r.proposeMonth, Math.round(r.qty),
+      fmt(r.createPRBy), stTxt
+    ]);
   });
-  var blob = new Blob([lines.join('\n')], {type:'text/csv;charset=utf-8'});
-  var a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'rekap_propose_pr_'+new Date().toISOString().slice(0,10)+'.csv';
-  a.click(); toast('Rekap PR exported ✓','ok');
+  var ws = XLSX.utils.aoa_to_sheet(data);
+  // Style header row
+  var hdrStyle = {font:{bold:true,color:{rgb:'FFFFFF'}},fill:{fgColor:{rgb:'1E4D6B'}},alignment:{horizontal:'center'}};
+  var range = XLSX.utils.decode_range(ws['!ref']);
+  for(var c=range.s.c; c<=range.e.c; c++) {
+    var cell = XLSX.utils.encode_cell({r:0,c:c});
+    if(ws[cell]) ws[cell].s = hdrStyle;
+  }
+  // Color rows
+  for(var ri=1; ri<data.length; ri++) {
+    var r2 = rows[ri-1];
+    var rowColor = r2.isOverdue||r2.daysLeft<=7 ? 'FFE4E4' : (ri%2===0 ? 'FFFFFF' : 'F8F8F8');
+    for(var ci2=range.s.c; ci2<=range.e.c; ci2++) {
+      var cell2 = XLSX.utils.encode_cell({r:ri,c:ci2});
+      if(ws[cell2]) ws[cell2].s = {fill:{fgColor:{rgb:rowColor}}};
+    }
+  }
+  ws['!cols'] = [{wch:12},{wch:14},{wch:30},{wch:6},{wch:10},{wch:28},{wch:16},{wch:10},{wch:16},{wch:35}];
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Rekap PR');
+  XLSX.writeFile(wb, 'rekap_propose_pr_'+new Date().toISOString().slice(0,10)+'.xlsx');
+  toast('Rekap PR exported ✓','ok');
 }
 
 
@@ -11152,9 +11169,11 @@ function _mpsUpload(input) {
       var planIdxs = {};
       var monthMap = MONTH_MAP_LAMA;
       if(headers.indexOf('MayPlan') < 0) {
-        // Try new format
-        if(headers.indexOf('Plan Mei') >= 0) monthMap = MONTH_MAP_BARU;
-        else monthMap = MONTH_MAP_ALT;
+        // Detect new format: check any Indonesian plan column (including ones not starting from Mei)
+        var hasNewFmt = headers.some(function(h) {
+          return /^Plan\s+(Jan|Feb|Mar|Apr|Mei|Jun|Jul|Agu|Sep|Okt|Nov|Des)$/i.test(h.trim());
+        });
+        monthMap = hasNewFmt ? MONTH_MAP_BARU : MONTH_MAP_ALT;
       }
       MRP_MONTHS.forEach(function(m) {
         var colName = monthMap[m];
@@ -11166,15 +11185,9 @@ function _mpsUpload(input) {
         planIdxs[m] = idx;
       });
 
-      // Detect which months have any plan data
-      // Detect active months: must have column AND at least some non-zero plan
-      _mpsActiveMonths = MRP_MONTHS.filter(function(m) {
-        if(planIdxs[m] < 0) return false;
-        for(var ri=hdrIdx+1; ri<Math.min(hdrIdx+50, rows.length); ri++) {
-          if(parseFloat(rows[ri][planIdxs[m]]) > 0) return true;
-        }
-        return false;
-      });
+      // Include ALL months that have a valid column — don't filter by non-zero data
+      // Previously filtering by first-50-rows caused Aug/Oct/Dec to be missed
+      _mpsActiveMonths = MRP_MONTHS.filter(function(m) { return planIdxs[m] >= 0; });
       if(!_mpsActiveMonths.length) _mpsActiveMonths = MRP_MONTHS.slice();
 
       // Also find description column
@@ -11410,7 +11423,7 @@ function _mrpShowResult() {
   var mrpMaster  = STATE.mrpData    || {};
   var matcom     = STATE.matcomData  || {};
 
-  var activeMonths = _mpsActiveMonths || MRP_MONTHS;
+  var activeMonths = showMonths.length ? showMonths : (_mpsActiveMonths || MRP_MONTHS);
   html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
     + '<thead><tr style="border-bottom:2px solid var(--border2)">'
     + '<th style="text-align:left;padding:8px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)">Item Code</th>'
