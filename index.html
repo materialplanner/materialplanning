@@ -10486,7 +10486,9 @@ function _calcForecast(code, ospoIdx) {
       // Nov/Des: bulan ke-4+ tidak ada data → dianggap 0 → skip (akan propose saat periode berikutnya)
       var _next3Req = 0;
       for(var _ni = am+1; _ni < Math.min(am+4, FC_MONTHS.length); _ni++) _next3Req += (forecast[_ni]||0);
-      var _skipNoDemand = (_next3Req === 0 && stockAfterOspo >= 0);
+      // Bulan terakhir di FC_MONTHS selalu propose — tidak ada data bulan berikutnya
+      var _isLastMonth = (am === FC_MONTHS.length - 1);
+      var _skipNoDemand = (!_isLastMonth && _next3Req === 0 && stockAfterOspo >= 0);
       if(_chkDOI >= 0 && _chkDOI < maxDOI && !_skipNoDemand) {
         var propNeeded = req_a * (maxDOI / WD) - stockAfterOspo;
         if(propNeeded > 0) {
