@@ -371,6 +371,7 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
   <div class="ni" data-label="Performance" onclick="showPage('performance',this)"><span class="ni-ico">📊</span><span class="nav-label">Performance </span><span style="font-size:9px;background:#f59e0b;color:#fff;padding:1px 5px;border-radius:3px;margin-left:4px;font-weight:600">On Develop</span></div>
   <div class="nav-divider"></div>
   <div class="nav-section">Data</div>
+  <div class="ni" data-label="Where Used" onclick="showPage('where-used',this)"><span class="ni-ico">🔍</span><span class="nav-label">Where Used</span></div>
   <div class="ni" data-label="GRPO" onclick="showPage('grpo',this)"><span class="ni-ico">✅</span><span class="nav-label">GRPO</span></div>
     <div class="ni" data-label="OSPR" onclick="showPage('ospr',this)"><span class="ni-ico">📝</span><span class="nav-label">OSPR</span></div>
   <div class="ni" data-label="Stock Daily" onclick="showPage('stock-daily',this)"><span class="ni-ico">📅</span><span class="nav-label">Stock Daily</span></div>
@@ -717,6 +718,31 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
   <div id="sched-list"></div>
 </div>
 </div>
+
+<!-- WHERE USED -->
+<div class="page" id="pg-where-used">
+  <div class="ph-l" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+    <div>
+      <h2>Where Used</h2>
+      <p>Cari RM/PM digunakan di FG mana saja (dari data BOM)</p>
+    </div>
+    <button class="btn btn-sm" onclick="_whereUsedExport()" style="font-size:11px">↓ Export Excel</button>
+  </div>
+
+  <div style="background:var(--bg3);border-radius:10px;padding:14px 16px;margin-bottom:16px">
+    <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Masukkan kode atau nama RM/PM — bisa satu atau banyak (pisah dengan koma atau enter)</div>
+    <textarea id="wu-search" placeholder="Contoh: 3000010026, Ecocerol&#10;3000030033" rows="3"
+      oninput="_whereUsedRender()"
+      style="width:100%;box-sizing:border-box;padding:8px 10px;font-size:12px;font-family:var(--mono);border:1px solid var(--border2);border-radius:6px;background:var(--bg2);color:var(--text);resize:vertical"></textarea>
+    <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-sm btn-primary" onclick="_whereUsedRender()">🔍 Cari</button>
+      <button class="btn btn-sm" onclick="document.getElementById('wu-search').value='';_whereUsedRender()">✕ Clear</button>
+    </div>
+  </div>
+
+  <div id="wu-result" style="font-size:12px;color:var(--muted);padding:8px 0">Upload BOM terlebih dahulu untuk menggunakan fitur ini.</div>
+</div>
+
 
 <!-- GRPO -->
 <div class="page" id="pg-grpo">
@@ -3799,11 +3825,164 @@ function showPage(name, el) {
     ospo: function(){if(!STATE.ospoData.length)loadOSPO();else renderOSPO()},
     ospr: function(){if(!STATE.osprData.length)loadOSPR().then(renderOSPR);else renderOSPR()},
     'stock-daily': function(){initStockDaily()},
+    'where-used':  function(){_whereUsedRender()},
     settings: loadSettingsForm,
     upload: function(){ _restoreSheetUrls(); }
   };
   if(handlers[name]) handlers[name]();
 }
+
+// ─── Where Used ──────────────────────────────────────────────────────────────
+function _whereUsedRender() {
+  var el = document.getElementById('wu-result');
+  if(!el) return;
+
+  var bom = _bomData || [];
+  if(!bom.length) {
+    el.innerHTML = '<div style="color:var(--muted);padding:8px">Upload BOM terlebih dahulu.</div>';
+    return;
+  }
+
+  var raw = (document.getElementById('wu-search')||{value:''}).value || '';
+  // Parse multiple queries: split by comma or newline
+  var queries = raw.split(/[,\n]/).map(function(q){ return q.trim().toLowerCase(); }).filter(Boolean);
+
+  if(!queries.length) {
+    el.innerHTML = '<div style="color:var(--muted);padding:8px">Masukkan kode atau nama RM/PM di atas.</div>';
+    window._whereUsedData = [];
+    return;
+  }
+
+  // Build lookup helpers
+  var masterData = STATE.masterData || {};
+  var realNames  = STATE.realNameData || {};
+
+  // For each query, find matching RM codes
+  var matchedCodes = {};
+  queries.forEach(function(q) {
+    Object.keys(masterData).forEach(function(code) {
+      var m = masterData[code] || {};
+      var desc    = (m.desc||'').toLowerCase();
+      var rname   = (realNames[code]||'').toLowerCase();
+      var codeLC  = code.toLowerCase();
+      if(codeLC.includes(q) || desc.includes(q) || rname.includes(q)) {
+        matchedCodes[code] = true;
+      }
+    });
+    // Also match directly against BOM rm codes not in masterData
+    bom.forEach(function(b) {
+      if(b.rm && b.rm.toLowerCase().includes(q)) matchedCodes[b.rm] = true;
+    });
+  });
+
+  var codes = Object.keys(matchedCodes);
+  if(!codes.length) {
+    el.innerHTML = '<div style="color:var(--muted);padding:8px">Tidak ada RM/PM yang cocok dengan pencarian "<b>'+raw.replace(/</g,'&lt;')+'</b>".</div>';
+    window._whereUsedData = [];
+    return;
+  }
+
+  // Build result rows: for each matched RM, find all FG
+  var rows = [];
+  var fgMaster = {};
+  bom.forEach(function(b){ if(b.fg) fgMaster[b.fg] = fgMaster[b.fg] || b; });
+
+  codes.forEach(function(rmCode) {
+    var rmMaster = masterData[rmCode] || {};
+    var rmName   = (_isAdmin && _rmDisplayMode==='realname' && realNames[rmCode])
+                   ? realNames[rmCode] : (rmMaster.desc || rmCode);
+
+    var fgList = [];
+    var seen = {};
+    bom.forEach(function(b) {
+      if(b.rm !== rmCode || seen[b.fg]) return;
+      seen[b.fg] = true;
+      // FG name from MPS data or just code
+      var fgName = '';
+      if(_mpsData && _mpsData[b.fg]) {
+        var keys = Object.keys(_mpsData[b.fg]);
+        if(keys.length > 0) fgName = ''; // mpsData doesn't store FG name easily
+      }
+      // Try matcom data for FG name
+      var matcom = (STATE.matcomData || {})[b.fg] || {};
+      fgName = matcom.sapName || b.fg;
+      fgList.push({ fgCode: b.fg, fgName: fgName, qty: b.qty||0 });
+    });
+
+    fgList.sort(function(a,b){ return a.fgCode.localeCompare(b.fgCode); });
+    if(fgList.length) rows.push({ rmCode: rmCode, rmName: rmName, fgList: fgList });
+  });
+
+  window._whereUsedData = rows;
+
+  if(!rows.length) {
+    el.innerHTML = '<div style="color:var(--muted);padding:8px">RM/PM yang dicari tidak ditemukan di BOM.</div>';
+    return;
+  }
+
+  // Count total rows for header
+  var totalFG = rows.reduce(function(s,r){ return s+r.fgList.length; }, 0);
+  var thS = 'padding:8px 10px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);background:var(--bg3);border-bottom:2px solid var(--border2)';
+
+  var html = '<div style="font-size:11px;color:var(--muted);margin-bottom:10px">'
+    + '<b>'+codes.length+'</b> RM/PM ditemukan &middot; <b>'+totalFG+'</b> total penggunaan di FG'
+    + '</div>';
+
+  html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
+    + '<thead><tr>'
+    + '<th style="'+thS+'">Kode RM/PM</th>'
+    + '<th style="'+thS+'">Nama RM/PM</th>'
+    + '<th style="'+thS+'">Kode FG</th>'
+    + '<th style="'+thS+'">Nama FG</th>'
+    + '<th style="'+thS+';text-align:right">Qty per FG</th>'
+    + '</tr></thead><tbody>';
+
+  rows.forEach(function(r, ri) {
+    var rowBg = ri%2===0 ? '' : 'background:var(--bg3)';
+    r.fgList.forEach(function(fg, fi) {
+      html += '<tr style="border-bottom:.5px solid var(--border);'+rowBg+'">';
+      // Only show RM info on first row of each RM group
+      if(fi===0) {
+        html += '<td style="padding:8px 10px;font-family:var(--mono);font-size:11px;white-space:nowrap;vertical-align:top;color:var(--teal)" rowspan="'+r.fgList.length+'">'+r.rmCode+'</td>';
+        html += '<td style="padding:8px 10px;font-size:11.5px;font-weight:500;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:top" rowspan="'+r.fgList.length+'">'+r.rmName+'</td>';
+      }
+      html += '<td style="padding:8px 10px;font-family:var(--mono);font-size:11px;white-space:nowrap">'+fg.fgCode+'</td>';
+      html += '<td style="padding:8px 10px;font-size:11.5px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+fg.fgName+'</td>';
+      html += '<td style="padding:8px 10px;text-align:right;font-family:var(--mono);font-size:11px;color:var(--muted)">'+n_id(Math.round(fg.qty*1000)/1000)+'</td>';
+      html += '</tr>';
+    });
+  });
+
+  html += '</tbody></table></div>';
+  el.innerHTML = html;
+}
+
+function _whereUsedExport() {
+  var rows = window._whereUsedData || [];
+  if(!rows.length) { toast('Cari dulu sebelum export','err'); return; }
+  if(typeof XLSX === 'undefined') { toast('SheetJS belum siap','err'); return; }
+
+  var data = [['Kode RM/PM','Nama RM/PM','Kode FG','Nama FG','Qty per FG']];
+  rows.forEach(function(r) {
+    r.fgList.forEach(function(fg) {
+      data.push([r.rmCode, r.rmName, fg.fgCode, fg.fgName, fg.qty]);
+    });
+  });
+
+  var ws = XLSX.utils.aoa_to_sheet(data);
+  var hdrStyle = {font:{bold:true,color:{rgb:'FFFFFF'}},fill:{fgColor:{rgb:'1E4D6B'}}};
+  var range = XLSX.utils.decode_range(ws['!ref']);
+  for(var c=range.s.c; c<=range.e.c; c++) {
+    var cell = XLSX.utils.encode_cell({r:0,c:c});
+    if(ws[cell]) ws[cell].s = hdrStyle;
+  }
+  ws['!cols'] = [{wch:14},{wch:30},{wch:14},{wch:35},{wch:12}];
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Where Used');
+  XLSX.writeFile(wb, 'where_used_'+new Date().toISOString().slice(0,10)+'.xlsx');
+  toast('Where Used exported ✓','ok');
+}
+
 
 // ─── TOAST ───────────────────────────────────────────────────────────────────
 function toast(msg, type) {
