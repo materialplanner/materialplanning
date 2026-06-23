@@ -10485,7 +10485,10 @@ function _calcForecast(code, ospoIdx) {
       // Cek 3 bulan ke depan: kalau demand = 0, tidak perlu propose PR
       var _next3Req = 0;
       for(var _ni = am+1; _ni < Math.min(am+4, FC_MONTHS.length); _ni++) _next3Req += (forecast[_ni]||0);
-      if(_chkDOI >= 0 && _chkDOI < maxDOI && (_next3Req > 0 || req_a > 0)) {
+      // Skip propose kalau next 3 bulan demand = 0 DAN stok masih positif
+      // (stok negatif = emergency, tetap propose meski demand ke depan 0)
+      var _skipNoDemand = (_next3Req === 0 && stockAfterOspo >= 0);
+      if(_chkDOI >= 0 && _chkDOI < maxDOI && !_skipNoDemand) {
         var propNeeded = req_a * (maxDOI / WD) - stockAfterOspo;
         if(propNeeded > 0) {
           propQty = moq > 0 ? Math.max(moq, Math.ceil(propNeeded / _step) * _step) : Math.max(_step||1, Math.ceil(propNeeded / (_step||1)) * (_step||1));
