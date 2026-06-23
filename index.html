@@ -3716,6 +3716,7 @@ var STATE = {
   scheduleData: JSON.parse(localStorage.getItem('schedule') || '[]'),
   supplierData: JSON.parse(localStorage.getItem('suppliers') || '[]'),
   poOverrides: JSON.parse(localStorage.getItem('po_overrides') || '{}'),
+  poConfirmations: JSON.parse(localStorage.getItem('po_confirmations') || '{}'),
   projectionSnapshots: JSON.parse(localStorage.getItem('proj_snapshots') || '{}'),
   projComments: JSON.parse(localStorage.getItem('proj_comments') || '{}'),
   palletPM: JSON.parse(localStorage.getItem('pallet_pm') || 'null'),
@@ -6700,20 +6701,23 @@ function _isAutoComment(comment) {
 }
 
 function _getNearestDelivery(code) {
-  // Returns {date, confirmed, qty, uom} for the nearest scheduled PO
   var pos = (STATE.poData||[]).filter(function(po){return po.itemCode===code;});
   if(!pos.length) return null;
   var best = null;
   pos.forEach(function(po){
-    var ovr = (STATE.poOverrides||{})[String(po.docNum)+'_'+po.itemCode]||{};
-    if(!ovr.date && !ovr.confDate) return;
-    var dateStr = ovr.confDate || ovr.date;
+    var key = String(po.docNum)+'_'+po.itemCode;
+    var ovr  = (STATE.poOverrides||{})[key] || {};
+    var pcon = (STATE.poConfirmations||{})[key] || {};
+    var confDate = pcon.confDate || ovr.confDate || null;
+    var confQty  = pcon.confQty  || ovr.confQty  || null;
+    if(!ovr.date && !confDate) return;
+    var dateStr = confDate || ovr.date;
     if(!best || dateStr < best.dateISO) {
       best = {
         dateISO: dateStr,
         date: (function(s){var p=s.split('-');return p.length===3&&p[0].length===4?p[2]+'-'+p[1]+'-'+p[0]:s;})(dateStr),
-        confirmed: !!ovr.confDate,
-        qty: ovr.confQty || po.openQty,
+        confirmed: !!confDate,
+        qty: confQty || po.openQty,
         uom: po.uom
       };
     }
