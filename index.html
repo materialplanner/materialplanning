@@ -813,6 +813,8 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
         style="padding:5px 14px;font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;background:transparent;color:var(--muted);border:none;cursor:pointer;font-family:var(--font)">Rekap PR</button>
       <button id="fc-tab-supplier" onclick="_fcSetView('supplier')"
         style="padding:5px 14px;font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;background:transparent;color:var(--muted);border:none;cursor:pointer;font-family:var(--font)">Forecast</button>
+      <button id="fc-tab-analisis" onclick="_fcSetView('analisis')"
+        style="padding:5px 14px;font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;background:transparent;color:var(--muted);border:none;cursor:pointer;font-family:var(--font)">Analisis</button>
     </div>
 
     <!-- Type -->
@@ -3156,13 +3158,28 @@ function _applyRealtimeChanges(keys) {
             var cOvr = cloudPO[k];
             var lOvr = STATE.poOverrides[k];
             if(!lOvr) { STATE.poOverrides[k] = cOvr; return; }
-            // Local sudah ada — ambil value yang lebih lengkap per field
-            var hasLocalData  = lOvr.date || lOvr.confDate || lOvr.confQty;
-            var hasCloudData  = cOvr.date || cOvr.confDate || cOvr.confQty;
-            var cloudUpdated  = (cOvr.confUpd||'') > (lOvr.confUpd||'');
-            if(hasCloudData && (cloudUpdated || !hasLocalData)) {
-              STATE.poOverrides[k] = cOvr;
+            // Field-level merge: ambil nilai paling baru per field
+            var merged = Object.assign({}, lOvr);
+            // date: pakai yang lebih baru (dateUpd)
+            if((cOvr.dateUpd||'') > (lOvr.dateUpd||'')) {
+              merged.date    = cOvr.date;
+              merged.isManual = cOvr.isManual;
+              merged.dateUpd = cOvr.dateUpd;
             }
+            // confDate + confQty: pakai yang lebih baru (confUpd)
+            // Jika cloud lebih baru → pakai cloud; selain itu JAGA data lokal
+            if((cOvr.confUpd||'') > (lOvr.confUpd||'')) {
+              merged.confDate   = cOvr.confDate;
+              merged.confQty    = cOvr.confQty;
+              merged.confSource = cOvr.confSource;
+              merged.confUpd    = cOvr.confUpd;
+            } else if(lOvr.confDate && !merged.confDate) {
+              // Local punya confDate tapi cloud tidak — pertahankan lokal
+              merged.confDate   = lOvr.confDate;
+              merged.confQty    = lOvr.confQty;
+              merged.confUpd    = lOvr.confUpd;
+            }
+            STATE.poOverrides[k] = merged;
           });
           // Tambah key cloud yang tidak ada di local
           renderFlags.po = true; renderFlags.sched = true;
@@ -4776,14 +4793,13 @@ function setPOConfQty(el) {
     delete STATE.poOverrides[key].confQty;
     delete STATE.poOverrides[key].confSource;
   }
-  STATE.poOverrides[key].confUpd = new Date().toISOString().split('T')[0];
+  STATE.poOverrides[key].confUpd = new Date().toISOString(); // full timestamp
   el.style.color = el.value ? 'var(--amber)' : 'var(--muted)';
   localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
   cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
   updateProjComment(key);
-  // Update TGL UPDATE di DOM
   var row = el.closest('tr');
-  if(row) { var upd = row.querySelector('td.tgl-update'); if(upd) upd.textContent = STATE.poOverrides[key].confUpd; }
+  if(row) { var upd = row.querySelector('td.tgl-update'); if(upd) upd.textContent = new Date().toLocaleDateString('id-ID'); }
 }
 
 function setPOConfDate(el) {
@@ -4796,13 +4812,13 @@ function setPOConfDate(el) {
     delete STATE.poOverrides[key].confDate;
     delete STATE.poOverrides[key].confSource;
   }
-  STATE.poOverrides[key].confUpd = new Date().toISOString().split('T')[0];
+  STATE.poOverrides[key].confUpd = new Date().toISOString(); // full timestamp
   el.style.color = el.value ? 'var(--amber)' : 'var(--muted)';
   localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
   cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
   updateProjComment(key);
   var row = el.closest('tr');
-  if(row) { var upd = row.querySelector('td.tgl-update'); if(upd) upd.textContent = STATE.poOverrides[key].confUpd; }
+  if(row) { var upd = row.querySelector('td.tgl-update'); if(upd) upd.textContent = new Date().toLocaleDateString('id-ID'); }
 }
 
 function updateProjComment(key) {
@@ -4870,7 +4886,7 @@ function setPODate(el, isManual) {
   STATE.poOverrides[key].date    = el.value;
   STATE.poOverrides[key].isManual = isManual;
   STATE.poOverrides[key].isAuto   = false;
-  STATE.poOverrides[key].confUpd  = new Date().toISOString().split('T')[0];
+  STATE.poOverrides[key].dateUpd  = new Date().toISOString(); // separate from confUpd
   el.style.color = isManual ? 'var(--amber)' : 'var(--text)';
   localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
   cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
@@ -10665,9 +10681,10 @@ function renderForecast(isGenerate) {
     return;
   }
 
-  if(_fcView==='rekap')    { _fcRenderRekap(el, allItems, fcData, fStatus); }
-  else if(_fcView==='supplier') { _fcRenderSupplier(el, allItems, fcData); }
-  else                     { _fcRenderDetail(el, allItems, fcData, fRows); }
+  if(_fcView==='rekap')       { _fcRenderRekap(el, allItems, fcData, fStatus); }
+  else if(_fcView==='supplier')  { _fcRenderSupplier(el, allItems, fcData); }
+  else if(_fcView==='analisis')  { _fcRenderAnalisis(el, allItems, fcData); }
+  else                           { _fcRenderDetail(el, allItems, fcData, fRows); }
 }
 
 // ─── KPIs ─────────────────────────────────────────────────────────────────────
@@ -10982,6 +10999,150 @@ function _fcDetailRow(code, fc, master) {
 }
 
 // ─── Rekap view ───────────────────────────────────────────────────────────────
+
+// ─── Tab Analisis: kualitas propose PR ───────────────────────────────────────
+function _fcRenderAnalisis(el, items, fcData) {
+  var maxDOI = parseInt(localStorage.getItem('fc_doi_target')||'30');
+  var yr2 = String(new Date().getFullYear()).slice(-2);
+
+  // ── Klasifikasi setiap item dengan propose PR ──────────────────────────────
+  var skip = [], tinjau = [], wajar = [], kritis = [];
+
+  items.forEach(function(code) {
+    var fc = fcData[code];
+    if(!fc) return;
+    var master = (STATE.masterData||{})[code] || {};
+    var totalPropose = (fc.propose||[]).reduce(function(s,v){return s+(v||0);},0);
+
+    // Item kritis: UNDER tapi tidak ada propose, PO, atau PR
+    var totalOspo = (fc.ospo||[]).reduce(function(s,v){return s+(v||0);},0);
+    var totalOspr = (fc.ospr||[]).reduce(function(s,v){return s+(v||0);},0);
+    var isUnder   = (fc.doi||[]).some(function(d){return d>=0&&d<maxDOI;});
+    if(isUnder && totalPropose===0 && totalOspo===0 && totalOspr===0) {
+      kritis.push({code:code, fc:fc, master:master});
+      return;
+    }
+    if(totalPropose <= 0) return; // tidak ada propose, skip
+
+    // Hitung metrik
+    var totalDemand    = (fc.forecast||[]).reduce(function(s,v){return s+(v||0);},0);
+    var maxDOIAfterPR  = Math.max.apply(null, (fc.doi||[]).filter(function(d){return d>=0;}));
+    var avgDOIAfterPR  = (function(){
+      var vals = (fc.doi||[]).filter(function(d){return d>0;});
+      return vals.length ? vals.reduce(function(s,v){return s+v;},0)/vals.length : 0;
+    })();
+    var name  = _isAdmin && _rmDisplayMode==='realname' && (STATE.realNameData||{})[code]
+      ? STATE.realNameData[code] : (master.desc||code);
+    var iType = /^3/.test(code)?'RM':'PM';
+    var item  = {code:code, fc:fc, master:master, name:name, iType:iType,
+                 totalPropose:totalPropose, totalDemand:totalDemand,
+                 maxDOIAfterPR:maxDOIAfterPR, avgDOIAfterPR:Math.round(avgDOIAfterPR)};
+
+    // 🚫 Skip PR: demand sangat rendah atau DOI jauh > target
+    var demandRatio = totalDemand > 0 ? totalPropose / totalDemand : Infinity;
+    if(totalDemand === 0 || maxDOIAfterPR > 4 * maxDOI || demandRatio > 5) {
+      item.reason = totalDemand === 0 ? 'Tidak ada demand sampai Desember'
+        : demandRatio > 5 ? 'PR ' + Math.round(demandRatio) + 'x lebih besar dari total demand'
+        : 'DOI mencapai ' + maxDOIAfterPR + ' hari (target ' + maxDOI + ')';
+      skip.push(item);
+    }
+    // ⚠️ Tinjau: DOI agak berlebihan
+    else if(maxDOIAfterPR > 2 * maxDOI || demandRatio > 2) {
+      item.reason = maxDOIAfterPR > 2*maxDOI
+        ? 'Max DOI ' + maxDOIAfterPR + ' hari setelah PR (2× target)'
+        : 'PR ' + Math.round(demandRatio*10)/10 + '× total demand';
+      tinjau.push(item);
+    }
+    // ✅ Wajar
+    else { wajar.push(item); }
+  });
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+  var html = '<div style="padding:0 2px">';
+
+  // Summary cards
+  html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px">';
+  var cards = [
+    {label:'PR Wajar', n:wajar.length,   color:'var(--green)', bg:'#f0fdf4'},
+    {label:'Tinjau Ulang', n:tinjau.length, color:'var(--amber)', bg:'#fffbeb'},
+    {label:'Skip PR',   n:skip.length,    color:'var(--red)',   bg:'#fff0f0'},
+    {label:'Kritis Tanpa Solusi', n:kritis.length, color:'#7c3aed', bg:'#f5f3ff'}
+  ];
+  cards.forEach(function(c){
+    html += '<div style="background:'+c.bg+';border-radius:10px;padding:14px 16px;border:1px solid '+c.color+'22">'
+      + '<div style="font-size:22px;font-weight:800;color:'+c.color+'">'+c.n+'</div>'
+      + '<div style="font-size:11px;color:var(--muted);margin-top:2px">'+c.label+'</div>'
+      + '</div>';
+  });
+  html += '</div>';
+
+  // Helper: render section
+  function renderSection(title, icon, items2, color, bg) {
+    if(!items2.length) return '';
+    var rows = items2.map(function(r) {
+      var badge = r.iType==='RM'
+        ? '<span class="badge b-blue" style="font-size:9px">RM</span>'
+        : '<span class="badge b-purple" style="font-size:9px">PM</span>';
+      var propMonths = (r.fc.propose||[]).map(function(v,i){
+        return v>0 ? FC_MONTHS[i].slice(0,3)+'='+n_id(v) : '';
+      }).filter(Boolean).join(', ');
+      return '<tr style="border-bottom:1px solid var(--border);background:'+bg+'">'
+        + '<td style="padding:8px 10px;font-size:11px;font-family:var(--mono);white-space:nowrap">'+r.code+' '+badge+'</td>'
+        + '<td style="padding:8px 10px;font-size:11.5px;font-weight:500;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+r.name+'</td>'
+        + '<td style="padding:8px 10px;font-size:11px;color:var(--muted)">'+propMonths+'</td>'
+        + '<td style="padding:8px 10px;text-align:right;font-size:11px;font-family:var(--mono);font-weight:600">'+n_id(r.totalPropose)+' '+((r.master&&r.master.uom)||'')+'</td>'
+        + '<td style="padding:8px 10px;text-align:right;font-size:11px;font-family:var(--mono);color:var(--muted)">'+n_id(Math.round(r.totalDemand))+' '+((r.master&&r.master.uom)||'')+'</td>'
+        + '<td style="padding:8px 10px;font-size:11px;font-weight:600;color:'+color+'">'+r.maxDOIAfterPR+' hr max</td>'
+        + '<td style="padding:8px 10px;font-size:11px;color:var(--muted);font-style:italic;max-width:200px">'+r.reason+'</td>'
+        + '</tr>';
+    }).join('');
+    var thS = 'padding:8px 10px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);background:var(--bg3);border-bottom:2px solid var(--border2)';
+    return '<div style="margin-bottom:20px">'
+      + '<div style="font-size:13px;font-weight:700;color:'+color+';margin-bottom:8px">'+icon+' '+title+' ('+items2.length+')</div>'
+      + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
+      + '<thead><tr>'
+      + '<th style="'+thS+'">Item No</th>'
+      + '<th style="'+thS+'">Deskripsi</th>'
+      + '<th style="'+thS+'">Propose Bulan</th>'
+      + '<th style="'+thS+';text-align:right">Total Propose</th>'
+      + '<th style="'+thS+';text-align:right">Total Demand</th>'
+      + '<th style="'+thS+'">Max DOI</th>'
+      + '<th style="'+thS+'">Alasan</th>'
+      + '</tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+  }
+
+  html += renderSection('Skip PR — Tidak Perlu Dibuka', '🚫', skip, 'var(--red)', '#fff8f8');
+  html += renderSection('Tinjau Ulang — Pertimbangkan Qty-nya', '⚠️', tinjau, 'var(--amber)', '#fffdf5');
+  html += renderSection('PR Wajar — Lanjutkan', '✅', wajar, 'var(--green)', '');
+
+  // Kritis section
+  if(kritis.length) {
+    var kRows = kritis.map(function(r) {
+      var badge = r.iType==='RM'
+        ? '<span class="badge b-blue" style="font-size:9px">RM</span>'
+        : '<span class="badge b-purple" style="font-size:9px">PM</span>';
+      var minDoi = Math.min.apply(null, (r.fc.doi||[]).filter(function(d){return d>=0;}));
+      return '<tr style="border-bottom:1px solid var(--border);background:#fdf4ff">'
+        + '<td style="padding:8px 10px;font-size:11px;font-family:var(--mono);white-space:nowrap">'+r.code+' '+badge+'</td>'
+        + '<td style="padding:8px 10px;font-size:11.5px;font-weight:500">'+((r.master&&r.master.desc)||r.code)+'</td>'
+        + '<td style="padding:8px 10px;font-size:11px;color:#7c3aed;font-weight:600">'+minDoi+' hr DOI minimum</td>'
+        + '<td style="padding:8px 10px;font-size:11px;color:var(--muted)">Tidak ada OSPO, OSPR, atau Propose PR</td>'
+        + '</tr>';
+    }).join('');
+    var thS2 = 'padding:8px 10px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);background:var(--bg3);border-bottom:2px solid var(--border2)';
+    html += '<div style="margin-bottom:20px">'
+      + '<div style="font-size:13px;font-weight:700;color:#7c3aed;margin-bottom:8px">🆘 Kritis Tanpa Solusi ('+kritis.length+')</div>'
+      + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
+      + '<thead><tr>'
+      + '<th style="'+thS2+'">Item No</th><th style="'+thS2+'">Deskripsi</th>'
+      + '<th style="'+thS2+'">DOI</th><th style="'+thS2+'">Keterangan</th>'
+      + '</tr></thead><tbody>'+kRows+'</tbody></table></div></div>';
+  }
+
+  html += '</div>';
+  el.innerHTML = html;
+}
+
 function _fcRenderRekap(el, items, fcData, fStatus) {
   var now  = new Date();
   var yr   = now.getFullYear();
