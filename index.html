@@ -10482,7 +10482,10 @@ function _calcForecast(code, ospoIdx) {
       // Zero out bulan yang belum dihitung agar calcDOI tidak terpengaruh
       for(var _zi = am+1; _zi < FC_MONTHS.length; _zi++) _chkStock[_zi] = 0;
       var _chkDOI = calcDOI(_chkStock)[am];
-      if(_chkDOI >= 0 && _chkDOI < maxDOI) {
+      // Cek 3 bulan ke depan: kalau demand = 0, tidak perlu propose PR
+      var _next3Req = 0;
+      for(var _ni = am+1; _ni < Math.min(am+4, FC_MONTHS.length); _ni++) _next3Req += (forecast[_ni]||0);
+      if(_chkDOI >= 0 && _chkDOI < maxDOI && (_next3Req > 0 || req_a > 0)) {
         var propNeeded = req_a * (maxDOI / WD) - stockAfterOspo;
         if(propNeeded > 0) {
           propQty = moq > 0 ? Math.max(moq, Math.ceil(propNeeded / _step) * _step) : Math.max(_step||1, Math.ceil(propNeeded / (_step||1)) * (_step||1));
@@ -11004,148 +11007,113 @@ function _fcDetailRow(code, fc, master) {
 
 // ─── Rekap view ───────────────────────────────────────────────────────────────
 
-// ─── Tab Analisis: kualitas propose PR ───────────────────────────────────────
+// ─── Tab Analisis: DOI rendah tapi tidak ada propose (demand 0) ──────────────
 function _fcRenderAnalisis(el, items, fcData) {
   var maxDOI = parseInt(localStorage.getItem('fc_doi_target')||'30');
-  var yr2 = String(new Date().getFullYear()).slice(-2);
+  var yr2    = String(new Date().getFullYear()).slice(-2);
 
-  // ── Klasifikasi setiap item dengan propose PR ──────────────────────────────
-  var skip = [], tinjau = [], wajar = [], kritis = [];
+  // ── Kumpulkan item: DOI < target, TIDAK ada propose, 3 bulan ke depan = 0 ──
+  var flagged = [];
 
   items.forEach(function(code) {
     var fc = fcData[code];
     if(!fc) return;
     var master = (STATE.masterData||{})[code] || {};
-    var totalPropose = (fc.propose||[]).reduce(function(s,v){return s+(v||0);},0);
-
-    // Item kritis: UNDER tapi tidak ada propose, PO, atau PR
-    var totalOspo = (fc.ospo||[]).reduce(function(s,v){return s+(v||0);},0);
-    var totalOspr = (fc.ospr||[]).reduce(function(s,v){return s+(v||0);},0);
-    var isUnder   = (fc.doi||[]).some(function(d){return d>=0&&d<maxDOI;});
-    if(isUnder && totalPropose===0 && totalOspo===0 && totalOspr===0) {
-      kritis.push({code:code, fc:fc, master:master});
-      return;
-    }
-    if(totalPropose <= 0) return; // tidak ada propose, skip
-
-    // Hitung metrik
-    var totalDemand    = (fc.forecast||[]).reduce(function(s,v){return s+(v||0);},0);
-    var maxDOIAfterPR  = Math.max.apply(null, (fc.doi||[]).filter(function(d){return d>=0;}));
-    var avgDOIAfterPR  = (function(){
-      var vals = (fc.doi||[]).filter(function(d){return d>0;});
-      return vals.length ? vals.reduce(function(s,v){return s+v;},0)/vals.length : 0;
-    })();
-    var name  = _isAdmin && _rmDisplayMode==='realname' && (STATE.realNameData||{})[code]
+    var name = _isAdmin && _rmDisplayMode==='realname' && (STATE.realNameData||{})[code]
       ? STATE.realNameData[code] : (master.desc||code);
     var iType = /^3/.test(code)?'RM':'PM';
-    var item  = {code:code, fc:fc, master:master, name:name, iType:iType,
-                 totalPropose:totalPropose, totalDemand:totalDemand,
-                 maxDOIAfterPR:maxDOIAfterPR, avgDOIAfterPR:Math.round(avgDOIAfterPR)};
 
-    // 🚫 Skip PR: demand sangat rendah atau DOI jauh > target
-    var demandRatio = totalDemand > 0 ? totalPropose / totalDemand : Infinity;
-    if(totalDemand === 0 || maxDOIAfterPR > 4 * maxDOI || demandRatio > 5) {
-      item.reason = totalDemand === 0 ? 'Tidak ada demand sampai Desember'
-        : demandRatio > 5 ? 'PR ' + Math.round(demandRatio) + 'x lebih besar dari total demand'
-        : 'DOI mencapai ' + maxDOIAfterPR + ' hari (target ' + maxDOI + ')';
-      skip.push(item);
-    }
-    // ⚠️ Tinjau: DOI agak berlebihan
-    else if(maxDOIAfterPR > 2 * maxDOI || demandRatio > 2) {
-      item.reason = maxDOIAfterPR > 2*maxDOI
-        ? 'Max DOI ' + maxDOIAfterPR + ' hari setelah PR (2× target)'
-        : 'PR ' + Math.round(demandRatio*10)/10 + '× total demand';
-      tinjau.push(item);
-    }
-    // ✅ Wajar
-    else { wajar.push(item); }
+    // Cek setiap bulan
+    (fc.doi||[]).forEach(function(doi, am) {
+      if(doi < 0 || doi >= maxDOI) return;          // DOI aman
+      var propQty = (fc.propose||[])[am] || 0;
+      if(propQty > 0) return;                        // sudah ada propose
+      var ospo = (fc.ospo||[])[am] || 0;
+      var ospr = (fc.ospr||[])[am] || 0;
+      if(ospo > 0 || ospr > 0) return;              // ada PO/PR masuk bulan ini
+
+      // Hitung demand 3 bulan ke depan
+      var next3 = 0;
+      for(var ni = am+1; ni < Math.min(am+4, FC_MONTHS.length); ni++) {
+        next3 += ((fc.forecast||[])[ni]||0);
+      }
+      if(next3 > 0) return;  // ada demand → propose seharusnya muncul
+
+      // DOI rendah tapi tidak propose karena demand ke depan 0
+      var totalRemainingDemand = ((fc.forecast||[]).slice(am+1)||[]).reduce(function(s,v){return s+(v||0);},0);
+      flagged.push({
+        code: code, name: name, iType: iType, master: master,
+        month: FC_MONTHS[am], monthIdx: am,
+        doi: doi, soh: fc.soh||0,
+        totalRemainingDemand: Math.round(totalRemainingDemand),
+        req: Math.round((fc.forecast||[])[am]||0)
+      });
+    });
+  });
+
+  // Deduplicate: satu item muncul sekali (ambil bulan pertama yang flag)
+  var seen = {}, unique = [];
+  flagged.forEach(function(r){
+    if(!seen[r.code]) { seen[r.code]=true; unique.push(r); }
   });
 
   // ── Render ─────────────────────────────────────────────────────────────────
   var html = '<div style="padding:0 2px">';
 
-  // Summary cards
-  html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px">';
-  var cards = [
-    {label:'PR Wajar', n:wajar.length,   color:'var(--green)', bg:'#f0fdf4'},
-    {label:'Tinjau Ulang', n:tinjau.length, color:'var(--amber)', bg:'#fffbeb'},
-    {label:'Skip PR',   n:skip.length,    color:'var(--red)',   bg:'#fff0f0'},
-    {label:'Kritis Tanpa Solusi', n:kritis.length, color:'#7c3aed', bg:'#f5f3ff'}
-  ];
-  cards.forEach(function(c){
-    html += '<div style="background:'+c.bg+';border-radius:10px;padding:14px 16px;border:1px solid '+c.color+'22">'
-      + '<div style="font-size:22px;font-weight:800;color:'+c.color+'">'+c.n+'</div>'
-      + '<div style="font-size:11px;color:var(--muted);margin-top:2px">'+c.label+'</div>'
-      + '</div>';
-  });
-  html += '</div>';
+  // Summary
+  html += '<div style="background:var(--bg3);border-radius:10px;padding:14px 18px;margin-bottom:18px;border-left:4px solid var(--amber)">'
+    + '<div style="font-size:13px;font-weight:700;color:var(--amber);margin-bottom:4px">'
+    + '⚠️ ' + unique.length + ' item: DOI di bawah target, tidak ada Propose PR</div>'
+    + '<div style="font-size:12px;color:var(--muted)">Item-item ini memiliki DOI &lt; '
+    + maxDOI + ' hari, namun tidak diberi propose PR karena <b>demand 3 bulan ke depan = 0</b>. '
+    + 'Tinjau apakah stok saat ini sudah cukup untuk sisa demand yang ada, atau perlu dimonitor lebih lanjut.</div>'
+    + '</div>';
 
-  // Helper: render section
-  function renderSection(title, icon, items2, color, bg) {
-    if(!items2.length) return '';
-    var rows = items2.map(function(r) {
+  if(!unique.length) {
+    html += '<div style="text-align:center;padding:40px;color:var(--muted)">'
+      + '✅ Tidak ada item dengan kondisi ini</div>';
+  } else {
+    var thS = 'padding:8px 10px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);background:var(--bg3);border-bottom:2px solid var(--border2)';
+    var rows = unique.map(function(r, idx) {
       var badge = r.iType==='RM'
         ? '<span class="badge b-blue" style="font-size:9px">RM</span>'
         : '<span class="badge b-purple" style="font-size:9px">PM</span>';
-      var propMonths = (r.fc.propose||[]).map(function(v,i){
-        return v>0 ? FC_MONTHS[i].slice(0,3)+'='+n_id(v) : '';
-      }).filter(Boolean).join(', ');
-      return '<tr style="border-bottom:1px solid var(--border);background:'+bg+'">'
-        + '<td style="padding:8px 10px;font-size:11px;font-family:var(--mono);white-space:nowrap">'+r.code+' '+badge+'</td>'
-        + '<td style="padding:8px 10px;font-size:11.5px;font-weight:500;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+r.name+'</td>'
-        + '<td style="padding:8px 10px;font-size:11px;color:var(--muted)">'+propMonths+'</td>'
-        + '<td style="padding:8px 10px;text-align:right;font-size:11px;font-family:var(--mono);font-weight:600">'+n_id(r.totalPropose)+' '+((r.master&&r.master.uom)||'')+'</td>'
-        + '<td style="padding:8px 10px;text-align:right;font-size:11px;font-family:var(--mono);color:var(--muted)">'+n_id(Math.round(r.totalDemand))+' '+((r.master&&r.master.uom)||'')+'</td>'
-        + '<td style="padding:8px 10px;font-size:11px;font-weight:600;color:'+color+'">'+r.maxDOIAfterPR+' hr max</td>'
-        + '<td style="padding:8px 10px;font-size:11px;color:var(--muted);font-style:italic;max-width:200px">'+r.reason+'</td>'
+      var doiColor = r.doi === 0 ? 'var(--red)' : r.doi < 7 ? 'var(--red)' : 'var(--amber)';
+      var bg = idx%2===0 ? '' : 'background:var(--bg3)';
+      return '<tr style="border-bottom:1px solid var(--border);'+bg+'">'
+        + '<td style="padding:8px 10px;font-size:11px;font-family:var(--mono);white-space:nowrap">'
+        + r.code+' '+badge+'</td>'
+        + '<td style="padding:8px 10px;font-size:11.5px;font-weight:500;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
+        + r.name+'</td>'
+        + '<td style="padding:8px 10px;text-align:center;font-size:11.5px;font-weight:700;color:'+doiColor+'">'
+        + r.doi+' hr</td>'
+        + '<td style="padding:8px 10px;text-align:center;font-family:var(--mono);font-size:11px">'
+        + r.month+'</td>'
+        + '<td style="padding:8px 10px;text-align:right;font-family:var(--mono);font-size:11px">'
+        + n_id(r.req)+' '+(r.master.uom||'')+'</td>'
+        + '<td style="padding:8px 10px;text-align:right;font-family:var(--mono);font-size:11px;color:var(--muted)">'
+        + n_id(r.totalRemainingDemand)+' '+(r.master.uom||'')+'</td>'
+        + '<td style="padding:8px 10px;font-size:11px;color:var(--muted)">'
+        + 'Demand Jul-Des = 0, PR di-skip</td>'
         + '</tr>';
     }).join('');
-    var thS = 'padding:8px 10px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);background:var(--bg3);border-bottom:2px solid var(--border2)';
-    return '<div style="margin-bottom:20px">'
-      + '<div style="font-size:13px;font-weight:700;color:'+color+';margin-bottom:8px">'+icon+' '+title+' ('+items2.length+')</div>'
-      + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
+
+    html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
       + '<thead><tr>'
       + '<th style="'+thS+'">Item No</th>'
       + '<th style="'+thS+'">Deskripsi</th>'
-      + '<th style="'+thS+'">Propose Bulan</th>'
-      + '<th style="'+thS+';text-align:right">Total Propose</th>'
-      + '<th style="'+thS+';text-align:right">Total Demand</th>'
-      + '<th style="'+thS+'">Max DOI</th>'
-      + '<th style="'+thS+'">Alasan</th>'
-      + '</tr></thead><tbody>'+rows+'</tbody></table></div></div>';
-  }
-
-  html += renderSection('Skip PR — Tidak Perlu Dibuka', '🚫', skip, 'var(--red)', '#fff8f8');
-  html += renderSection('Tinjau Ulang — Pertimbangkan Qty-nya', '⚠️', tinjau, 'var(--amber)', '#fffdf5');
-  html += renderSection('PR Wajar — Lanjutkan', '✅', wajar, 'var(--green)', '');
-
-  // Kritis section
-  if(kritis.length) {
-    var kRows = kritis.map(function(r) {
-      var badge = r.iType==='RM'
-        ? '<span class="badge b-blue" style="font-size:9px">RM</span>'
-        : '<span class="badge b-purple" style="font-size:9px">PM</span>';
-      var minDoi = Math.min.apply(null, (r.fc.doi||[]).filter(function(d){return d>=0;}));
-      return '<tr style="border-bottom:1px solid var(--border);background:#fdf4ff">'
-        + '<td style="padding:8px 10px;font-size:11px;font-family:var(--mono);white-space:nowrap">'+r.code+' '+badge+'</td>'
-        + '<td style="padding:8px 10px;font-size:11.5px;font-weight:500">'+((r.master&&r.master.desc)||r.code)+'</td>'
-        + '<td style="padding:8px 10px;font-size:11px;color:#7c3aed;font-weight:600">'+minDoi+' hr DOI minimum</td>'
-        + '<td style="padding:8px 10px;font-size:11px;color:var(--muted)">Tidak ada OSPO, OSPR, atau Propose PR</td>'
-        + '</tr>';
-    }).join('');
-    var thS2 = 'padding:8px 10px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);background:var(--bg3);border-bottom:2px solid var(--border2)';
-    html += '<div style="margin-bottom:20px">'
-      + '<div style="font-size:13px;font-weight:700;color:#7c3aed;margin-bottom:8px">🆘 Kritis Tanpa Solusi ('+kritis.length+')</div>'
-      + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
-      + '<thead><tr>'
-      + '<th style="'+thS2+'">Item No</th><th style="'+thS2+'">Deskripsi</th>'
-      + '<th style="'+thS2+'">DOI</th><th style="'+thS2+'">Keterangan</th>'
-      + '</tr></thead><tbody>'+kRows+'</tbody></table></div></div>';
+      + '<th style="'+thS+';text-align:center">DOI Sekarang</th>'
+      + '<th style="'+thS+';text-align:center">Bulan</th>'
+      + '<th style="'+thS+';text-align:right">Req Bulan Ini</th>'
+      + '<th style="'+thS+';text-align:right">Total Demand Sisa</th>'
+      + '<th style="'+thS+'">Keterangan</th>'
+      + '</tr></thead><tbody>'+rows+'</tbody></table></div>';
   }
 
   html += '</div>';
   el.innerHTML = html;
 }
+
 
 function _fcRenderRekap(el, items, fcData, fStatus) {
   var now  = new Date();
