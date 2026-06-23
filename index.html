@@ -3926,7 +3926,7 @@ function _whereUsedRender() {
 
   var html = '<div style="font-size:11px;color:var(--muted);margin-bottom:10px;display:flex;align-items:center;gap:10px">'
     + '<span><b>'+codes.length+'</b> RM/PM · <b>'+totalFG+'</b> FG</span>'
-    + '<button class="btn btn-sm" onclick="_whereUsedCopy()" style="font-size:11px">Salin ke WA</button>'
+    + '<button class="btn btn-sm" onclick="_whereUsedCopy()" style="font-size:11px">Copy</button>'
     + '</div>';
 
   
@@ -3964,18 +3964,21 @@ function _whereUsedCopy() {
   if(!rows.length) { toast('Tidak ada data','err'); return; }
   var lines = [];
   rows.forEach(function(r) {
+    // Hanya FG dengan kode awalan "12" (WIP)
+    var wipList = r.fgList.filter(function(fg){ return fg.fgCode.substring(0,2) === '12'; });
+    if(!wipList.length) return;
     lines.push('*' + r.rmCode + '* - ' + r.rmName);
-    r.fgList.forEach(function(fg) {
-      var qty = fg.qty > 0 ? ' (' + n_id(Math.round(fg.qty*1000)/1000) + '/FG)' : '';
-      lines.push('  - ' + fg.fgCode + (fg.fgName !== fg.fgCode ? '  ' + fg.fgName : '') + qty);
+    wipList.forEach(function(fg) {
+      lines.push('  - ' + fg.fgCode + (fg.fgName !== fg.fgCode ? '  ' + fg.fgName : ''));
     });
     lines.push('');
   });
+  if(!lines.length) { toast('Tidak ada WIP (kode "12...") di hasil','err'); return; }
   var text = lines.join('\n').trim();
   var ta = document.createElement('textarea');
   ta.value = text; ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
   document.body.appendChild(ta); ta.select();
-  try { document.execCommand('copy'); toast('Disalin! Paste di WA','ok'); }
+  try { document.execCommand('copy'); toast('WIP disalin!','ok'); }
   catch(e) { toast('Gagal menyalin','err'); }
   document.body.removeChild(ta);
 }
