@@ -11071,6 +11071,29 @@ function _fcRenderAnalisis(el, items, fcData) {
     if(!seen[r.code]) { seen[r.code]=true; unique.push(r); }
   });
 
+  // ── Section 2: MOQ overstock detection ──────────────────────────────────
+  var seenMoq = {}, moqFlags = [];
+  items.forEach(function(code) {
+    var fc = fcData[code]; if(!fc) return;
+    var master = (STATE.masterData||{})[code] || {};
+    var name2 = _isAdmin && _rmDisplayMode==='realname' && (STATE.realNameData||{})[code]
+      ? STATE.realNameData[code] : (master.desc||code);
+    var iType2 = /^3/.test(code)?'RM':'PM';
+    var moq = fc.moq || master.moq || 0;
+    (fc.propose||[]).forEach(function(propQty, am) {
+      if(!propQty || propQty <= 0 || seenMoq[code]) return;
+      var doiAfterPR = (fc.doi||[])[am] || 0;
+      if(doiAfterPR < maxDOI * 3) return;
+      var totalDemand = (fc.forecast||[]).slice(am).reduce(function(s,v){return s+(v||0);},0);
+      var moqRatio = totalDemand > 0 ? Math.round(propQty / totalDemand * 10) / 10 : 999;
+      seenMoq[code] = true;
+      moqFlags.push({code:code, name:name2, iType:iType2, master:master,
+        month:FC_MONTHS[am], propQty:Math.round(propQty), moq:moq,
+        doiAfterPR:Math.round(doiAfterPR), totalDemand:Math.round(totalDemand),
+        moqRatio:moqRatio, uom:master.uom||''});
+    });
+  });
+
   // ── Render ─────────────────────────────────────────────────────────────────
   var html = '<div style="padding:0 2px">';
 
