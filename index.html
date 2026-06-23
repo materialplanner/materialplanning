@@ -3904,8 +3904,8 @@ function _whereUsedRender() {
         if(keys.length > 0) fgName = ''; // mpsData doesn't store FG name easily
       }
       // Try matcom data for FG name
-      var matcom = (STATE.matcomData || {})[b.fg] || {};
-      fgName = matcom.sapName || b.fg;
+      var fgDescs2 = (typeof _fgDescFromMps !== 'undefined' ? _fgDescFromMps : null) || {};
+      fgName = b.fgDesc || fgDescs2[b.fg] || (masterData[b.fg] && masterData[b.fg].desc) || b.fg;
       fgList.push({ fgCode: b.fg, fgName: fgName, qty: b.qty||0 });
     });
 
@@ -3924,10 +3924,12 @@ function _whereUsedRender() {
   var totalFG = rows.reduce(function(s,r){ return s+r.fgList.length; }, 0);
   var thS = 'padding:8px 10px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);background:var(--bg3);border-bottom:2px solid var(--border2)';
 
-  var html = '<div style="font-size:11px;color:var(--muted);margin-bottom:10px">'
-    + '<b>'+codes.length+'</b> RM/PM ditemukan &middot; <b>'+totalFG+'</b> total penggunaan di FG'
+  var html = '<div style="font-size:11px;color:var(--muted);margin-bottom:10px;display:flex;align-items:center;gap:10px">'
+    + '<span><b>'+codes.length+'</b> RM/PM · <b>'+totalFG+'</b> FG</span>'
+    + '<button class="btn btn-sm" onclick="_whereUsedCopy()" style="font-size:11px">Salin ke WA</button>'
     + '</div>';
 
+  
   html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
     + '<thead><tr>'
     + '<th style="'+thS+'">Kode RM/PM</th>'
@@ -3955,6 +3957,27 @@ function _whereUsedRender() {
 
   html += '</tbody></table></div>';
   el.innerHTML = html;
+}
+
+function _whereUsedCopy() {
+  var rows = window._whereUsedData || [];
+  if(!rows.length) { toast('Tidak ada data','err'); return; }
+  var lines = [];
+  rows.forEach(function(r) {
+    lines.push('*' + r.rmCode + '* - ' + r.rmName);
+    r.fgList.forEach(function(fg) {
+      var qty = fg.qty > 0 ? ' (' + n_id(Math.round(fg.qty*1000)/1000) + '/FG)' : '';
+      lines.push('  - ' + fg.fgCode + (fg.fgName !== fg.fgCode ? '  ' + fg.fgName : '') + qty);
+    });
+    lines.push('');
+  });
+  var text = lines.join('\n').trim();
+  var ta = document.createElement('textarea');
+  ta.value = text; ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); toast('Disalin! Paste di WA','ok'); }
+  catch(e) { toast('Gagal menyalin','err'); }
+  document.body.removeChild(ta);
 }
 
 function _whereUsedExport() {
