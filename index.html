@@ -10482,11 +10482,10 @@ function _calcForecast(code, ospoIdx) {
       // Zero out bulan yang belum dihitung agar calcDOI tidak terpengaruh
       for(var _zi = am+1; _zi < FC_MONTHS.length; _zi++) _chkStock[_zi] = 0;
       var _chkDOI = calcDOI(_chkStock)[am];
-      // Cek 3 bulan ke depan: kalau demand = 0, tidak perlu propose PR
+      // Cek 3 bulan ke depan: kalau demand = 0, skip propose PR
+      // Nov/Des: bulan ke-4+ tidak ada data → dianggap 0 → skip (akan propose saat periode berikutnya)
       var _next3Req = 0;
       for(var _ni = am+1; _ni < Math.min(am+4, FC_MONTHS.length); _ni++) _next3Req += (forecast[_ni]||0);
-      // Skip propose kalau next 3 bulan demand = 0 DAN stok masih positif
-      // (stok negatif = emergency, tetap propose meski demand ke depan 0)
       var _skipNoDemand = (_next3Req === 0 && stockAfterOspo >= 0);
       if(_chkDOI >= 0 && _chkDOI < maxDOI && !_skipNoDemand) {
         var propNeeded = req_a * (maxDOI / WD) - stockAfterOspo;
@@ -11029,27 +11028,39 @@ function _fcRenderAnalisis(el, items, fcData) {
     // Cek setiap bulan
     (fc.doi||[]).forEach(function(doi, am) {
       if(doi < 0 || doi >= maxDOI) return;          // DOI aman
+      var req_am = Math.round((fc.forecast||[])[am]||0);
       var propQty = (fc.propose||[])[am] || 0;
       if(propQty > 0) return;                        // sudah ada propose
       var ospo = (fc.ospo||[])[am] || 0;
       var ospr = (fc.ospr||[])[am] || 0;
       if(ospo > 0 || ospr > 0) return;              // ada PO/PR masuk bulan ini
 
-      // Hitung demand 3 bulan ke depan
-      var next3 = 0;
+      // Hitung demand 3 bulan ke depan (konsisten dengan propose logic)
+      var next3Req = 0;
       for(var ni = am+1; ni < Math.min(am+4, FC_MONTHS.length); ni++) {
-        next3 += ((fc.forecast||[])[ni]||0);
+        next3Req += ((fc.forecast||[])[ni]||0);
       }
-      if(next3 > 0) return;  // ada demand → propose seharusnya muncul
+      if(next3Req > 0) return;  // ada demand 3 bulan ke depan → propose harusnya muncul
+      var remainReq = ((fc.forecast||[]).slice(am+1)||[]).reduce(function(s,v){return s+(v||0);},0);
 
-      // DOI rendah tapi tidak propose karena demand ke depan 0
-      var totalRemainingDemand = ((fc.forecast||[]).slice(am+1)||[]).reduce(function(s,v){return s+(v||0);},0);
+      // Skip: DOI = 0 dan req bulan ini = 0 dan total = 0 → tidak perlu ditampilkan
+      if(doi === 0 && req_am === 0 && remainReq === 0) return;
+
+      // Cari bulan mana saja yang 0 setelah bulan ini
+      var zeroMonths = [];
+      for(var zi = am+1; zi < FC_MONTHS.length; zi++) {
+        if(((fc.forecast||[])[zi]||0) === 0) zeroMonths.push(FC_MONTHS[zi].slice(0,3));
+      }
+      var zeroDesc = zeroMonths.length > 0
+        ? zeroMonths.join(', ') + ' = 0, PR di-skip'
+        : 'Tidak ada demand tersisa';
+
       flagged.push({
         code: code, name: name, iType: iType, master: master,
         month: FC_MONTHS[am], monthIdx: am,
         doi: doi, soh: fc.soh||0,
-        totalRemainingDemand: Math.round(totalRemainingDemand),
-        req: Math.round((fc.forecast||[])[am]||0)
+        remainReq: Math.round(remainReq),
+        req: req_am, zeroDesc: zeroDesc
       });
     });
   });
@@ -11095,9 +11106,9 @@ function _fcRenderAnalisis(el, items, fcData) {
         + '<td style="padding:8px 10px;text-align:right;font-family:var(--mono);font-size:11px">'
         + n_id(r.req)+' '+(r.master.uom||'')+'</td>'
         + '<td style="padding:8px 10px;text-align:right;font-family:var(--mono);font-size:11px;color:var(--muted)">'
-        + n_id(r.totalRemainingDemand)+' '+(r.master.uom||'')+'</td>'
+        + n_id(r.remainReq)+' '+(r.master.uom||'')+'</td>'
         + '<td style="padding:8px 10px;font-size:11px;color:var(--muted)">'
-        + 'Demand Jul-Des = 0, PR di-skip</td>'
+        + r.zeroDesc+'</td>'
         + '</tr>';
     }).join('');
 
@@ -11111,6 +11122,39 @@ function _fcRenderAnalisis(el, items, fcData) {
       + '<th style="'+thS+';text-align:right">Total Demand Sisa</th>'
       + '<th style="'+thS+'">Keterangan</th>'
       + '</tr></thead><tbody>'+rows+'</tbody></table></div>';
+  }
+
+  // ── MOQ section HTML ────────────────────────────────────────────────────
+  if(moqFlags.length) {
+    var thS2 = 'padding:8px 10px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);background:var(--bg3);border-bottom:2px solid var(--border2)';
+    html += '<div style="margin-top:24px;background:var(--bg3);border-radius:10px;padding:14px 18px;margin-bottom:14px;border-left:4px solid #7c3aed">'
+      + '<div style="font-size:13px;font-weight:700;color:#7c3aed;margin-bottom:4px">📦 '+moqFlags.length+' item: Propose PR besar karena MOQ</div>'
+      + '<div style="font-size:12px;color:var(--muted)">DOI setelah PR melebihi '+(maxDOI*3)+' hari (3x target). Pertimbangkan negosiasi MOQ atau tahan PR.</div>'
+      + '</div>';
+    var rows2 = moqFlags.map(function(r,idx2){
+      var badge2 = r.iType==='RM'?'<span class="badge b-blue" style="font-size:9px">RM</span>':'<span class="badge b-purple" style="font-size:9px">PM</span>';
+      var bg2 = idx2%2===0?'':'background:rgba(124,58,237,.04)';
+      return '<tr style="border-bottom:1px solid var(--border);'+bg2+'">'
+        +'<td style="padding:8px 10px;font-size:11px;font-family:var(--mono);white-space:nowrap">'+r.code+' '+badge2+'</td>'
+        +'<td style="padding:8px 10px;font-size:11.5px;font-weight:500;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+r.name+'</td>'
+        +'<td style="padding:8px 10px;text-align:center;font-size:11px">'+r.month+'</td>'
+        +'<td style="padding:8px 10px;text-align:right;font-family:var(--mono);font-size:11px;font-weight:600;color:#7c3aed">'+n_id(r.propQty)+' '+r.uom+'</td>'
+        +'<td style="padding:8px 10px;text-align:right;font-family:var(--mono);font-size:11px;color:var(--muted)">'+n_id(r.totalDemand)+' '+r.uom+'</td>'
+        +'<td style="padding:8px 10px;text-align:center;font-family:var(--mono);font-size:11px">'+r.moq+' '+r.uom+'</td>'
+        +'<td style="padding:8px 10px;text-align:center;font-size:11px;font-weight:700;color:#7c3aed">'+r.doiAfterPR+' hr</td>'
+        +'<td style="padding:8px 10px;font-size:11px;color:var(--muted)">'+r.moqRatio+'x demand sisa</td>'
+        +'</tr>';
+    }).join('');
+    html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
+      +'<thead><tr>'
+      +'<th style="'+thS2+'">Item No</th><th style="'+thS2+'">Deskripsi</th>'
+      +'<th style="'+thS2+';text-align:center">Bulan PR</th>'
+      +'<th style="'+thS2+';text-align:right">Qty Propose</th>'
+      +'<th style="'+thS2+';text-align:right">Total Demand Sisa</th>'
+      +'<th style="'+thS2+';text-align:center">MOQ</th>'
+      +'<th style="'+thS2+';text-align:center">DOI Setelah PR</th>'
+      +'<th style="'+thS2+'">Keterangan</th>'
+      +'</tr></thead><tbody>'+rows2+'</tbody></table></div>';
   }
 
   html += '</div>';
