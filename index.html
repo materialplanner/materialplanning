@@ -3149,6 +3149,20 @@ function _applyRealtimeChanges(keys) {
           STATE.scheduleData = JSON.parse(val || '[]');
           renderFlags.sched = true; renderFlags.dash = true;
           break;
+        case 'po_confirmations':
+          var cloudConf = JSON.parse(val || '{}');
+          if(!STATE.poConfirmations) STATE.poConfirmations = {};
+          Object.keys(cloudConf).forEach(function(ck){
+            var cc = cloudConf[ck], lc = STATE.poConfirmations[ck];
+            if(!lc) { STATE.poConfirmations[ck] = cc; return; }
+            if((cc.confUpd||'') > (lc.confUpd||'')) {
+              if(!cc.confDate && lc.confDate) return;
+              STATE.poConfirmations[ck] = cc;
+            }
+          });
+          localStorage.setItem('po_confirmations', JSON.stringify(STATE.poConfirmations));
+          renderFlags.po = true;
+          break;
         case 'po_overrides':
           var cloudPO = JSON.parse(val || '{}');
           // Merge: per-key, lebih banyak data menang
@@ -4659,9 +4673,10 @@ function renderPO() {
     var isAuto   = ovr.isAuto;
     var reqStyle = isManual ? 'color:var(--amber)' : (isAuto ? 'color:var(--teal)' : '');
     var reqTitle = isManual ? 'Edit manual' : (isAuto ? 'Auto-generate' : '');
-    var confQty    = ovr.confQty  || '';
-    var confDate   = ovr.confDate || '';
-    var confUpd    = ovr.confUpd  || '';
+    var _pconf  = (STATE.poConfirmations && STATE.poConfirmations[key]) || {};
+    var confQty    = _pconf.confQty  || ovr.confQty  || '';
+    var confDate   = _pconf.confDate || ovr.confDate || '';
+    var confUpd    = _pconf.confUpd  ? _pconf.confUpd.substring(0,10) : (ovr.confUpd||'');
     var notes      = (ovr.notes  || '').replace(/"/g, '&quot;');
     var confSrc    = ovr.confSource || 'manual';
     // teal = from jadwal, amber = manual edit
@@ -4785,39 +4800,39 @@ function _initColResize(tableId) {
 }
 
 function setPOConfQty(el) {
+  if(!_requireAdmin('edit konfirmasi')) return;
   var key = el.getAttribute('data-key');
-  if(!STATE.poOverrides[key]) STATE.poOverrides[key] = {};
+  if(!STATE.poConfirmations) STATE.poConfirmations = {};
+  if(!STATE.poConfirmations[key]) STATE.poConfirmations[key] = {};
   if(el.value) {
-    STATE.poOverrides[key].confQty = el.value;
-    STATE.poOverrides[key].confSource = 'manual';
+    STATE.poConfirmations[key].confQty = el.value;
   } else {
-    delete STATE.poOverrides[key].confQty;
-    delete STATE.poOverrides[key].confSource;
+    delete STATE.poConfirmations[key].confQty;
   }
-  STATE.poOverrides[key].confUpd = new Date().toISOString(); // full timestamp
+  STATE.poConfirmations[key].confUpd = new Date().toISOString();
   el.style.color = el.value ? 'var(--amber)' : 'var(--muted)';
-  localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
-  cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
-  updateProjComment(key);
+  localStorage.setItem('po_confirmations', JSON.stringify(STATE.poConfirmations));
+  cloudSave('po_confirmations', JSON.stringify(STATE.poConfirmations));
   var row = el.closest('tr');
   if(row) { var upd = row.querySelector('td.tgl-update'); if(upd) upd.textContent = new Date().toLocaleDateString('id-ID'); }
 }
 
 function setPOConfDate(el) {
+  if(!_requireAdmin('edit konfirmasi')) return;
   var key = el.getAttribute('data-key');
-  if(!STATE.poOverrides[key]) STATE.poOverrides[key] = {};
+  if(!STATE.poConfirmations) STATE.poConfirmations = {};
+  if(!STATE.poConfirmations[key]) STATE.poConfirmations[key] = {};
   if(el.value) {
-    STATE.poOverrides[key].confDate = el.value;
-    STATE.poOverrides[key].confSource = 'manual';
+    STATE.poConfirmations[key].confDate   = el.value;
+    STATE.poConfirmations[key].confSource = 'manual';
   } else {
-    delete STATE.poOverrides[key].confDate;
-    delete STATE.poOverrides[key].confSource;
+    delete STATE.poConfirmations[key].confDate;
+    delete STATE.poConfirmations[key].confSource;
   }
-  STATE.poOverrides[key].confUpd = new Date().toISOString(); // full timestamp
+  STATE.poConfirmations[key].confUpd = new Date().toISOString();
   el.style.color = el.value ? 'var(--amber)' : 'var(--muted)';
-  localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
-  cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
-  updateProjComment(key);
+  localStorage.setItem('po_confirmations', JSON.stringify(STATE.poConfirmations));
+  cloudSave('po_confirmations', JSON.stringify(STATE.poConfirmations));
   var row = el.closest('tr');
   if(row) { var upd = row.querySelector('td.tgl-update'); if(upd) upd.textContent = new Date().toLocaleDateString('id-ID'); }
 }
@@ -5710,8 +5725,11 @@ function _doBuildProjection() {
       if(po.itemCode !== code) return;
       var key = String(po.docNum)+'_'+po.itemCode;
       var ovr = (STATE.poOverrides||{})[key] || {};
-      if(ovr.confDate) {
-        totalOpenPOQty += (parseFloat(ovr.confQty) || po.openQty || 0);
+      var _pcc2 = (STATE.poConfirmations||{})[key] || {};
+      var _cd = _pcc2.confDate || ovr.confDate;
+      var _cq = _pcc2.confQty  || ovr.confQty;
+      if(_cd) {
+        totalOpenPOQty += (parseFloat(_cq) || po.openQty || 0);
       } else if(ovr.date) {
         // Belum dikonfirmasi tapi sudah ada jadwal request kirim
         totalOpenPOQty += (po.openQty || 0);
@@ -5801,11 +5819,14 @@ function _doBuildProjection() {
         var ovr = STATE.poOverrides[k];
         var po  = (STATE.poData||[]).find(function(p){ return p.docNum+'_'+p.itemCode === k; });
         if(ovr) {
-          // Pakai confDate (konfirmasi supplier) jika ada, fallback ke date (request kirim)
-          var useDate = ovr.confDate || ovr.date || null;
-          var useQty  = ovr.confDate
-            ? (parseFloat(ovr.confQty) || 0)   // sudah dikonfirmasi → pakai confQty
-            : (po ? (po.openQty||0) : 0);       // baru request → pakai openQty
+          // Read from po_confirmations first, fallback to po_overrides (legacy)
+          var _pcc = (STATE.poConfirmations && STATE.poConfirmations[k]) || {};
+          var _confDate = _pcc.confDate || ovr.confDate || null;
+          var _confQty  = _pcc.confQty  || ovr.confQty  || null;
+          var useDate = _confDate || ovr.date || null;
+          var useQty  = _confDate
+            ? (parseFloat(_confQty) || 0)
+            : (po ? (po.openQty||0) : 0);
           if(useDate && confDateList.indexOf(useDate) < 0) confDateList.push(useDate);
           if(useDate && useQty > 0) confQtyTotal += useQty; // hanya tambah qty jika ada tanggal
         }
@@ -9318,6 +9339,7 @@ function _appInit() {
     _fcPropose      = JSON.parse(localStorage.getItem('fc_propose')       || '{}');
     _fcAutoPropose  = localStorage.getItem('fc_autopropose') === '1';
     _fcOspoOverride = JSON.parse(localStorage.getItem('fc_ospo_ovr')      || '{}');
+  STATE.poConfirmations = JSON.parse(localStorage.getItem('po_confirmations') || '{}');
     _fcOsprOverride = JSON.parse(localStorage.getItem('fc_ospr_ovr')      || '{}');
     _fcDOI2         = parseInt(localStorage.getItem('fc_doi2') || '60')   || 60;
     _fcDOI2Suppliers= JSON.parse(localStorage.getItem('fc_doi2_suppliers')|| '[]');
