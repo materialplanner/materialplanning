@@ -5039,6 +5039,35 @@ function _initColResize(tableId) {
   });
 }
 
+function _refreshProjectionIncoming(itemCode) {
+  var proj = STATE.projectionData && STATE.projectionData.find(function(p){ return p.productCode === itemCode; });
+  if(!proj) return;
+  var _aPK = {};
+  (STATE.poData||[]).forEach(function(p){ _aPK[p.docNum+'_'+p.itemCode]=true; });
+  var _aK = {}, cdList = [], cqTotal = 0;
+  Object.keys(STATE.poOverrides||{}).forEach(function(k){ _aK[k]=1; });
+  Object.keys(STATE.poConfirmations||{}).forEach(function(k){ _aK[k]=1; });
+  Object.keys(_aK).forEach(function(k){
+    var kp = k.split('_');
+    if(kp.length < 2 || kp.slice(1).join('_') !== itemCode) return;
+    if(!_aPK[k]) return;
+    var ovr = STATE.poOverrides[k] || {};
+    var pcc = (STATE.poConfirmations||{})[k] || {};
+    var cd  = pcc.confDate || ovr.confDate || null;
+    var cq  = pcc.confQty  || ovr.confQty  || null;
+    var ud  = cd || ovr.date || null;
+    var po  = (STATE.poData||[]).find(function(p){ return p.docNum+'_'+p.itemCode===k; });
+    var uq  = cd ? (parseFloat(cq)||0) : (po ? (po.openQty||0) : 0);
+    if(ud && cdList.indexOf(ud) < 0) cdList.push(ud);
+    if(ud && uq > 0) cqTotal += uq;
+  });
+  proj.tglIncoming = cdList.length
+    ? cdList.map(function(d){ var p=d.split('-'); return p.length===3&&p[0].length===4?p[2]+'-'+p[1]+'-'+p[0]:d; }).join(', ')
+    : '';
+  proj.qtyIncoming = cqTotal > 0 ? Math.round(cqTotal) : 0;
+  if(document.getElementById('proj-tbody') || document.getElementById('proj-table')) renderProjectionRAF();
+}
+
 function setPOConfQty(el) {
   if(!_requireAdmin('edit konfirmasi')) return;
   var key = el.getAttribute('data-key');
@@ -5053,6 +5082,9 @@ function setPOConfQty(el) {
   el.style.color = el.value ? 'var(--amber)' : 'var(--muted)';
   localStorage.setItem('po_confirmations', JSON.stringify(STATE.poConfirmations));
   cloudSave('po_confirmations', JSON.stringify(STATE.poConfirmations));
+  // Update Projection Stock in-memory agar tidak perlu Rebuild
+  var _itemCode = key.slice(key.indexOf('_') + 1);
+  if(_itemCode) _refreshProjectionIncoming(_itemCode);
   var row = el.closest('tr');
   if(row) { var upd = row.querySelector('td.tgl-update'); if(upd) upd.textContent = new Date().toLocaleDateString('id-ID'); }
 }
@@ -5073,6 +5105,8 @@ function setPOConfDate(el) {
   el.style.color = el.value ? 'var(--amber)' : 'var(--muted)';
   localStorage.setItem('po_confirmations', JSON.stringify(STATE.poConfirmations));
   cloudSave('po_confirmations', JSON.stringify(STATE.poConfirmations));
+  var _icD = key.slice(key.indexOf('_') + 1);
+  if(_icD) _refreshProjectionIncoming(_icD);
   var row = el.closest('tr');
   if(row) { var upd = row.querySelector('td.tgl-update'); if(upd) upd.textContent = new Date().toLocaleDateString('id-ID'); }
 }
