@@ -5044,7 +5044,7 @@ function _refreshProjectionIncoming(itemCode) {
   if(!proj) return;
   var _aPK = {};
   (STATE.poData||[]).forEach(function(p){ _aPK[p.docNum+'_'+p.itemCode]=true; });
-  var _aK = {}, cdList = [], cqTotal = 0;
+  var _aK = {}, cdList = [], cqTotal = 0, opqTotal = 0;
   Object.keys(STATE.poOverrides||{}).forEach(function(k){ _aK[k]=1; });
   Object.keys(STATE.poConfirmations||{}).forEach(function(k){ _aK[k]=1; });
   Object.keys(_aK).forEach(function(k){
@@ -5060,11 +5060,23 @@ function _refreshProjectionIncoming(itemCode) {
     var uq  = cd ? (parseFloat(cq)||0) : (po ? (po.openQty||0) : 0);
     if(ud && cdList.indexOf(ud) < 0) cdList.push(ud);
     if(ud && uq > 0) cqTotal += uq;
+    // totalOpenPOQty: untuk DOI+INCOMING dan COVERAGE+INCOMING
+    if(cd) { opqTotal += (parseFloat(cq) || (po ? po.openQty||0 : 0)); }
+    else if(ovr.date) { opqTotal += (po ? po.openQty||0 : 0); }
   });
-  proj.tglIncoming = cdList.length
+  proj.tglIncoming   = cdList.length
     ? cdList.map(function(d){ var p=d.split('-'); return p.length===3&&p[0].length===4?p[2]+'-'+p[1]+'-'+p[0]:d; }).join(', ')
     : '';
-  proj.qtyIncoming = cqTotal > 0 ? Math.round(cqTotal) : 0;
+  proj.qtyIncoming   = cqTotal > 0 ? Math.round(cqTotal) : 0;
+  proj.totalOpenPOQty = Math.round(opqTotal);
+  // Recalculate doiAfterIncoming + coverageAfterIncoming
+  var totalStock = (proj.stockBTG||0) + (proj.stockSNG||0);
+  var estUsgMax  = proj.estUsageMRP || proj.estUsageMax || 0;
+  var d = estUsgMax > 0 ? (totalStock + opqTotal) / estUsgMax : (totalStock + opqTotal > 0 ? 999 : 0);
+  proj.doiAfterIncoming = d >= 999 ? 999 : Math.floor(d);
+  var dt = new Date();
+  dt.setDate(dt.getDate() + Math.floor(Math.min(d, 999)));
+  proj.coverageAfterIncoming = fmtDateID(dt);
   if(document.getElementById('proj-tbody') || document.getElementById('proj-table')) renderProjectionRAF();
 }
 
@@ -7531,11 +7543,16 @@ function generateSchedule(typeFilter) {
       // Ambil multiple dari master data — PO dengan openQty < multiple dilewati
       var masterItem = STATE.masterData && STATE.masterData[item.productCode];
       var multipleQty = masterItem ? (masterItem.multiple || 0) : 0;
-      // Exclude PO yang sudah ada di kartu jadwal lain
+      // Exclude PO yang sudah ada di kartu jadwal ATAU sudah punya confDate (confirmed manual)
       var sortedPOs2 = sortedPOs.filter(function(po){
-        return !scheduledPOKeys[po.docNum + '_' + po.itemCode];
+        var _pk = po.docNum + '_' + po.itemCode;
+        if(scheduledPOKeys[_pk]) return false; // sudah di kartu jadwal
+        var _pcc = (STATE.poConfirmations||{})[_pk] || {};
+        var _ovr = (STATE.poOverrides||{})[_pk] || {};
+        if(_pcc.confDate || _ovr.confDate) return false; // sudah dikonfirmasi langsung
+        return true;
       });
-      if(!sortedPOs2.length) sortedPOs2 = sortedPOs; // fallback kalau semua sudah terjadwal
+      if(!sortedPOs2.length) sortedPOs2 = sortedPOs; // fallback kalau semua sudah terjadwal/konfirmasi
       // Ambil multiple dari master data — konversi gram→kg kalau UOM gram
       var masterItem = STATE.masterData && STATE.masterData[item.productCode];
       var multipleQty = masterItem ? (masterItem.multiple || 0) : 0;
@@ -7684,7 +7701,8 @@ function renderSchedule() {
         var dispQty = _getEntryReqQty(en);
         // DOI calculation: DOI max + (incoming / daily usage)
         var proj = STATE.projectionData.find(function(x){ return x.productCode === en.item.productCode; });
-        var doiNow = proj ? Math.round(proj.doiFC||0) : 0;
+        // Pakai doiAfterIncoming (sudah hitung confirmed PO) bukan doiFC (stock saja)
+        var doiNow = proj ? Math.round(proj.doiAfterIncoming != null ? proj.doiAfterIncoming : (proj.doiFC||0)) : 0;
         var daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth()+1, 0).getDate();
         var dailyUsg = (proj && proj.max3MRP > 0) ? proj.max3MRP / daysInMonth : 0;
         var addDays = dailyUsg > 0 ? Math.round(dispQty / dailyUsg) : 0;
