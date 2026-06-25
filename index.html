@@ -8028,7 +8028,9 @@ function removeSchedule(idx) {
     cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
   }
   STATE.scheduleData.splice(idx, 1);
-  localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData)); renderSchedule();
+  localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData));
+  cloudSave('schedule', JSON.stringify(STATE.scheduleData));
+  renderSchedule();
 }
 
 function resetSchedule() {
@@ -8052,6 +8054,7 @@ function resetSchedule() {
   cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
   STATE.scheduleData = [];
   localStorage.setItem('schedule', '[]');
+  cloudSave('schedule', '[]');  // harus disimpan ke Firebase juga
   document.getElementById('s-unconfirmed').textContent = '—';
   renderSchedule();
   updateDashStats();
