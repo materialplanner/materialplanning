@@ -7681,9 +7681,10 @@ function saveSchedDate(input) {
     (en.pos||[]).forEach(function(po){
       var key = po.docNum + '_' + po.itemCode;
       if(!STATE.poOverrides[key]) STATE.poOverrides[key] = {};
-      STATE.poOverrides[key].date = iso;
-      STATE.poOverrides[key].isManual = true;
-      STATE.poOverrides[key].isAuto = false;
+      STATE.poOverrides[key].date          = iso;
+      STATE.poOverrides[key].isSchedManual = true;
+      STATE.poOverrides[key].isManual      = false;
+      STATE.poOverrides[key].isAuto        = false;
     });
   });
 
