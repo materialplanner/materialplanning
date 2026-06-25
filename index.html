@@ -5100,14 +5100,8 @@ function updateProjComment(key) {
     if(_cc5b.confQty) totalQty += parseFloat(_cc5b.confQty)||0;
     if(_cc5b.confDate && confDates.indexOf(_cc5b.confDate) < 0) confDates.push(_cc5b.confDate);
   });
-  if(totalQty > 0 || confDates.length > 0) {
-    confDates.sort();
-    var dtStr = confDates.map(function(d){ return d.split('-').reverse().join('/'); }).join(', ');
-    var autoComment = (dtStr||'') + (totalQty > 0 ? ' Qty:' + n_id(Math.round(totalQty)) : '');
-    proj.comment = autoComment;
-    STATE.projComments[itemCode] = { text: autoComment, _manual: false };
-    try { localStorage.setItem('proj_comments', JSON.stringify(STATE.projComments)); cloudSave('proj_comments', JSON.stringify(STATE.projComments)); } catch(e) {}
-  }
+  // Comment hanya dari manual — data konfirmasi sudah tampil di kolom TGL/QTY INCOMING
+  // Tidak ada auto-write ke projComments dari sini
 }
 
 
@@ -5123,17 +5117,7 @@ function setPOField(el, field) {
     var row = el.closest('tr');
     if(row) { var updInput = row.querySelectorAll('input[type=date]')[2]; if(updInput) updInput.value = STATE.poOverrides[key].confUpd; }
   }
-  // Update projection comment for this item
-  if(field === 'confDate' || field === 'confQty') {
-    var itemCode = key.split('_')[1];
-    var proj = STATE.projectionData.find(function(p){return p.productCode === itemCode});
-    if(proj) {
-      var _cc7 = _poConfData(key);
-      var qty = _cc7.confQty || '';
-      var dt = _cc7.confDate || '';
-      if(qty || dt) proj.comment = 'KONFIRM' + (qty?' QTY:'+n_id(qty):'') + (dt?' TGL:'+dt.split('-').reverse().join('/'):'');
-    }
-  }
+  // Data konfirmasi tampil di kolom TGL/QTY INCOMING — tidak ditulis ke comment
 }
 
 function setPODate(el, isManual) {
@@ -6046,24 +6030,26 @@ function _doBuildProjection() {
     var confDateList = [];
     var _activePOKeys = {};
     (STATE.poData || []).forEach(function(p){ _activePOKeys[p.docNum + '_' + p.itemCode] = true; });
-    Object.keys(STATE.poOverrides).forEach(function(k){
+    // Pakai union key po_overrides + po_confirmations agar konfirmasi yg hanya ada di po_confirmations ikut terbaca
+    var _allConfKeys = {};
+    Object.keys(STATE.poOverrides||{}).forEach(function(k){ _allConfKeys[k]=1; });
+    Object.keys(STATE.poConfirmations||{}).forEach(function(k){ _allConfKeys[k]=1; });
+    Object.keys(_allConfKeys).forEach(function(k){
       var kp = k.split('_');
       if(kp.length >= 2 && kp.slice(1).join('_') === code) {
         if(!_activePOKeys[k]) return; // PO sudah datang/hilang — skip
-        var ovr = STATE.poOverrides[k];
+        var ovr = STATE.poOverrides[k] || {};
         var po  = (STATE.poData||[]).find(function(p){ return p.docNum+'_'+p.itemCode === k; });
-        if(ovr) {
-          // Read from po_confirmations first, fallback to po_overrides (legacy)
-          var _pcc = (STATE.poConfirmations && STATE.poConfirmations[k]) || {};
-          var _confDate = _pcc.confDate || ovr.confDate || null;
-          var _confQty  = _pcc.confQty  || ovr.confQty  || null;
-          var useDate = _confDate || ovr.date || null;
-          var useQty  = _confDate
-            ? (parseFloat(_confQty) || 0)
-            : (po ? (po.openQty||0) : 0);
-          if(useDate && confDateList.indexOf(useDate) < 0) confDateList.push(useDate);
-          if(useDate && useQty > 0) confQtyTotal += useQty; // hanya tambah qty jika ada tanggal
-        }
+        // Read from po_confirmations first, fallback to po_overrides (legacy)
+        var _pcc = (STATE.poConfirmations && STATE.poConfirmations[k]) || {};
+        var _confDate = _pcc.confDate || ovr.confDate || null;
+        var _confQty  = _pcc.confQty  || ovr.confQty  || null;
+        var useDate = _confDate || ovr.date || null;
+        var useQty  = _confDate
+          ? (parseFloat(_confQty) || 0)
+          : (po ? (po.openQty||0) : 0);
+        if(useDate && confDateList.indexOf(useDate) < 0) confDateList.push(useDate);
+        if(useDate && useQty > 0) confQtyTotal += useQty;
       }
     });
     // Auto-generated date+qty → separate fields, NOT comment
@@ -7267,17 +7253,19 @@ function generateSchedule(typeFilter) {
       if(typeFilter === 'PM' && p.itemType !== 'PM') return false;
     }
     var stockTotal = (p.stockBTG || 0) + (p.stockSNG || 0);
-    var needed = Math.max(0, (p.max3MRP || 0) - stockTotal);
     var confirmed  = confQtyByItem[p.productCode] || 0;
     var scheduled  = scheduledQtyByItem[p.productCode] || 0;
     var totalCover = confirmed + scheduled;
-    // Skip kalau qty konfirmasi + terjadwal sudah cukup
-    if(needed > 0 && totalCover >= needed) return false;
-    // Skip kalau DOI setelah kartu aktif sudah >= target
+    // Cek DOI setelah semua incoming (konfirmasi + terjadwal)
+    // Kalau sudah cukup → skip. Kalau masih kurang → tetap generate
     var estUsg = p.estUsageMRP || p.estUsageMax || 0;
-    if(estUsg > 0 && scheduled > 0) {
-      var doiAfterSched = (stockTotal + totalCover) / estUsg;
-      if(doiAfterSched >= (p.maxDOI || 30)) return false;
+    if(totalCover > 0 && estUsg > 0) {
+      var doiAfterIncoming = (stockTotal + totalCover) / estUsg;
+      if(doiAfterIncoming >= (p.maxDOI || 30)) return false;
+    } else if(totalCover > 0) {
+      // Tidak bisa hitung DOI (estUsg=0), fallback ke cek qty vs needed
+      var needed = Math.max(0, (p.max3MRP || 0) - stockTotal);
+      if(needed > 0 && totalCover >= needed) return false;
     }
     return p.coverageDate <= coverageCutoff;
   });
@@ -8385,16 +8373,11 @@ function saveFeedback() {
     // Only build comment if there's something to show
     if(totalQty > 0 || confDates.length > 0) {
       confDates.sort();
-      var dtStr = confDates.map(function(d){ return d.split('-').reverse().join('/'); }).join(', ');
+      var dtStr = confDates.map(function(d){ return d.split('-').reverse().join('-'); }).join(', ');
       var autoComment = (dtStr || '') + (totalQty > 0 ? ' Qty:' + n_id(Math.round(totalQty)) : '');
 
-      // Only overwrite if no manual comment exists, or comment was previously auto-set
-      var existing = STATE.projComments[ic];
-      var isManual = existing && existing._manual;
-      if(!isManual) {
-        STATE.projComments[ic] = { text: autoComment, _manual: false };
-        if(proj) proj.comment = autoComment;
-      }
+      // Comment hanya dari manual — data konfirmasi sudah di kolom TGL/QTY INCOMING
+      // Tidak overwrite projComments dari saveFeedback
     }
   });
   try { localStorage.setItem('proj_comments', JSON.stringify(STATE.projComments)); cloudSave('proj_comments', JSON.stringify(STATE.projComments)); } catch(ex) {}
@@ -8426,27 +8409,10 @@ function clearManualComment(code) {
   // Remove manual flag so auto-comment can take over
   var existing = STATE.projComments[code];
   if(existing && typeof existing === 'object') {
-    // Rebuild auto-comment dari PO yg masih open saja
-    var totalQty = 0; var confDates = [];
-    var _activePOKeys3 = {};
-    (STATE.poData || []).forEach(function(p){ _activePOKeys3[p.docNum + '_' + p.itemCode] = true; });
-    Object.keys(STATE.poOverrides).forEach(function(k){
-      var us = k.indexOf('_');
-      if(us < 0 || k.slice(us+1) !== code) return;
-      if(!_activePOKeys3[k]) return; // PO sudah datang — skip
-      var _cc5 = _poConfData(k);
-      if(_cc5.confQty) totalQty += parseFloat(_cc5.confQty)||0;
-      if(_cc5.confDate && confDates.indexOf(_cc5.confDate) < 0) confDates.push(_cc5.confDate);
-    });
-    var autoComment = '';
-    if(totalQty > 0 || confDates.length > 0) {
-      confDates.sort();
-      var dtStr = confDates.map(function(d){ return d.split('-').reverse().join('/'); }).join(', ');
-      autoComment = (dtStr||'') + (totalQty > 0 ? ' Qty:' + n_id(Math.round(totalQty)) : '');
-    }
-    STATE.projComments[code] = autoComment ? { text: autoComment, _manual: false } : null;
+    // Hapus comment manual — biarkan kosong
+    STATE.projComments[code] = null;
     var p = STATE.projectionData.find(function(x){ return x.productCode === code; });
-    if(p) p.comment = autoComment;
+    if(p) p.comment = '';
     try { localStorage.setItem('proj_comments', JSON.stringify(STATE.projComments)); cloudSave('proj_comments', JSON.stringify(STATE.projComments)); } catch(e) {}
   }
   renderProjection();
