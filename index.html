@@ -2186,6 +2186,23 @@ function _aiExecTool(name, args) {
   } catch(e) { return 'Error eksekusi tool: '+e.message; }
 }
 
+function getPOItem(code) {
+  var pos = (STATE.poData||[]).filter(function(po){return po.itemCode===code;});
+  if(!pos.length) return [];
+  return pos.map(function(po){
+    var ovr = (STATE.poOverrides||{})[String(po.docNum)+'_'+po.itemCode] || {};
+    var _aiCC = _poConfData(String(po.docNum)+'_'+po.itemCode);
+    return {
+      docNum: po.docNum, qty: po.openQty, uom: po.uom,
+      prReqDate: po.prReqDate,
+      tglKirim: ovr.date ? (function(s){var p=s.split('-');return p[2]+'-'+p[1]+'-'+p[0];})(ovr.date) : 'belum dijadwal',
+      konfirmasi_supplier: (function(cd){return cd?(function(s){var p=s.split('-');return p[2]+'-'+p[1]+'-'+p[0];})(cd):null;})(_aiCC.confDate),
+      qty_konfirmasi: _aiCC.confQty || null,
+      catatan: _aiCC.confDate ? 'SUDAH DIKONFIRMASI supplier' : (ovr.date ? 'sudah dijadwal, belum konfirmasi' : 'belum dijadwal')
+    };
+  });
+}
+
 function _aiToolSearch(query) {
   var q = (query||'').toLowerCase();
   var dispFn2 = (typeof _dispName==='function') ? _dispName : function(p){return p.description||p.productCode;};
@@ -2431,22 +2448,6 @@ function _aiBuildCtx() {
     return Object.keys(out).length ? out : null;
   }
 
-  function getPOItem(code) {
-    var pos = (STATE.poData||[]).filter(function(po){return po.itemCode===code;});
-    if(!pos.length) return [];
-    return pos.map(function(po){
-      var ovr = (STATE.poOverrides||{})[String(po.docNum)+'_'+po.itemCode] || {};
-      var _aiCC = _poConfData(String(po.docNum)+'_'+po.itemCode);
-      return {
-        docNum: po.docNum, qty: po.openQty, uom: po.uom,
-        prReqDate: po.prReqDate,
-        tglKirim: ovr.date ? (function(s){var p=s.split('-');return p[2]+'-'+p[1]+'-'+p[0];})(ovr.date) : 'belum dijadwal',
-        konfirmasi_supplier: (function(cd){return cd?(function(s){var p=s.split('-');return p[2]+'-'+p[1]+'-'+p[0];})(cd):null;})(_aiCC.confDate),
-        qty_konfirmasi: _aiCC.confQty || null,
-        catatan: _aiCC.confDate ? 'SUDAH DIKONFIRMASI supplier' : (ovr.date ? 'sudah dijadwal, belum konfirmasi' : 'belum dijadwal')
-      };
-    });
-  }
 
   function getMatcomItem(code) {
     var mc = STATE.matcomMonthly && STATE.matcomMonthly[code];
@@ -2520,12 +2521,13 @@ function _aiBuildCtx() {
     var entries = (s.entries||[]).slice(0,5).map(function(en){
       var po = en.pos&&en.pos[0];
       var ovr = po ? ((STATE.poOverrides||{})[String(po.docNum)+'_'+po.itemCode]||{}) : {};
+      var _ccS = po ? _poConfData(String(po.docNum)+'_'+po.itemCode) : {};
       return {
         item: en.item ? (dispFn(en.item)||en.item.productCode) : '',
         kode: en.item ? en.item.productCode : '',
         qty: po ? po.openQty : 0, uom: po ? po.uom : '',
-        konfirmasi_qty: _poConfData(key).confQty||null,
-        konfirmasi_tgl: _poConfData(key).confDate||null
+        konfirmasi_qty: _ccS.confQty||null,
+        konfirmasi_tgl: _ccS.confDate||null
       };
     });
     return {supplier:s.supName,tanggal:s.date,status:s.status,
@@ -3416,6 +3418,26 @@ function _applyRealtimeChanges(keys) {
             if(document.getElementById('fc-table')) { setTimeout(renderForecast, 100); }
             if(document.getElementById('proj-tbody')||document.getElementById('proj-table')) { setTimeout(function(){buildProjection();renderProjection();}, 100); }
           } catch(e) {} break;
+        case 'master_data':
+          try {
+            STATE.masterData = JSON.parse(val || 'null');
+            // Master data dipakai projection — rebuild kalau halaman terbuka
+            if(document.getElementById('proj-tbody')||document.getElementById('proj-table')) { setTimeout(function(){buildProjection();renderProjection();}, 100); }
+            if(document.getElementById('fc-table')) { setTimeout(renderForecast, 100); }
+          } catch(e) {} break;
+        case 'realname_data':
+          try {
+            STATE.realNameData = JSON.parse(val || '{}');
+            if(document.getElementById('proj-tbody')||document.getElementById('proj-table')) { setTimeout(renderProjection, 100); }
+            if(document.getElementById('pg-po')&&document.getElementById('pg-po').classList.contains('active')) setTimeout(renderPO, 100);
+          } catch(e) {} break;
+        case 'matcom_data':
+          try {
+            STATE.matcomData = JSON.parse(val || 'null');
+            if(document.getElementById('proj-tbody')||document.getElementById('proj-table')) { setTimeout(function(){buildProjection();renderProjection();}, 100); }
+          } catch(e) {} break;
+        case 'proj_snapshots':
+          try { STATE.projectionSnapshots = JSON.parse(val || '{}'); } catch(e) {} break;
         case 'update_deldate_data':
           try { STATE.updateDelDateData = JSON.parse(val || '{}'); if(document.getElementById('pg-po')&&document.getElementById('pg-po').classList.contains('active')) renderPO(); } catch(e) {}
           break;
@@ -4844,10 +4866,11 @@ function renderPO() {
     if(srch && !String(p.docNum).includes(srch) && !(p.itemCode||'').toLowerCase().includes(srch) && !(p.itemName||'').toLowerCase().includes(srch) && !(p.supplierName||'').toLowerCase().includes(srch)) return false;
     if(site && !(p.site||'').toUpperCase().includes(site)) return false;
     var ovr = STATE.poOverrides[p.docNum + '_' + p.itemCode] || {};
+    var _poKeyF = p.docNum + '_' + p.itemCode;
     if(reqFilter === 'has' && !ovr.date && !p._reqDate) return false;
     if(reqFilter === 'none' && (ovr.date || p._reqDate)) return false;
     if(reqFilter === 'manual' && !ovr.isManual) return false;
-    var _ccF = _poConfData(key);
+    var _ccF = _poConfData(_poKeyF);
     if(confFilter === 'confirmed' && !_ccF.confDate) return false;
     if(confFilter === 'unconfirmed' && _ccF.confDate) return false;
     if(hfDoc   && !String(p.docNum).toLowerCase().includes(hfDoc)) return false;
@@ -4857,7 +4880,7 @@ function renderPO() {
     if(hfSite  && !(p.site||'').toLowerCase().includes(hfSite)) return false;
     if(_reqDates.length > 0 && _reqDates.indexOf(ovr.date||'') < 0) return false;
     if(!_reqDates.length && hfReq && !(ovr.date||'').includes(hfReq)) return false;
-    if(hfConf  && !((_poConfData(key).confDate)||'').includes(hfConf)) return false;
+    if(hfConf  && !((_poConfData(_poKeyF).confDate)||'').includes(hfConf)) return false;
     if(hfNotes && !(ovr.notes||'').toLowerCase().includes(hfNotes)) return false;
     return true;
   });
