@@ -7211,8 +7211,17 @@ function generateSchedule(typeFilter) {
     }
     var stockTotal = (p.stockBTG || 0) + (p.stockSNG || 0);
     var needed = Math.max(0, (p.max3MRP || 0) - stockTotal);
-    var confirmed = (confQtyByItem[p.productCode] || 0) + (scheduledQtyByItem[p.productCode] || 0);
-    if(needed > 0 && confirmed >= needed) return false;
+    var confirmed  = confQtyByItem[p.productCode] || 0;
+    var scheduled  = scheduledQtyByItem[p.productCode] || 0;
+    var totalCover = confirmed + scheduled;
+    // Skip kalau qty konfirmasi + terjadwal sudah cukup
+    if(needed > 0 && totalCover >= needed) return false;
+    // Skip kalau DOI setelah kartu aktif sudah >= target
+    var estUsg = p.estUsageMRP || p.estUsageMax || 0;
+    if(estUsg > 0 && scheduled > 0) {
+      var doiAfterSched = (stockTotal + totalCover) / estUsg;
+      if(doiAfterSched >= (p.maxDOI || 30)) return false;
+    }
     return p.coverageDate <= coverageCutoff;
   });
 
