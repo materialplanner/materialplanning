@@ -7498,7 +7498,7 @@ function generateSchedule(typeFilter) {
         supName: sup.supName, date: delivDate,
         items: itemSummaryParts.join(', '), pos: poNums.join(', '),
         entries: selectedEntries,
-        status: sup._isManual ? 'approved' : 'pending',
+        status: 'pending', // selalu mulai dari pending, user approve manual
         feedback: '', isManual: !!sup._isManual,
         coverageDate: sup.earliestCoverage ? fmtDateID(sup.earliestCoverage) : ''
       });
