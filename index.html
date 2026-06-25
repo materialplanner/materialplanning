@@ -2118,6 +2118,7 @@ document.addEventListener('click', function(e){
 </div>
 <script>
 var _aiKey = localStorage.getItem('ai_api_key') || '';
+var _aiModel = localStorage.getItem('ai_model') || 'gemini-3.5-flash';
 var _aiHistory = [];
 var _aiStreaming = false;
 var _aiPanelOpen = false;
@@ -2362,6 +2363,18 @@ async function _aiGroqCall(messages, useTools) {
 }
 
 // ─── Main send ────────────────────────────────────────────────────────────────
+function _aiSaveModel(val) {
+  if(!val) return;
+  _aiModel = val;
+  localStorage.setItem('ai_model', val);
+  cloudSave('ai_model', val);
+  var st = document.getElementById('ai-key-status');
+  if(st && _aiKey) st.innerHTML='<span style="color:var(--green)">\u2713 API Key aktif &nbsp;\u00b7&nbsp; '+_aiModel+'</span>';
+  var sub = document.getElementById('ai-panel-sub');
+  if(sub) sub.textContent = _aiModel + ' \u2014 tanya apa saja';
+  toast('Model AI: ' + val, 'ok');
+}
+
 function _aiSaveKey() {
   var k = (document.getElementById('cfg-ai-key')||{value:''}).value.trim();
   if(!k) { toast('Masukkan API Key terlebih dahulu','err'); return; }
@@ -2423,13 +2436,14 @@ function _aiBuildCtx() {
     if(!pos.length) return [];
     return pos.map(function(po){
       var ovr = (STATE.poOverrides||{})[String(po.docNum)+'_'+po.itemCode] || {};
+      var _aiCC = _poConfData(String(po.docNum)+'_'+po.itemCode);
       return {
         docNum: po.docNum, qty: po.openQty, uom: po.uom,
         prReqDate: po.prReqDate,
         tglKirim: ovr.date ? (function(s){var p=s.split('-');return p[2]+'-'+p[1]+'-'+p[0];})(ovr.date) : 'belum dijadwal',
-        konfirmasi_supplier: ovr.confDate ? (function(s){var p=s.split('-');return p[2]+'-'+p[1]+'-'+p[0];})(ovr.confDate) : null,
-        qty_konfirmasi: ovr.confQty || null,
-        catatan: ovr.confDate ? 'SUDAH DIKONFIRMASI supplier' : (ovr.date ? 'sudah dijadwal, belum konfirmasi' : 'belum dijadwal')
+        konfirmasi_supplier: (function(cd){return cd?(function(s){var p=s.split('-');return p[2]+'-'+p[1]+'-'+p[0];})(cd):null;})(_aiCC.confDate),
+        qty_konfirmasi: _aiCC.confQty || null,
+        catatan: _aiCC.confDate ? 'SUDAH DIKONFIRMASI supplier' : (ovr.date ? 'sudah dijadwal, belum konfirmasi' : 'belum dijadwal')
       };
     });
   }
@@ -2510,8 +2524,8 @@ function _aiBuildCtx() {
         item: en.item ? (dispFn(en.item)||en.item.productCode) : '',
         kode: en.item ? en.item.productCode : '',
         qty: po ? po.openQty : 0, uom: po ? po.uom : '',
-        konfirmasi_qty: ovr.confQty||null,
-        konfirmasi_tgl: ovr.confDate||null
+        konfirmasi_qty: _poConfData(key).confQty||null,
+        konfirmasi_tgl: _poConfData(key).confDate||null
       };
     });
     return {supplier:s.supName,tanggal:s.date,status:s.status,
@@ -2532,8 +2546,8 @@ function _aiBuildCtx() {
     if(s.status!=='confirmed') return false;
     return (s.entries||[]).some(function(en){
       var k=en.pos&&en.pos[0]?en.pos[0].docNum+'_'+en.pos[0].itemCode:'';
-      var ov=k?(STATE.poOverrides[k]||{}):{};
-      return ov.confDate&&ov.confDate<today_iso;
+      var cc=k?_poConfData(k):{};
+      return cc.confDate&&cc.confDate<today_iso;
     });
   }).map(function(s){
     return {supplier:s.supName,tgl_konfirmasi:s.date,items:s.items||''};
@@ -3718,9 +3732,6 @@ function _restoreSheetUrls() {
   if(badge) badge.style.display = localStorage.getItem('mrp_source')==='mps' ? 'block' : 'none';
 }
 // ─── PERF UTILS ──────────────────────────────────────────────────────────────
-function debounce(fn, ms) {
-  var t; return function(){ clearTimeout(t); t = setTimeout(fn, ms||120); };
-}
 var _rpPending = false;
 function renderProjectionRAF() {
   if(!_rpPending){ _rpPending=true; requestAnimationFrame(function(){ _rpPending=false; renderProjection(); }); }
@@ -4737,8 +4748,8 @@ function exportPOExcel() {
       p.docNum, p.supplierName||'', p.itemCode||'', p.itemName||'', p.site||'',
       p.openQty||0, p.uom||'', p.prReqDate||'',
       ovr.date ? ovr.date.split('-').reverse().join('/') : '',
-      ovr.confQty||'',
-      ovr.confDate ? (function(s){var p=s.split('-');return p[2]+'-'+p[1]+'-'+p[0];})(ovr.confDate) : '',
+      (_poConfData(String(p.docNum)+'_'+p.itemCode).confQty)||'',
+      (function(cd){return cd?(function(s){var pp=s.split('-');return pp[2]+'-'+pp[1]+'-'+pp[0];})(cd):'';})(_poConfData(String(p.docNum)+'_'+p.itemCode).confDate),
       ovr.notes||'', uddDisp
     ];
   });
@@ -4793,8 +4804,8 @@ function _doExportPOGSheet() {
       p.docNum, p.supplierName||'', p.itemCode||'', p.itemName||'', p.site||'',
       p.openQty||0, p.uom||'', p.prReqDate||'',
       ovr.date ? ovr.date.split('-').reverse().join('/') : '',
-      ovr.confQty||'',
-      ovr.confDate ? (function(s){var p=s.split('-');return p[2]+'-'+p[1]+'-'+p[0];})(ovr.confDate) : '',
+      (_poConfData(String(p.docNum)+'_'+p.itemCode).confQty)||'',
+      (function(cd){return cd?(function(s){var pp=s.split('-');return pp[2]+'-'+pp[1]+'-'+pp[0];})(cd):'';})(_poConfData(String(p.docNum)+'_'+p.itemCode).confDate),
       ovr.notes||'', uddDisp
     ];
   });
@@ -4836,8 +4847,9 @@ function renderPO() {
     if(reqFilter === 'has' && !ovr.date && !p._reqDate) return false;
     if(reqFilter === 'none' && (ovr.date || p._reqDate)) return false;
     if(reqFilter === 'manual' && !ovr.isManual) return false;
-    if(confFilter === 'confirmed' && !ovr.confDate) return false;
-    if(confFilter === 'unconfirmed' && ovr.confDate) return false;
+    var _ccF = _poConfData(key);
+    if(confFilter === 'confirmed' && !_ccF.confDate) return false;
+    if(confFilter === 'unconfirmed' && _ccF.confDate) return false;
     if(hfDoc   && !String(p.docNum).toLowerCase().includes(hfDoc)) return false;
     if(hfSup   && !(p.supplierName||'').toLowerCase().includes(hfSup)) return false;
     if(hfCode  && !(p.itemCode||'').toLowerCase().includes(hfCode)) return false;
@@ -4845,7 +4857,7 @@ function renderPO() {
     if(hfSite  && !(p.site||'').toLowerCase().includes(hfSite)) return false;
     if(_reqDates.length > 0 && _reqDates.indexOf(ovr.date||'') < 0) return false;
     if(!_reqDates.length && hfReq && !(ovr.date||'').includes(hfReq)) return false;
-    if(hfConf  && !(ovr.confDate||'').includes(hfConf)) return false;
+    if(hfConf  && !((_poConfData(key).confDate)||'').includes(hfConf)) return false;
     if(hfNotes && !(ovr.notes||'').toLowerCase().includes(hfNotes)) return false;
     return true;
   });
@@ -5061,9 +5073,9 @@ function updateProjComment(key) {
     var u2 = k.indexOf('_');
     if(u2 < 0 || k.slice(u2+1) !== itemCode) return;
     if(!_activePOKeys2[k]) return; // PO sudah datang — skip
-    var ovr = STATE.poOverrides[k];
-    if(ovr && ovr.confQty) totalQty += parseFloat(ovr.confQty)||0;
-    if(ovr && ovr.confDate && confDates.indexOf(ovr.confDate) < 0) confDates.push(ovr.confDate);
+    var _cc5b = _poConfData(k);
+    if(_cc5b.confQty) totalQty += parseFloat(_cc5b.confQty)||0;
+    if(_cc5b.confDate && confDates.indexOf(_cc5b.confDate) < 0) confDates.push(_cc5b.confDate);
   });
   if(totalQty > 0 || confDates.length > 0) {
     confDates.sort();
@@ -5071,7 +5083,7 @@ function updateProjComment(key) {
     var autoComment = (dtStr||'') + (totalQty > 0 ? ' Qty:' + n_id(Math.round(totalQty)) : '');
     proj.comment = autoComment;
     STATE.projComments[itemCode] = { text: autoComment, _manual: false };
-    try { localStorage.setItem('proj_comments', JSON.stringify(STATE.projComments)); } catch(e) {}
+    try { localStorage.setItem('proj_comments', JSON.stringify(STATE.projComments)); cloudSave('proj_comments', JSON.stringify(STATE.projComments)); } catch(e) {}
   }
 }
 
@@ -5093,8 +5105,9 @@ function setPOField(el, field) {
     var itemCode = key.split('_')[1];
     var proj = STATE.projectionData.find(function(p){return p.productCode === itemCode});
     if(proj) {
-      var qty = STATE.poOverrides[key].confQty || '';
-      var dt = STATE.poOverrides[key].confDate || '';
+      var _cc7 = _poConfData(key);
+      var qty = _cc7.confQty || '';
+      var dt = _cc7.confDate || '';
       if(qty || dt) proj.comment = 'KONFIRM' + (qty?' QTY:'+n_id(qty):'') + (dt?' TGL:'+dt.split('-').reverse().join('/'):'');
     }
   }
@@ -5292,15 +5305,21 @@ function resetPOOverrides() {
   // Clear all date/confirm fields but keep notes
   Object.keys(STATE.poOverrides).forEach(function(key) {
     var ovr = STATE.poOverrides[key];
-    ovr.date     = '';
-    ovr.isManual = false;
-    ovr.isAuto   = false;
-    ovr.confQty  = '';
-    ovr.confDate = '';
-    ovr.confUpd  = '';
+    ovr.date       = '';
+    ovr.isManual   = false;
+    ovr.isAuto     = false;
+    ovr.isSchedManual = false;
+    ovr.confQty    = '';
+    ovr.confDate   = '';
+    ovr.confUpd    = '';
     ovr.confSource = '';
   });
+  // Juga bersihkan po_confirmations (tempat penyimpanan konfirmasi yang baru)
+  STATE.poConfirmations = {};
   localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
+  localStorage.setItem('po_confirmations', '{}');
+  cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
+  cloudSave('po_confirmations', '{}');
   // Clear auto-generated comments (keep manual ones)
   if(STATE.projComments) {
     Object.keys(STATE.projComments).forEach(function(code){
@@ -5308,7 +5327,7 @@ function resetPOOverrides() {
       if(c && !c._manual) delete STATE.projComments[code];
     });
   }
-  try { localStorage.setItem('proj_comments', JSON.stringify(STATE.projComments || {})); } catch(e) {}
+  try { localStorage.setItem('proj_comments', JSON.stringify(STATE.projComments || {})); cloudSave('proj_comments', JSON.stringify(STATE.projComments || {})); } catch(e) {}
   renderPO();
   toast('Semua tanggal request dan konfirmasi direset ✓', 'ok');
 }
@@ -6733,10 +6752,11 @@ function renderDashboard() {
       if(g.baseRef) grpoReceivedKeys[String(g.baseRef)+'_'+g.itemCode] = true;
     });
     var overdue = [];
-    Object.keys(STATE.poOverrides).forEach(function(key){
-      var ovr = STATE.poOverrides[key];
-      if(!ovr.confDate) return;
-      if(ovr.confDate >= todayISO2) return;
+    _allPOConfKeys().forEach(function(key){
+      var _ccO = _poConfData(key);
+      if(!_ccO.confDate) return;
+      if(_ccO.confDate >= todayISO2) return;
+      var ovr = (STATE.poOverrides[key]||{});
       var parts = key.split('_');
       var docNum = parts[0];
       var itemCode = parts.slice(1).join('_');
@@ -6782,7 +6802,7 @@ function renderDashboard() {
         itemName: _ovName,
         realName: _ovRealName,
         supplier: po ? po.supplierName : '—',
-        confDate: ovr.confDate, confQty: ovr.confQty || 0
+        confDate: _ccO.confDate, confQty: _ccO.confQty || 0
       });
     });
     // Sort by confDate ascending (oldest first)
@@ -6911,6 +6931,20 @@ function _isAutoComment(comment) {
   // Auto-generated: "22/06/2026 Qty:50" atau "15/06/2026,22/06/2026 Qty:1.000"
   // Pattern: dimulai dengan tanggal dd/mm/yyyy dan mengandung "Qty:"
   return comment && /^\d{2}\/\d{2}\/\d{4}/.test(comment.trim()) && comment.includes('Qty:');
+}
+
+function _poConfData(key) {
+  // Konfirmasi PO: po_confirmations (utama) → po_overrides (legacy fallback)
+  var pc = (STATE.poConfirmations||{})[key] || {};
+  var ov = (STATE.poOverrides||{})[key] || {};
+  return { confDate: pc.confDate || ov.confDate || null, confQty: pc.confQty || ov.confQty || null };
+}
+function _allPOConfKeys() {
+  // Union key dari po_overrides + po_confirmations
+  var s = {};
+  Object.keys(STATE.poOverrides||{}).forEach(function(k){ s[k]=1; });
+  Object.keys(STATE.poConfirmations||{}).forEach(function(k){ s[k]=1; });
+  return Object.keys(s);
 }
 
 function _getNearestDelivery(code) {
@@ -7520,6 +7554,8 @@ function generateSchedule(typeFilter) {
   STATE.scheduleData = STATE.scheduleData.concat(newSchedule);
   localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData));
   localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
+  cloudSave('schedule', JSON.stringify(STATE.scheduleData));
+  cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
   document.getElementById('s-unconfirmed').textContent =
     STATE.scheduleData.filter(function(s){ return s.status !== 'confirmed'; }).length;
 
@@ -7887,7 +7923,9 @@ function toggleApprove(idx) {
     cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
   }
 
-  localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData)); renderSchedule();
+  localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData));
+  cloudSave('schedule', JSON.stringify(STATE.scheduleData));
+  renderSchedule();
   // Sync ke GSheet kalau approved
   if(nowApproved && e.entries) {
     var delivISO = (e.date||'').split('/').reverse().join('-');
@@ -7995,6 +8033,7 @@ function approveAll() {
   localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
   cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
   localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData));
+  cloudSave('schedule', JSON.stringify(STATE.scheduleData));
   renderSchedule();
   // Sync semua yang baru di-approve ke GSheet
   STATE.scheduleData.forEach(function(e){
@@ -8135,6 +8174,7 @@ async function sendWA() {
     if(data.status === false) throw new Error(data.reason||'Fonnte error');
     STATE.scheduleData[waQueue.idx].status = 'sent';
     localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData));
+    cloudSave('schedule', JSON.stringify(STATE.scheduleData));
     closeModal('modal-wa'); renderSchedule(); toast('WA terkirim ✓','ok');
   } catch(e) { toast('Gagal kirim WA: '+e.message,'err'); }
   finally { document.getElementById('btn-send-wa').disabled = false; document.getElementById('btn-send-wa').textContent = '📲 Kirim WA'; }
@@ -8157,7 +8197,9 @@ async function blastAll() {
     } catch(e){fail++;}
     await new Promise(function(r){setTimeout(r,1500)});
   }
-  localStorage.setItem('schedule',JSON.stringify(STATE.scheduleData)); renderSchedule();
+  localStorage.setItem('schedule',JSON.stringify(STATE.scheduleData));
+  cloudSave('schedule',JSON.stringify(STATE.scheduleData));
+  renderSchedule();
   toast('Terkirim: '+ok+' ✓'+(fail?' | Gagal: '+fail:''),ok?'ok':'err');
 }
 
@@ -8196,9 +8238,10 @@ function openFbModal(idx) {
       // reqQtyOverride = 0 artinya PO pernah di-clear dari jadwal lain → fallback ke openQty SAP
       // reqQtyOverride = undefined artinya belum pernah diubah → fallback ke openQty SAP
       var reqQty = (ovr.reqQtyOverride !== undefined && ovr.reqQtyOverride > 0) ? ovr.reqQtyOverride : origQty;
-      var confQty = ovr.confQty !== undefined ? ovr.confQty : reqQty;
+      var _ccM = _poConfData(poKey);
+      var confQty = _ccM.confQty != null ? _ccM.confQty : reqQty;
       // Auto-fill: jika belum ada confQty, isi dengan reqQty
-      if(!ovr.confQty && !ovr.confDate) confQty = reqQty;
+      if(!_ccM.confQty && !_ccM.confDate) confQty = reqQty;
       var isConf = ovr.confDate ? true : false;
       html += '<tr style="border-bottom:1px solid rgba(36,45,64,.4)">';
       var _rmName = _poName(itemCode, po.itemName);
@@ -8273,6 +8316,7 @@ function saveFeedback() {
     }
   });
   localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
+  cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
 
   var totalChks = document.querySelectorAll('#fb-items-list .fb-conf-chk').length;
   var doneChks  = document.querySelectorAll('#fb-items-list .fb-conf-chk:checked').length;
@@ -8283,6 +8327,7 @@ function saveFeedback() {
   e.confDate = dateISO || todayISO;
   e.note     = note;
   localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData));
+  cloudSave('schedule', JSON.stringify(STATE.scheduleData));
 
   // Update projection comments for confirmed items — auto-generated, persists through rebuild
   if(!STATE.projComments) STATE.projComments = {};
@@ -8329,7 +8374,7 @@ function saveFeedback() {
       }
     }
   });
-  try { localStorage.setItem('proj_comments', JSON.stringify(STATE.projComments)); } catch(ex) {}
+  try { localStorage.setItem('proj_comments', JSON.stringify(STATE.projComments)); cloudSave('proj_comments', JSON.stringify(STATE.projComments)); } catch(ex) {}
 
   closeModal('modal-fb');
   renderSchedule();
@@ -8366,9 +8411,9 @@ function clearManualComment(code) {
       var us = k.indexOf('_');
       if(us < 0 || k.slice(us+1) !== code) return;
       if(!_activePOKeys3[k]) return; // PO sudah datang — skip
-      var ovr = STATE.poOverrides[k];
-      if(ovr && ovr.confQty) totalQty += parseFloat(ovr.confQty)||0;
-      if(ovr && ovr.confDate && confDates.indexOf(ovr.confDate) < 0) confDates.push(ovr.confDate);
+      var _cc5 = _poConfData(k);
+      if(_cc5.confQty) totalQty += parseFloat(_cc5.confQty)||0;
+      if(_cc5.confDate && confDates.indexOf(_cc5.confDate) < 0) confDates.push(_cc5.confDate);
     });
     var autoComment = '';
     if(totalQty > 0 || confDates.length > 0) {
@@ -8379,7 +8424,7 @@ function clearManualComment(code) {
     STATE.projComments[code] = autoComment ? { text: autoComment, _manual: false } : null;
     var p = STATE.projectionData.find(function(x){ return x.productCode === code; });
     if(p) p.comment = autoComment;
-    try { localStorage.setItem('proj_comments', JSON.stringify(STATE.projComments)); } catch(e) {}
+    try { localStorage.setItem('proj_comments', JSON.stringify(STATE.projComments)); cloudSave('proj_comments', JSON.stringify(STATE.projComments)); } catch(e) {}
   }
   renderProjection();
 }
@@ -8468,6 +8513,7 @@ function saveSup() {
   var obj = {name:name,waTarget:document.getElementById('sup-w').value.trim(),picName:document.getElementById('sup-p').value.trim(),fyi:document.getElementById('sup-f').value.trim()};
   if(editSupIdx >= 0) STATE.supplierData[editSupIdx] = obj; else STATE.supplierData.push(obj);
   localStorage.setItem('suppliers',JSON.stringify(STATE.supplierData));
+  cloudSave('suppliers', JSON.stringify(STATE.supplierData));
   closeModal('modal-sup'); toast('Supplier disimpan ✓','ok');
 }
 
@@ -8653,9 +8699,6 @@ function exportConfigHTML() {
 }
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
-function _perfFmtDate(d) {
-  return String(d.getDate()).padStart(2,'0') + '/' + String(d.getMonth()+1).padStart(2,'0') + '/' + d.getFullYear();
-}
 function fmtDateID(d) {
   return String(d.getDate()).padStart(2,'0') + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + d.getFullYear();
 }
@@ -8770,6 +8813,8 @@ function freezeStockToday() {
     STATE.stockHistory[today][ic] = { btg: STATE.stockData[ic].btg, sng: STATE.stockData[ic].sng };
   });
   localStorage.setItem('stock_history', JSON.stringify(STATE.stockHistory));
+  cloudSave('stock_history', JSON.stringify(STATE.stockHistory));
+  cloudSave('stock_history', JSON.stringify(STATE.stockHistory));
   toast('Stock di-freeze: ' + today + ' (' + Object.keys(STATE.stockData).length + ' item) ✓','ok');
   renderStockDaily();
 }
@@ -8865,6 +8910,7 @@ function deleteStockSnapshot(date) {
   if(!confirm('Hapus snapshot ' + date + '?')) return;
   delete STATE.stockHistory[date];
   localStorage.setItem('stock_history', JSON.stringify(STATE.stockHistory));
+  cloudSave('stock_history', JSON.stringify(STATE.stockHistory));
   renderStockDaily();
   toast('Snapshot ' + date + ' dihapus','ok');
 }
@@ -8874,6 +8920,7 @@ function clearAllStockHistory() {
   if(!confirm('Hapus SEMUA stock history? Tidak bisa dibatalkan.')) return;
   STATE.stockHistory = {};
   localStorage.setItem('stock_history', '{}');
+  cloudSave('stock_history', '{}');
   renderStockDaily();
   toast('Semua stock history dihapus','ok');
 }
