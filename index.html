@@ -5960,24 +5960,11 @@ function _doBuildProjection() {
     if(doiFC < 14) category = 'UNDER';
     else if(doiFC > 30) category = 'OVER';
 
-    // Actual Usage bulan ini:
-    // = Stock awal bulan + GRPO 1-today - Stock live SAP hari ini
-    // Balance: kalau stock turun (pemakaian) → actual usage naik
-    // Fallback: kalau tidak ada stock awal bulan → pakai diff history kemarin
+    // Actual Usage bulan ini: dari matcomMonthly (Material Consumption SAP)
     var actualUsageDaily = 0;
-    // Cari stock awal bulan dari stockHistory
-    var curMonthPrefix = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
-    var histKeysM = Object.keys(STATE.stockHistory||{}).filter(function(d){ return d.slice(0,7)===curMonthPrefix; }).sort();
-    var stockAwal = histKeysM.length > 0 ? ((STATE.stockHistory[histKeysM[0]]||{})[code] || undefined) : undefined;
-    if(stockAwal !== undefined) {
-      var stockAwalTotal = (stockAwal.btg || 0) + (stockAwal.sng || 0);
-      // totalIncoming sudah berisi semua GRPO bulan ini (1-today)
-      var rawUsage = stockAwalTotal + totalIncoming - totalStock;
-      actualUsageDaily = Math.max(0, rawUsage);
-    } else if(prevSnap && prevSnap[code]) {
-      // Fallback: pakai diff dari stock freeze kemarin
-      var prevTotal = (prevSnap[code].btg || 0) + (prevSnap[code].sng || 0);
-      actualUsageDaily = Math.max(0, prevTotal - totalStock);
+    var _curMo = now.getMonth() + 1; // bulan sekarang (1-12)
+    if(STATE.matcomMonthly && STATE.matcomMonthly[code]) {
+      actualUsageDaily = STATE.matcomMonthly[code][_curMo] || 0;
     }
     if(doiFC < 14) category = 'UNDER';
     else if(doiFC > 30) category = 'OVER';
@@ -7169,20 +7156,49 @@ function generateSchedule(typeFilter) {
     grpoByItem[g.itemCode] = (grpoByItem[g.itemCode]||0) + (parseFloat(g.qty)||0);
   });
 
-  // confQtyByItem hanya dari PO yang masih aktif di list PO
+  // confQtyByItem: dari po_confirmations (prioritas) + po_overrides (legacy)
   var confQtyByItem = {};
   Object.keys(STATE.poOverrides || {}).forEach(function(key){
-    // Skip kalau PO sudah tidak ada di poData
     if(!activePOKeys[key]) return;
     var ovr = STATE.poOverrides[key];
-    if(!ovr || !ovr.confDate || !ovr.confQty) return;
+    var pcon = (STATE.poConfirmations||{})[key] || {};
+    var cd = pcon.confDate || ovr.confDate;
+    var cq = pcon.confQty  || ovr.confQty;
+    if(!cd || !cq) return;
     var itemCode = key.slice(key.indexOf('_') + 1);
     if(!itemCode) return;
-    confQtyByItem[itemCode] = (confQtyByItem[itemCode] || 0) + (parseFloat(ovr.confQty) || 0);
+    confQtyByItem[itemCode] = (confQtyByItem[itemCode] || 0) + (parseFloat(cq) || 0);
+  });
+  // Tambah qty dari kartu jadwal aktif (confirmed, tanggal belum lewat)
+  var scheduledQtyByItem = {};
+  STATE.scheduleData.forEach(function(s){
+    var _cardISO = s.delivDateISO || s.delivDate || s.date || '';
+    var _cardDate = null;
+    if(_cardISO) {
+      var _cp = _cardISO.indexOf('/') >= 0 ? _cardISO.split('/') : _cardISO.split('-');
+      if(_cp[0] && _cp[0].length === 4) _cardDate = new Date(parseInt(_cp[0]),parseInt(_cp[1])-1,parseInt(_cp[2]));
+      else if(_cp.length===3) _cardDate = new Date(parseInt(_cp[2]),parseInt(_cp[1])-1,parseInt(_cp[0]));
+    }
+    if(_cardDate && _cardDate < _today) return; // kartu sudah lewat
+    if(s.status !== 'confirmed') return;        // hanya konfirmasi
+    (s.entries||[]).forEach(function(en){
+      var code = en.item && en.item.productCode;
+      if(!code) return;
+      (en.pos||[]).forEach(function(po){
+        var pk = po.docNum + '_' + po.itemCode;
+        var ovr = (STATE.poOverrides||{})[pk] || {};
+        // Pakai reqQtyOverride (qty aktual di kartu) jika ada, fallback ke openQty
+        var qty = (ovr.reqQtyOverride != null && ovr.reqQtyOverride > 0)
+          ? ovr.reqQtyOverride
+          : (po.openQty || 0);
+        scheduledQtyByItem[code] = (scheduledQtyByItem[code]||0) + qty;
+      });
+    });
   });
   // Kurangi dengan yang sudah datang (GRPO)
   Object.keys(grpoByItem).forEach(function(ic){
     if(confQtyByItem[ic]) confQtyByItem[ic] = Math.max(0, confQtyByItem[ic] - grpoByItem[ic]);
+    if(scheduledQtyByItem[ic]) scheduledQtyByItem[ic] = Math.max(0, scheduledQtyByItem[ic] - grpoByItem[ic]);
   });
 
   var urgentItems = STATE.projectionData.filter(function(p){
@@ -7195,7 +7211,7 @@ function generateSchedule(typeFilter) {
     }
     var stockTotal = (p.stockBTG || 0) + (p.stockSNG || 0);
     var needed = Math.max(0, (p.max3MRP || 0) - stockTotal);
-    var confirmed = confQtyByItem[p.productCode] || 0;
+    var confirmed = (confQtyByItem[p.productCode] || 0) + (scheduledQtyByItem[p.productCode] || 0);
     if(needed > 0 && confirmed >= needed) return false;
     return p.coverageDate <= coverageCutoff;
   });
@@ -7375,7 +7391,24 @@ function generateSchedule(typeFilter) {
   // Cek by itemCode dan by poKey agar tidak dobel
   var scheduledItemCodes = {};
   var scheduledPOKeys = {};
+  var _today = new Date(); _today.setHours(0,0,0,0);
   STATE.scheduleData.forEach(function(s){
+    // Parse tanggal kartu — format bisa dd/mm/yyyy atau yyyy-mm-dd
+    var _cardISO = s.delivDateISO || s.delivDate || s.date || '';
+    var _cardDate = null;
+    if(_cardISO) {
+      var _cp = _cardISO.split(_cardISO.indexOf('-') > 2 ? '/' : '-');
+      if(!_cp || _cp.length < 3) _cp = _cardISO.split('/');
+      if(_cp[0] && _cp[0].length === 4) {
+        _cardDate = new Date(parseInt(_cp[0]), parseInt(_cp[1])-1, parseInt(_cp[2]));
+      } else if(_cp.length === 3) {
+        _cardDate = new Date(parseInt(_cp[2]), parseInt(_cp[1])-1, parseInt(_cp[0]));
+      }
+    }
+    // Kartu yang tanggal kirimnya sudah lewat dari hari ini:
+    // Kalau item sudah datang → kartu sudah otomatis dihapus (tidak ada di scheduleData)
+    // Kalau kartu masih ada tapi tanggal lewat → item belum datang/delay → boleh di-generate ulang
+    if(_cardDate && _cardDate < _today) return;
     (s.entries||[]).forEach(function(en){
       if(en.item && en.item.productCode) scheduledItemCodes[en.item.productCode] = true;
       (en.pos||[]).forEach(function(po){
@@ -7399,8 +7432,8 @@ function generateSchedule(typeFilter) {
     var itemSummaryParts = [], selectedPOs = [], selectedEntries = [];
     sup.entries.forEach(function(e){
       var item = e.item;
-      // Skip item yang sudah ada di kartu jadwal aktif
-      if(scheduledItemCodes[item.productCode]) return;
+      // Tidak skip item hanya karena ada di kartu jadwal — mungkin masih perlu PO tambahan
+      // Yang di-skip hanya PO yang sudah ada di kartu (cek via scheduledPOKeys di bawah)
       var sortedPOs = (e.pos||[]).slice().sort(function(a,b){
         var da = _dateToSortISO(a.prReqDate), db = _dateToSortISO(b.prReqDate);
         if(da !== db) return da.localeCompare(db);
@@ -9514,6 +9547,7 @@ function _appInit() {
   try {
   STATE.mrpData          = JSON.parse(localStorage.getItem('mrp_data')       || 'null');
   STATE.matcomData       = JSON.parse(localStorage.getItem('matcom_data')     || 'null');
+  STATE.matcomMonthly    = JSON.parse(localStorage.getItem('matcom_monthly')  || 'null');
   STATE.realNameData     = JSON.parse(localStorage.getItem('realname_data')   || '{}');
   STATE.masterData       = JSON.parse(localStorage.getItem('master_data')     || 'null');
   STATE.projectionHistory= JSON.parse(localStorage.getItem('proj_history')    || '{}');
