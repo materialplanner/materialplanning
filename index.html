@@ -4654,81 +4654,67 @@ function generateUpdateDelDate() {
     var fc; try{fc=_calcForecast(code,ospoIdx);}catch(e){return;}
     // Gunakan fc.stockFc — sesuai nilai yg ditampilkan di forecast UI (Forecast view)
     // fc.stock menggunakan pull-forward algorithm → nilai berbeda dari yang user lihat
-    var fcStock = fc.stockFc || fc.stock || new Array(FC_MONTHS.length).fill(0);
     var fcReq   = fc.forecast || new Array(FC_MONTHS.length).fill(0);
-    var daysArr=FC_DAYS||FC_MONTHS.map(function(){return 30;});
-    var sd=(STATE.stockData||{})[code]||{};
-    var sohTotal=((sd.btg||0)+(sd.sng||0))*gF;
+    var fcOspr  = fc.ospr_base || new Array(FC_MONTHS.length).fill(0);
+    var daysArr = FC_DAYS || FC_MONTHS.map(function(){return 30;});
+    var sd = (STATE.stockData||{})[code]||{};
+    var sohTotal = ((sd.btg||0)+(sd.sng||0))*gF;
 
-    // Bulan forecast dari prReqDate (sama dg _buildOSPOIndex)
-    // Past dates → bulan berjalan (idx 0), out of range → -1 (2027)
-    function _mIdx(p){
-      var parts=(p.prReqDate||'').split('/');
-      if(parts.length!==3)return 0;
-      var mo=parseInt(parts[1]),yr=parseInt(parts[2]);
-      if(yr>curYear)return -1;
-      if(yr<curYear||(yr===curYear&&mo<curMon))return 0;
-      var idx=FC_MONTH_NUMS.indexOf(mo);
-      return idx>=0?idx:-1;
+    // Build stockSim: SOH + OSPR - demand (tanpa OSPO)
+    // Basis yang konsisten dengan forecast: tiap PO di-assign mandiri tanpa overlap
+    var stockSim = new Array(FC_MONTHS.length).fill(0);
+    var _prevSim = sohTotal;
+    for(var _si = 0; _si < FC_MONTHS.length; _si++) {
+      _prevSim = _prevSim + (fcOspr[_si]||0) - (fcReq[_si]||0);
+      stockSim[_si] = _prevSim;
     }
 
-    // monthAssignedQty: akumulasi PO yg sudah di-assign ke tiap bulan dalam pass ini
-    // Dipakai untuk FIFO dalam bulan yg sama
-    var monthAssignedQty=new Array(FC_MONTHS.length).fill(0);
-
     pos.forEach(function(p){
-      var key=p.docNum+'_'+p.itemCode;
-      var poQty=(p.openQty||0)*gF;
+      var key = p.docNum+'_'+p.itemCode;
+      var poQty = (p.openQty||0)*gF;
 
-      // Priority 1: sudah ada Tgl Request Kirim → ikut itu
-      if(STATE.poOverrides[key]&&STATE.poOverrides[key].date){
-        var prM0=_mIdx(p);
-        if(prM0>=0) monthAssignedQty[prM0]+=poQty; // tetap update tracker
-        newUpdateDelDate[key]=STATE.poOverrides[key].date;
+      // Priority 1: sudah ada Tgl Request Kirim → ikut, update stockSim
+      if(STATE.poOverrides[key] && STATE.poOverrides[key].date){
+        var prM0 = _mIdx(p);
+        if(prM0 >= 0){
+          for(var _u0=prM0; _u0<FC_MONTHS.length; _u0++) stockSim[_u0] += poQty;
+        }
+        newUpdateDelDate[key] = STATE.poOverrides[key].date;
         return;
       }
 
-      var prMIdx=_mIdx(p);
-      if(prMIdx<0){ newUpdateDelDate[key]='2027-01-01'; return; }
+      var prMIdx = _mIdx(p);
+      if(prMIdx < 0){ newUpdateDelDate[key] = '2027-01-01'; return; }
 
-      var assignedISO=null, assignedMIdx=-1;
+      var assignedISO = null, assignedMIdx = -1;
 
-      for(var i=prMIdx; i<FC_MONTHS.length; i++){
-        var req=fcReq[i]||0;
-        var days_i=daysArr[i]||30;
-        var dailyReq=req>0?req/days_i:0;
-        var mn=FC_MONTH_NUMS[i];
+      for(var i = prMIdx; i < FC_MONTHS.length; i++){
+        var req = fcReq[i] || 0;
+        var days_i = daysArr[i] || 30;
+        var dailyReq = req > 0 ? req/days_i : 0;
+        var mn = FC_MONTH_NUMS[i];
+        // Base = stockSim bulan lalu (sudah termasuk PO sebelumnya yg di-assign)
+        var startStock = i === 0 ? sohTotal : (stockSim[i-1] || 0);
 
-        // startStock untuk bulan i:
-        // - bulan prMIdx (belum defer): fcStock[i-1] + PO lain yg sudah di-assign ke bulan ini
-        // - bulan > prMIdx (defer): fcStock[i-1] - poQty + PO lain
-        //   (fcStock[i-1] include PO ini di bulan prMIdx, tapi PO belum datang → kurangi)
-        var base=i===0?sohTotal:(fcStock[i-1]||0);
-        var startStock=i===prMIdx
-          ? base + monthAssignedQty[i]
-          : base - poQty + monthAssignedQty[i];
+        if(dailyReq <= 0) continue;
+        var D = startStock / dailyReq - targetDOI;
 
-        if(dailyReq<=0) continue; // bulan tanpa kebutuhan, terus defer
-
-        var D=startStock/dailyReq-targetDOI;
-
-        if(D<=0){
-          // Sudah di bawah target di awal bulan
-          var c=new Date(curYear,mn-1,1);
-          assignedISO=c<=today?todayISO:curYear+'-'+String(mn).padStart(2,'0')+'-01';
-          assignedMIdx=i; break;
-        } else if(D<=days_i){
-          // Jatuh di dalam bulan ini
-          var dayN=Math.min(Math.ceil(D),days_i);
-          var c=new Date(curYear,mn-1,dayN);
-          assignedISO=c<=today?todayISO:curYear+'-'+String(mn).padStart(2,'0')+'-'+String(dayN).padStart(2,'0');
-          assignedMIdx=i; break;
+        if(D <= 0){
+          var c = new Date(curYear,mn-1,1);
+          assignedISO = c<=today ? todayISO : curYear+'-'+String(mn).padStart(2,'0')+'-01';
+          assignedMIdx = i; break;
+        } else if(D <= days_i){
+          var dayN = Math.min(Math.ceil(D), days_i);
+          var c = new Date(curYear,mn-1,dayN);
+          assignedISO = c<=today ? todayISO : curYear+'-'+String(mn).padStart(2,'0')+'-'+String(dayN).padStart(2,'0');
+          assignedMIdx = i; break;
         }
-        // D > days_i: stock masih aman sepanjang bulan ini → defer ke bulan berikutnya
       }
 
-      newUpdateDelDate[key]=assignedISO||'2027-01-01';
-      if(assignedMIdx>=0) monthAssignedQty[assignedMIdx]+=poQty;
+      newUpdateDelDate[key] = assignedISO || '2027-01-01';
+      if(assignedMIdx >= 0){
+        for(var _u=assignedMIdx; _u<FC_MONTHS.length; _u++) stockSim[_u] += poQty;
+      }
     });
   });
 
