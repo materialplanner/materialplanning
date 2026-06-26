@@ -4308,13 +4308,17 @@ function _autoRemoveDeliveredCards() {
   });
   if(!Object.keys(grpoDocNums).length) return;
 
+  // PO yang masih open di SAP (ada sisa qty) — partial delivery, kartu belum boleh dihapus
+  var openPONums = {};
+  (STATE.poData||[]).forEach(function(po){
+    if((po.openQty||0) > 0) openPONums[String(po.docNum)] = true;
+  });
+
   var removed = [];
 
   STATE.scheduleData = STATE.scheduleData.filter(function(card) {
     if(card.status !== 'confirmed') return true;
 
-    // Card has entries array with PO details
-    // entries = [{item, pos:[{docNum, itemCode, ...}]}]
     var entries = card.entries || [];
     var allPONums = [];
     entries.forEach(function(e) {
@@ -4323,12 +4327,17 @@ function _autoRemoveDeliveredCards() {
         if(dn) allPONums.push(dn);
       });
     });
-    var allDelivered = allPONums.length > 0 && allPONums.every(function(dn){ return grpoDocNums[dn]; });
+    // Hapus hanya kalau GRPO ada DAN PO sudah tidak ada sisa di SAP (bukan partial)
+    var allDelivered = allPONums.length > 0 && allPONums.every(function(dn){
+      return grpoDocNums[dn] && !openPONums[dn];
+    });
 
-    // Also check via pos string (fallback)
+    // Fallback via pos string
     if(!allDelivered && card.pos) {
       var poNums = card.pos.split(',').map(function(s){ return s.trim(); });
-      allDelivered = poNums.length > 0 && poNums.every(function(dn){ return dn && grpoDocNums[dn]; });
+      allDelivered = poNums.length > 0 && poNums.every(function(dn){
+        return dn && grpoDocNums[dn] && !openPONums[dn];
+      });
     }
 
     if(!allDelivered) return true;
@@ -7988,9 +7997,14 @@ function saveSchedQty(input) {
 
 // Get total request qty for a schedule entry (sum of distributed PO overrides)
 function _getEntryReqQty(en) {
-  // Selalu pakai openQty dari SAP — reqQtyOverride hanya untuk input konfirmasi
+  // Pakai reqQtyOverride kalau user sudah set manual, fallback ke openQty dari SAP
   if(!en.pos || !en.pos.length) return 0;
-  return en.pos.reduce(function(s,po){ return s + (po.openQty||0); }, 0);
+  return en.pos.reduce(function(s,po){
+    var pk  = po.docNum + '_' + po.itemCode;
+    var ovr = (STATE.poOverrides||{})[pk] || {};
+    var qty = (ovr.reqQtyOverride != null) ? ovr.reqQtyOverride : (po.openQty||0);
+    return s + qty;
+  }, 0);
 }
 function toggleApprove(idx) {
   var e = STATE.scheduleData[idx];
