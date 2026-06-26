@@ -4655,19 +4655,23 @@ function generateUpdateDelDate() {
     var ospoEff = fc.ospo || new Array(FC_MONTHS.length).fill(0);
 
     // Build placement list: bulan-bulan yang ada OSPO (setelah pull-forward), urut ascending
+    var fcStock = fc.stockFc || fc.stock || [];
+    var fcReq2  = fc.forecast || [];
+    var daysArr = FC_DAYS || FC_MONTHS.map(function(){ return 30; });
+    var sohNow  = fc.soh || 0;
+
     var placements = [];
     ospoEff.forEach(function(qty, idx){
       if(qty > 0) placements.push({ idx: idx, remaining: qty });
     });
-    // placements sudah dalam urutan bulan ascending (forEach preserves order)
 
-    var pPtr = 0; // pointer ke slot placement berikutnya
+    var pPtr = 0;
 
     pos.forEach(function(p){
       var key = p.docNum+'_'+p.itemCode;
       var poQty = p.openQty || 0;
 
-      // Priority 1: sudah ada Tgl Request Kirim → pakai itu, konsumsi satu slot
+      // Priority 1: sudah ada Tgl Request Kirim manual → pakai itu
       if(STATE.poOverrides[key] && STATE.poOverrides[key].date){
         newUpdateDelDate[key] = STATE.poOverrides[key].date;
         if(pPtr < placements.length){
@@ -4677,19 +4681,44 @@ function generateUpdateDelDate() {
         return;
       }
 
-      // Advance pointer jika slot saat ini sudah habis
       while(pPtr < placements.length && placements[pPtr].remaining <= 0) pPtr++;
 
       if(pPtr < placements.length){
         var pl = placements[pPtr];
-        var mn = FC_MONTH_NUMS[pl.idx];
-        var iso = curYear+'-'+String(mn).padStart(2,'0')+'-01';
-        if(iso <= todayISO) iso = todayISO;
-        newUpdateDelDate[key] = iso;
+        var m  = pl.idx;
+        var mn = FC_MONTH_NUMS[m];
+        var days_m   = daysArr[m] || 30;
+        var req_m    = fcReq2[m]  || 0;
+        var dailyReq = req_m > 0 ? req_m / days_m : 0;
+
+        // Stock awal bulan m (akhir bulan m-1), SEBELUM PO bulan m masuk
+        // = fc.stockFc[m-1] (sudah termasuk OSPO bulan sebelumnya, tapi belum bulan m)
+        var startSt = m === 0 ? sohNow : (fcStock[m-1] || 0);
+
+        var assignedISO;
+        if(dailyReq <= 0){
+          // Tidak ada kebutuhan di bulan ini → pakai tgl 1
+          assignedISO = curYear+'-'+String(mn).padStart(2,'0')+'-01';
+        } else {
+          // D = hari ke berapa stock turun ke bawah targetDOI (formula sama dgn _calcForecast)
+          var targetStock = dailyReq * targetDOI;
+          var D = (startSt - targetStock) / dailyReq;
+          var dayN;
+          if(D <= 0){
+            dayN = 1; // langsung butuh di awal bulan
+          } else {
+            dayN = Math.min(Math.ceil(D), days_m);
+          }
+          var dt = new Date(curYear, mn-1, dayN);
+          assignedISO = dt <= today
+            ? todayISO
+            : curYear+'-'+String(mn).padStart(2,'0')+'-'+String(dayN).padStart(2,'0');
+        }
+
+        newUpdateDelDate[key] = assignedISO;
         pl.remaining -= poQty;
         if(pl.remaining <= 0) pPtr++;
       } else {
-        // Tidak ada slot di forecast → PO ini di luar horizon atau tidak dibutuhkan
         newUpdateDelDate[key] = '2027-01-01';
       }
     });
