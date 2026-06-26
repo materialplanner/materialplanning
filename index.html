@@ -4658,10 +4658,11 @@ function generateUpdateDelDate() {
     var targetDOI=(_fcGetDOIForItem?_fcGetDOIForItem(code):30)||30;
     var master=(STATE.masterData||{})[code]||{};
     var uomRaw=(master.uom||'').toLowerCase();
-    // Baca langsung fc.ospo (hasil pull-forward forecast) — tidak hitung sendiri
-    // Ini memastikan UpdateDelDate konsisten 100% dengan tampilan forecast
+    // Gunakan fc.forecastOspo (distribusi pool optimal = tampilan ADJUSTED OSPO di forecast)
+    // BUKAN fc.ospo (pull-forward): fc.ospo menaruh semua PO past-due ke bulan pertama (JUN)
+    // sehingga hasilnya backdate. fc.forecastOspo konsisten dengan apa yang user lihat di UI.
     var fc; try{fc=_calcForecast(code,ospoIdx);}catch(e){return;}
-    var ospoEff = fc.ospo || new Array(FC_MONTHS.length).fill(0);
+    var ospoEff = fc.forecastOspo || fc.ospo || new Array(FC_MONTHS.length).fill(0);
 
     // Build placement list: bulan-bulan yang ada OSPO (setelah pull-forward), urut ascending
     var fcStock = fc.stockFc || fc.stock || [];
@@ -8073,6 +8074,16 @@ function removeSchedItem(schedIdx, entryIdx) {
   } else {
     var itemName = removed.item ? _dispName(removed.item) : 'item';
     if(!confirm('Hapus ' + itemName + ' dari jadwal ' + e.supName + '?')) return;
+    // Bersihkan reqQtyOverride PO milik entry ini agar generate berikutnya tidak baca stale 0
+    (removed.pos||[]).forEach(function(po){
+      var pk = po.docNum + '_' + po.itemCode;
+      var ovr = STATE.poOverrides[pk];
+      if(!ovr || ovr.isManual) return;
+      delete ovr.reqQtyOverride;
+      delete ovr.date;
+      delete ovr.isAuto;
+      if(!Object.keys(ovr).length) delete STATE.poOverrides[pk];
+    });
     e.entries.splice(entryIdx, 1);
     // Update summary
     e.items = e.entries.map(function(en){
@@ -8172,6 +8183,7 @@ function removeSchedule(idx) {
         delete ovr.confQty;
         delete ovr.confDate;
         delete ovr.confUpdByGRPO;
+        delete ovr.reqQtyOverride; // bersihkan agar generate berikutnya tidak baca stale 0
         // Kalau sudah kosong semua, hapus key-nya
         if(!Object.keys(ovr).length) delete STATE.poOverrides[key];
       });
