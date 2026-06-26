@@ -4677,6 +4677,23 @@ function generateUpdateDelDate() {
 
     var pPtr = 0;
 
+    // Pre-compute outside-horizon state sekali per item (BUKAN per PO)
+    // Bug lama: extReq & extStockPrev dideklarasi di dalam pos.forEach → reset setiap PO
+    // → semua PO outside-horizon hitung dari stock yang sama → numpuk di bulan yang sama
+    var _lastFcIdx2  = FC_MONTHS.length - 1;
+    var _fcLen2      = fcReq2.length;
+    var _extReq2     = [];
+    for(var _em0 = 0; _em0 < 12; _em0++) {
+      var _r1 = _fcLen2 > 0 ? (fcReq2[Math.max(0, _lastFcIdx2 - 2 + _em0)] || 0) : 0;
+      var _r2 = _fcLen2 > 0 ? (fcReq2[Math.max(0, _lastFcIdx2 - 1 + _em0)] || 0) : 0;
+      var _r3 = _em0 === 0
+        ? (_fcLen2 > 0 ? (fcReq2[_lastFcIdx2] || 0) : 0)
+        : (_extReq2[_em0 - 1] || 0);
+      _extReq2[_em0] = (_r1 + _r2 + _r3) / 3;
+    }
+    var _extStockPrev2 = fcStock && fcStock[_lastFcIdx2] != null ? fcStock[_lastFcIdx2] : 0;
+    var _extMonStart2  = 0; // pointer bulan 2027, dipertahankan antar PO
+
     pos.forEach(function(p){
       var key = p.docNum+'_'+p.itemCode;
       var poQty = p.openQty || 0;
@@ -4729,50 +4746,35 @@ function generateUpdateDelDate() {
         pl.remaining -= poQty;
         if(pl.remaining <= 0) pPtr++;
       } else {
-        // PO di luar horizon forecast → hitung tanggal 2027 dengan rolling average 3 bulan
-        // Requirement Jan2027 = avg(Oct,Nov,Dec 2026), Feb2027 = avg(Nov,Dec,Jan2027), dst.
-        var lastFcIdx = FC_MONTHS.length - 1;
-        var fcLen = fcReq2.length;
-
-        // Bangun extended requirement untuk 2027 (12 bulan)
-        var extReq = [];
-        for(var _em = 0; _em < 12; _em++) {
-          // Ambil 3 bulan ke belakang dari posisi (lastFcIdx + _em)
-          var r1 = fcLen > 0 ? (fcReq2[Math.max(0, lastFcIdx - 2 + _em)] || 0) : 0;
-          var r2 = fcLen > 0 ? (fcReq2[Math.max(0, lastFcIdx - 1 + _em)] || 0) : 0;
-          var r3 = _em === 0
-            ? (fcLen > 0 ? (fcReq2[lastFcIdx] || 0) : 0)
-            : (extReq[_em - 1] || 0); // gunakan estimasi bulan sebelumnya
-          extReq[_em] = (r1 + r2 + r3) / 3;
-        }
-
-        // Stock lanjutan dari akhir forecast
-        var extStockPrev = fcStock && fcStock[lastFcIdx] != null ? fcStock[lastFcIdx] : 0;
-
+        // PO di luar horizon forecast → distribusikan ke 2027 dengan state bersama antar PO
+        // extReq, extStockPrev, extMonStart sudah dihitung di atas (per-item, bukan per-PO)
         var foundISO = null;
-        for(var _em2 = 0; _em2 < 12; _em2++) {
-          var extMon   = (_em2 + 1);           // 1–12
-          var extDays  = new Date(2027, extMon, 0).getDate(); // days in this month
-          var reqExt   = extReq[_em2] || 0;
+        for(var _em2 = _extMonStart2; _em2 < 12; _em2++) {
+          var extMon   = _em2 + 1;                              // 1–12
+          var extDays  = new Date(2027, extMon, 0).getDate();   // days in this month
+          var reqExt   = _extReq2[_em2] || 0;
           var dailyExt = reqExt > 0 ? reqExt / extDays : 0;
 
           if(dailyExt <= 0) {
-            // Tidak ada kebutuhan → cek bulan berikutnya
-            extStockPrev -= reqExt;
+            // Tidak ada kebutuhan bulan ini → geser ke berikutnya
+            _extStockPrev2 -= reqExt;
             continue;
           }
 
-          var D2 = (extStockPrev - dailyExt * targetDOI) / dailyExt;
-          var dayN2;
-          if(D2 <= 0) {
-            dayN2 = 1;
-          } else {
-            dayN2 = Math.min(Math.ceil(D2), extDays);
-          }
-          foundISO = '2027-' + String(extMon).padStart(2,'0') + '-' + String(dayN2).padStart(2,'0');
+          var D2 = (_extStockPrev2 - dailyExt * targetDOI) / dailyExt;
 
-          // Update extended stock setelah PO ini masuk di awal bulan extMon
-          extStockPrev = extStockPrev + poQty - reqExt;
+          if(D2 >= extDays) {
+            // Stock masih cukup sepanjang bulan ini → PO tidak diperlukan bulan ini
+            // Konsumsi demand bulan ini dan cari bulan berikutnya
+            _extStockPrev2 -= reqExt;
+            _extMonStart2 = _em2 + 1;
+            continue;
+          }
+
+          var dayN2 = D2 <= 0 ? 1 : Math.min(Math.ceil(D2), extDays);
+          foundISO = '2027-' + String(extMon).padStart(2,'0') + '-' + String(dayN2).padStart(2,'0');
+          _extStockPrev2 += poQty - reqExt;   // update stock setelah PO ini masuk
+          _extMonStart2 = _em2;               // PO berikutnya cari mulai bulan ini
           break;
         }
 
@@ -13262,23 +13264,9 @@ function _fcOspoEdit(input) {
   qty = Math.max(0, Math.min(qty, total));
   input.value = qty > 0 ? n_id(qty) : '0';
 
-  // Reset semua override untuk item ini dulu, lalu set ulang
-  _fcOspoOverride[code] = new Array(FC_MONTHS.length).fill(null);
-
-  // Set override bulan yang diedit
+  // Set override hanya untuk bulan yang diedit — bulan lain tidak berubah
+  if(!_fcOspoOverride[code]) _fcOspoOverride[code] = new Array(FC_MONTHS.length).fill(null);
   _fcOspoOverride[code][mi] = qty;
-
-  // Redistribute: semua bulan lain = 0, sisa ke bulan terdekat (pertama selain mi)
-  var sisa = total - qty;
-  var firstOther = -1;
-  for(var oi2 = 0; oi2 < FC_MONTHS.length; oi2++) {
-    if(oi2 === mi) continue;
-    _fcOspoOverride[code][oi2] = 0;
-    if(firstOther < 0) firstOther = oi2;
-  }
-  if(sisa > 0 && firstOther >= 0) {
-    _fcOspoOverride[code][firstOther] = sisa;
-  }
 
   try { localStorage.setItem('fc_ospo_ovr', JSON.stringify(_fcOspoOverride)); cloudSave('fc_ospo_ovr', JSON.stringify(_fcOspoOverride)); } catch(e){}
   input.style.color = (_fcOspoOverride[code][mi] !== ospoOrig[mi]) ? '#8b5cf6' : (qty > 0 ? 'var(--teal)' : 'var(--muted)');
