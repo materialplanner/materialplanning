@@ -4649,68 +4649,48 @@ function generateUpdateDelDate() {
     var targetDOI=(_fcGetDOIForItem?_fcGetDOIForItem(code):30)||30;
     var master=(STATE.masterData||{})[code]||{};
     var uomRaw=(master.uom||'').toLowerCase();
-    // Tidak perlu gF — _calcForecast sudah dalam unit native SAP (sama dengan poData.openQty)
-    // Semua nilai fc.forecast, fc.ospr_base, soh konsisten tanpa konversi
+    // Baca langsung fc.ospo (hasil pull-forward forecast) — tidak hitung sendiri
+    // Ini memastikan UpdateDelDate konsisten 100% dengan tampilan forecast
     var fc; try{fc=_calcForecast(code,ospoIdx);}catch(e){return;}
-    var fcReq   = fc.forecast || new Array(FC_MONTHS.length).fill(0);
-    var fcOspr  = fc.ospr_base || new Array(FC_MONTHS.length).fill(0);
-    var daysArr = FC_DAYS || FC_MONTHS.map(function(){return 30;});
-    var sd = (STATE.stockData||{})[code]||{};
-    var sohTotal = (sd.btg||0)+(sd.sng||0); // no gF — sama unit dengan fc.forecast
+    var ospoEff = fc.ospo || new Array(FC_MONTHS.length).fill(0);
 
-    // Build stockSim: SOH + OSPR - demand (tanpa OSPO)
-    var stockSim = new Array(FC_MONTHS.length).fill(0);
-    var _prevSim = sohTotal;
-    for(var _si = 0; _si < FC_MONTHS.length; _si++) {
-      _prevSim = _prevSim + (fcOspr[_si]||0) - (fcReq[_si]||0);
-      stockSim[_si] = _prevSim;
-    }
+    // Build placement list: bulan-bulan yang ada OSPO (setelah pull-forward), urut ascending
+    var placements = [];
+    ospoEff.forEach(function(qty, idx){
+      if(qty > 0) placements.push({ idx: idx, remaining: qty });
+    });
+    // placements sudah dalam urutan bulan ascending (forEach preserves order)
+
+    var pPtr = 0; // pointer ke slot placement berikutnya
 
     pos.forEach(function(p){
       var key = p.docNum+'_'+p.itemCode;
-      var poQty = (p.openQty||0); // no gF — sama unit dengan fc.forecast
+      var poQty = p.openQty || 0;
 
-      // Priority 1: sudah ada Tgl Request Kirim → ikut, update stockSim
+      // Priority 1: sudah ada Tgl Request Kirim → pakai itu, konsumsi satu slot
       if(STATE.poOverrides[key] && STATE.poOverrides[key].date){
-        var prM0 = _mIdx(p);
-        if(prM0 >= 0){
-          for(var _u0=prM0; _u0<FC_MONTHS.length; _u0++) stockSim[_u0] += poQty;
-        }
         newUpdateDelDate[key] = STATE.poOverrides[key].date;
+        if(pPtr < placements.length){
+          placements[pPtr].remaining -= poQty;
+          if(placements[pPtr].remaining <= 0) pPtr++;
+        }
         return;
       }
 
-      var prMIdx = _mIdx(p);
-      if(prMIdx < 0){ newUpdateDelDate[key] = '2027-01-01'; return; }
+      // Advance pointer jika slot saat ini sudah habis
+      while(pPtr < placements.length && placements[pPtr].remaining <= 0) pPtr++;
 
-      var assignedISO = null, assignedMIdx = -1;
-
-      for(var i = prMIdx; i < FC_MONTHS.length; i++){
-        var req = fcReq[i] || 0;
-        var days_i = daysArr[i] || 30;
-        var dailyReq = req > 0 ? req/days_i : 0;
-        var mn = FC_MONTH_NUMS[i];
-        // Base = stockSim bulan lalu (sudah termasuk PO sebelumnya yg di-assign)
-        var startStock = i === 0 ? sohTotal : (stockSim[i-1] || 0);
-
-        if(dailyReq <= 0) continue;
-        var D = startStock / dailyReq - targetDOI;
-
-        if(D <= 0){
-          var c = new Date(curYear,mn-1,1);
-          assignedISO = c<=today ? todayISO : curYear+'-'+String(mn).padStart(2,'0')+'-01';
-          assignedMIdx = i; break;
-        } else if(D <= days_i){
-          var dayN = Math.min(Math.ceil(D), days_i);
-          var c = new Date(curYear,mn-1,dayN);
-          assignedISO = c<=today ? todayISO : curYear+'-'+String(mn).padStart(2,'0')+'-'+String(dayN).padStart(2,'0');
-          assignedMIdx = i; break;
-        }
-      }
-
-      newUpdateDelDate[key] = assignedISO || '2027-01-01';
-      if(assignedMIdx >= 0){
-        for(var _u=assignedMIdx; _u<FC_MONTHS.length; _u++) stockSim[_u] += poQty;
+      if(pPtr < placements.length){
+        var pl = placements[pPtr];
+        var mn = FC_MONTH_NUMS[pl.idx];
+        var iso = curYear+'-'+String(mn).padStart(2,'0')+'-01';
+        if(iso <= todayISO) iso = todayISO;
+        newUpdateDelDate[key] = iso;
+        pl.remaining -= poQty;
+        if(pl.remaining <= 0) pPtr++;
+      } else {
+        // Tidak ada slot di forecast → PO ini di luar horizon atau tidak dibutuhkan
+        newUpdateDelDate[key] = '2027-01-01';
       }
     });
   });
@@ -10770,12 +10750,15 @@ function _calcForecast(code, ospoIdx) {
     // Step 1: pull-forward OSPO dari bulan berikutnya jika DOI < target
     // Jika bulan ini di-override manual → pakai nilai as-is, skip pull-forward
     var _amOverridden = _fcOspoOverride[code] && _fcOspoOverride[code][am] != null;
+    // Kalau item punya override manual di bulan manapun → matikan pull-forward seluruhnya
+    // User sudah mengatur manual, algoritma tidak boleh menggeser bulan lain
+    var _anyOverridden = _fcOspoOverride[code] && Object.keys(_fcOspoOverride[code]).length > 0;
     var stockAfterOspo = prevSt + ospoPool2[am] + ospoPulled[am] + ospr_a - req_a;
     var _pfSt = stockAktualFw.slice();
     _pfSt[am] = stockAfterOspo;
     for(var _pz = am+1; _pz < FC_MONTHS.length; _pz++) _pfSt[_pz] = 0;
     var _pfD = calcDOI(_pfSt)[am];
-    if(!_amOverridden && _pfD >= 0 && _pfD < maxDOI) {
+    if(!_amOverridden && !_anyOverridden && _pfD >= 0 && _pfD < maxDOI) {
       for(var nx = am+1; nx < FC_MONTHS.length; nx++) {
         // Skip bulan yang sudah di-override manual — jangan ambil dari sana
         var _nxOverridden = _fcOspoOverride[code] && _fcOspoOverride[code][nx] != null;
@@ -10800,7 +10783,7 @@ function _calcForecast(code, ospoIdx) {
     }
 
     // Step 1.5: pull OSPR dari bulan berikutnya jika DOI masih kurang
-    if(!_amOverridden && _pfD >= 0 && _pfD < maxDOI) {
+    if(!_amOverridden && !_anyOverridden && _pfD >= 0 && _pfD < maxDOI) {
       for(var nxr = am+1; nxr < FC_MONTHS.length; nxr++) {
         if((osprPool2[nxr]||0) <= 0) continue;
         var deficit2 = Math.max(0, req_a * (maxDOI / WD) - stockAfterOspo);
