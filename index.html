@@ -4649,19 +4649,16 @@ function generateUpdateDelDate() {
     var targetDOI=(_fcGetDOIForItem?_fcGetDOIForItem(code):30)||30;
     var master=(STATE.masterData||{})[code]||{};
     var uomRaw=(master.uom||'').toLowerCase();
-    var gF=(/^(g|gr|gram)$/i.test(uomRaw.trim()))?0.001:1;
-
+    // Tidak perlu gF — _calcForecast sudah dalam unit native SAP (sama dengan poData.openQty)
+    // Semua nilai fc.forecast, fc.ospr_base, soh konsisten tanpa konversi
     var fc; try{fc=_calcForecast(code,ospoIdx);}catch(e){return;}
-    // Gunakan fc.stockFc — sesuai nilai yg ditampilkan di forecast UI (Forecast view)
-    // fc.stock menggunakan pull-forward algorithm → nilai berbeda dari yang user lihat
     var fcReq   = fc.forecast || new Array(FC_MONTHS.length).fill(0);
     var fcOspr  = fc.ospr_base || new Array(FC_MONTHS.length).fill(0);
     var daysArr = FC_DAYS || FC_MONTHS.map(function(){return 30;});
     var sd = (STATE.stockData||{})[code]||{};
-    var sohTotal = ((sd.btg||0)+(sd.sng||0))*gF;
+    var sohTotal = (sd.btg||0)+(sd.sng||0); // no gF — sama unit dengan fc.forecast
 
     // Build stockSim: SOH + OSPR - demand (tanpa OSPO)
-    // Basis yang konsisten dengan forecast: tiap PO di-assign mandiri tanpa overlap
     var stockSim = new Array(FC_MONTHS.length).fill(0);
     var _prevSim = sohTotal;
     for(var _si = 0; _si < FC_MONTHS.length; _si++) {
@@ -4671,7 +4668,7 @@ function generateUpdateDelDate() {
 
     pos.forEach(function(p){
       var key = p.docNum+'_'+p.itemCode;
-      var poQty = (p.openQty||0)*gF;
+      var poQty = (p.openQty||0); // no gF — sama unit dengan fc.forecast
 
       // Priority 1: sudah ada Tgl Request Kirim → ikut, update stockSim
       if(STATE.poOverrides[key] && STATE.poOverrides[key].date){
