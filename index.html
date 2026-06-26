@@ -4719,7 +4719,54 @@ function generateUpdateDelDate() {
         pl.remaining -= poQty;
         if(pl.remaining <= 0) pPtr++;
       } else {
-        newUpdateDelDate[key] = '2027-01-01';
+        // PO di luar horizon forecast → hitung tanggal 2027 dengan rolling average 3 bulan
+        // Requirement Jan2027 = avg(Oct,Nov,Dec 2026), Feb2027 = avg(Nov,Dec,Jan2027), dst.
+        var lastFcIdx = FC_MONTHS.length - 1;
+        var fcLen = fcReq2.length;
+
+        // Bangun extended requirement untuk 2027 (12 bulan)
+        var extReq = [];
+        for(var _em = 0; _em < 12; _em++) {
+          // Ambil 3 bulan ke belakang dari posisi (lastFcIdx + _em)
+          var r1 = fcLen > 0 ? (fcReq2[Math.max(0, lastFcIdx - 2 + _em)] || 0) : 0;
+          var r2 = fcLen > 0 ? (fcReq2[Math.max(0, lastFcIdx - 1 + _em)] || 0) : 0;
+          var r3 = _em === 0
+            ? (fcLen > 0 ? (fcReq2[lastFcIdx] || 0) : 0)
+            : (extReq[_em - 1] || 0); // gunakan estimasi bulan sebelumnya
+          extReq[_em] = (r1 + r2 + r3) / 3;
+        }
+
+        // Stock lanjutan dari akhir forecast
+        var extStockPrev = fcStock && fcStock[lastFcIdx] != null ? fcStock[lastFcIdx] : 0;
+
+        var foundISO = null;
+        for(var _em2 = 0; _em2 < 12; _em2++) {
+          var extMon   = (_em2 + 1);           // 1–12
+          var extDays  = new Date(2027, extMon, 0).getDate(); // days in this month
+          var reqExt   = extReq[_em2] || 0;
+          var dailyExt = reqExt > 0 ? reqExt / extDays : 0;
+
+          if(dailyExt <= 0) {
+            // Tidak ada kebutuhan → cek bulan berikutnya
+            extStockPrev -= reqExt;
+            continue;
+          }
+
+          var D2 = (extStockPrev - dailyExt * targetDOI) / dailyExt;
+          var dayN2;
+          if(D2 <= 0) {
+            dayN2 = 1;
+          } else {
+            dayN2 = Math.min(Math.ceil(D2), extDays);
+          }
+          foundISO = '2027-' + String(extMon).padStart(2,'0') + '-' + String(dayN2).padStart(2,'0');
+
+          // Update extended stock setelah PO ini masuk di awal bulan extMon
+          extStockPrev = extStockPrev + poQty - reqExt;
+          break;
+        }
+
+        newUpdateDelDate[key] = foundISO || '2027-12-31';
       }
     });
   });
@@ -5047,14 +5094,13 @@ function _refreshProjectionIncoming(itemCode) {
     var pcc = (STATE.poConfirmations||{})[k] || {};
     var cd  = pcc.confDate || ovr.confDate || null;
     var cq  = pcc.confQty  || ovr.confQty  || null;
-    var ud  = cd || ovr.date || null;
+    var ud  = cd || null; // hanya confDate
     var po  = (STATE.poData||[]).find(function(p){ return p.docNum+'_'+p.itemCode===k; });
-    var uq  = cd ? (parseFloat(cq)||0) : (po ? (po.openQty||0) : 0);
+    var uq  = cd ? (parseFloat(cq)||0) : 0;
     if(ud && cdList.indexOf(ud) < 0) cdList.push(ud);
     if(ud && uq > 0) cqTotal += uq;
-    // totalOpenPOQty: untuk DOI+INCOMING dan COVERAGE+INCOMING
+    // DOI+INCOMING hanya dari konfirmasi supplier
     if(cd) { opqTotal += (parseFloat(cq) || (po ? po.openQty||0 : 0)); }
-    else if(ovr.date) { opqTotal += (po ? po.openQty||0 : 0); }
   });
   proj.tglIncoming   = cdList.length
     ? cdList.map(function(d){ var p=d.split('-'); return p.length===3&&p[0].length===4?p[2]+'-'+p[1]+'-'+p[0]:d; }).join(', ')
@@ -5998,10 +6044,8 @@ function _doBuildProjection() {
       var _cd = _pcc2.confDate || ovr.confDate;
       var _cq = _pcc2.confQty  || ovr.confQty;
       if(_cd) {
+        // DOI+INCOMING hanya dari confDate (konfirmasi supplier)
         totalOpenPOQty += (parseFloat(_cq) || po.openQty || 0);
-      } else if(ovr.date) {
-        // Belum dikonfirmasi tapi sudah ada jadwal request kirim
-        totalOpenPOQty += (po.openQty || 0);
       }
     });
 
@@ -6082,10 +6126,10 @@ function _doBuildProjection() {
         var _pcc = (STATE.poConfirmations && STATE.poConfirmations[k]) || {};
         var _confDate = _pcc.confDate || ovr.confDate || null;
         var _confQty  = _pcc.confQty  || ovr.confQty  || null;
-        var useDate = _confDate || ovr.date || null;
-        var useQty  = _confDate
-          ? (parseFloat(_confQty) || 0)
-          : (po ? (po.openQty||0) : 0);
+        // TGL/QTY INCOMING hanya dari confDate (konfirmasi supplier)
+        // ovr.date (TGL REQUEST KIRIM) bukan konfirmasi — tidak masuk incoming
+        var useDate = _confDate || null;
+        var useQty  = _confDate ? (parseFloat(_confQty) || 0) : 0;
         if(useDate && confDateList.indexOf(useDate) < 0) confDateList.push(useDate);
         if(useDate && useQty > 0) confQtyTotal += useQty;
       }
