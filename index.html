@@ -3220,6 +3220,7 @@ function _applyRealtimeChanges(keys) {
             if((cOvr.dateUpd||'') > (lOvr.dateUpd||'')) {
               merged.date    = cOvr.date;
               merged.isManual = cOvr.isManual;
+              merged.isAuto  = cOvr.isAuto;   // ikut copy — kalau tidak, warna TGL REQUEST KIRIM jadi hitam
               merged.dateUpd = cOvr.dateUpd;
             }
             // confDate + confQty: pakai yang lebih baru (confUpd)
@@ -6085,6 +6086,11 @@ function _doBuildProjection() {
     var _curMo = now.getMonth() + 1; // bulan sekarang (1-12)
     if(STATE.matcomMonthly && STATE.matcomMonthly[code]) {
       actualUsageDaily = STATE.matcomMonthly[code][_curMo] || 0;
+    }
+    // Konversi gram → KG jika UOM master adalah gram
+    var _masterUomLow = (master.uom||'').toLowerCase();
+    if((_masterUomLow === 'g' || _masterUomLow === 'gr' || _masterUomLow === 'gram') && actualUsageDaily > 0) {
+      actualUsageDaily = actualUsageDaily / 1000;
     }
     if(doiFC < 14) category = 'UNDER';
     else if(doiFC > 30) category = 'OVER';
