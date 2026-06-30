@@ -11781,17 +11781,26 @@ function _fcRekapUpdatePrintBtn() {
   btn.textContent = n === 0 ? '🖨 Cetak Lampiran' : '🖨 Cetak Lampiran ('+n+' item)';
 }
 
-// DOI kalau extraQty (qty Propose PR) ditambahkan di bulan monthIdx — replikasi exact
-// logika calcDOI() di dalam _calcForecast, supaya angka before→after konsisten dengan
-// baris DOI biasa. fc tidak expose WD/avgReq, jadi dihitung ulang dari fc.forecast.
-function _fcCalcDoiAfterPR(forecast, stockArr, monthIdx, extraQty) {
+// fc.stockFc & fc.doiFc SUDAH menambahkan propose PR ke rolling balance-nya
+// (lihat stockFc[fm2] = prevStFc + forecastOspo[fm2] + ospr_f + prop_f - req_f di _calcForecast).
+// Jadi fc.doiFc[i] itu SENDIRI sudah "DOI setelah PR" — bukan baseline before.
+// Untuk dapat angka "before", hitung ulang stock TANPA prop_f di bulan itu, reuse
+// forecastOspo/ospr/forecast yang sudah ada (tidak re-simulasi pool OSPO dari nol).
+function _fcStockBeforePR(fc, monthIdx) {
+  var prevStock = monthIdx > 0 ? (fc.stockFc[monthIdx-1] || 0) : (fc.soh || 0);
+  var ospo_f = (fc.forecastOspo||[])[monthIdx] || 0;
+  var ospr_f = (fc.ospr||[])[monthIdx] || 0;
+  var req_f  = (fc.forecast||[])[monthIdx] || 0;
+  return prevStock + ospo_f + ospr_f - req_f; // tanpa prop_f — ini baseline before
+}
+
+function _fcDoiFromStock(forecast, s, monthIdx) {
   var WD = 25;
   var avgReq = (function(){
     var sum = 0, cnt = 0;
     (forecast||[]).forEach(function(v){ if(v > 0){ sum += v; cnt++; } });
     return cnt > 0 ? sum / cnt : 0;
   })();
-  var s = (stockArr[monthIdx] || 0) + extraQty;
   if(s <= 0) return 0;
   var r0 = forecast[monthIdx] || 0;
   var r1 = (forecast[monthIdx+1] != null && forecast[monthIdx+1] > 0) ? forecast[monthIdx+1] : avgReq;
@@ -11826,12 +11835,14 @@ function _fcPrintLampiranPR() {
     if(v == null || v === 0) return '–';
     return v.toLocaleString('id-ID', {minimumFractionDigits: v % 1 !== 0 ? 2 : 0, maximumFractionDigits: 2});
   };
-  var rowHtml = function(label, arr, hiIdx, doiAfter, bold) {
+  var rowHtml = function(label, arr, hiSet, doiBeforeMap, bold) {
     var cells = '';
     for(var i = 0; i < nMon; i++) {
-      var isHi = i === hiIdx;
+      var isHi = !!hiSet[i];
       var val = fmt2((arr||[])[i]);
-      if(isHi && doiAfter != null) val = fmt2((arr||[])[i]) + ' → <span style="color:#1d9e75">' + doiAfter + '</span>';
+      if(isHi && doiBeforeMap && doiBeforeMap[i] != null) {
+        val = doiBeforeMap[i] + ' → <span style="color:#1d9e75">' + fmt2((arr||[])[i]) + '</span>';
+      }
       cells += '<td style="text-align:right;padding:1px 3px;' + (isHi ? 'background:#fdf4e3;' : '') + (bold ? 'font-weight:500;' : '') + '">' + val + '</td>';
     }
     return '<tr><td style="padding:1px 3px;color:#555;' + (bold ? 'font-weight:500;' : '') + 'white-space:nowrap">' + label + '</td>' + cells + '</tr>';
@@ -11846,15 +11857,21 @@ function _fcPrintLampiranPR() {
     var name   = realN ? STATE.realNameData[code] : (master.desc || (STATE.mrpData[code]||{}).desc || '');
     var iType  = /^3/.test(code) ? 'RM' : 'PM';
 
-    // Cari bulan dengan Propose PR > 0 (boleh lebih dari satu)
-    var hiIdx = -1, hiQty = 0;
-    (fc.propose||[]).forEach(function(v, i){ if(v > 0 && hiIdx < 0) { hiIdx = i; hiQty = v; } });
+    // Semua bulan dengan Propose PR > 0 — bukan cuma yang pertama, karena satu item
+    // bisa butuh PR di lebih dari satu bulan sekaligus.
+    var hiSet = {};
+    var doiBeforeMap = {};
+    var badgeParts = [];
+    (fc.propose||[]).forEach(function(v, i){
+      if(v <= 0) return;
+      hiSet[i] = true;
+      var stockBefore = _fcStockBeforePR(fc, i);
+      doiBeforeMap[i] = _fcDoiFromStock(fc.forecast, stockBefore, i);
+      badgeParts.push(fmt2(v) + ' ' + (master.uom||'') + ' @ ' + monthsHdr[i]);
+    });
 
-    var doiAfter = null;
-    if(hiIdx >= 0) doiAfter = _fcCalcDoiAfterPR(fc.forecast, fc.stockFc, hiIdx, hiQty);
-
-    var headBadge = hiIdx >= 0
-      ? '<span style="font-size:12px;color:#996600;font-weight:500;white-space:nowrap">PR ' + fmt2(hiQty) + ' ' + (master.uom||'') + ' @ ' + monthsHdr[hiIdx] + '</span>'
+    var headBadge = badgeParts.length
+      ? '<span style="font-size:12px;color:#996600;font-weight:500;white-space:nowrap">PR ' + badgeParts.join(', ') + '</span>'
       : '';
 
     blocks += '<div style="border-bottom:0.5px solid #ddd;padding-bottom:10px;margin-bottom:10px;page-break-inside:avoid">'
@@ -11866,14 +11883,14 @@ function _fcPrintLampiranPR() {
       + '<table style="width:100%;border-collapse:collapse;font-size:9.5px">'
       +   '<thead><tr style="color:#999">'
       +     '<td style="padding:1px 3px;width:78px"></td>'
-      +     monthsHdr.map(function(m, i){ return '<td style="text-align:right;padding:1px 3px;' + (i===hiIdx?'background:#fdf4e3;color:#5c4a13;':'') + '">' + m + '</td>'; }).join('')
+      +     monthsHdr.map(function(m, i){ return '<td style="text-align:right;padding:1px 3px;' + (hiSet[i]?'background:#fdf4e3;color:#5c4a13;':'') + '">' + m + '</td>'; }).join('')
       +   '</tr></thead><tbody>'
-      +   rowHtml('Requirement', fc.forecast, hiIdx)
-      +   rowHtml('Adj. OSPO', fc.forecastOspo, hiIdx)
-      +   rowHtml('OSPR', fc.ospr, hiIdx)
-      +   rowHtml('Stock ending', fc.stockFc, hiIdx)
-      +   rowHtml('DOI (hari)', fc.doiFc, hiIdx, doiAfter)
-      +   rowHtml('Propose PR', fc.propose, hiIdx, null, true)
+      +   rowHtml('Requirement', fc.forecast, hiSet)
+      +   rowHtml('Adj. OSPO', fc.forecastOspo, hiSet)
+      +   rowHtml('OSPR', fc.ospr, hiSet)
+      +   rowHtml('Stock ending', fc.stockFc, hiSet)
+      +   rowHtml('DOI (hari)', fc.doiFc, hiSet, doiBeforeMap)
+      +   rowHtml('Propose PR', fc.propose, hiSet, null, true)
       + '</tbody></table>'
       + '</div>';
   });
