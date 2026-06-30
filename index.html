@@ -880,7 +880,8 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
     <!-- Search -->
     <div style="position:relative;flex:1;min-width:160px;max-width:280px">
       <span style="position:absolute;left:9px;top:50%;transform:translateY(-50%);font-size:13px;color:var(--muted);pointer-events:none">⌕</span>
-      <input type="text" id="srch-fc" placeholder="Cari kode / nama..." oninput="renderForecast()"
+      <input type="text" id="srch-fc" placeholder="Cari kode / nama... (paste banyak kode dipisah spasi)" oninput="renderForecast()"
+        title="Bisa paste banyak kode item sekaligus dipisah spasi, mis: 3000020041 3000010013 3000030099"
         style="width:100%;padding:6px 10px 6px 28px;font-size:12px;background:var(--bg4);border:1.5px solid var(--border);border-radius:var(--r);color:var(--text);outline:none;font-family:var(--font)">
     </div>
 
@@ -11112,12 +11113,22 @@ function renderForecast(isGenerate) {
   var fABC    = (document.getElementById('f-fc-abc')    ||{value:''}).value;
   var fStatus = (document.getElementById('f-fc-status') ||{value:''}).value;
 
+  // Multi-code search: paste banyak kode item dipisah spasi (mis. dari Excel/clipboard)
+  // → exact-match terhadap daftar kode, bukan substring search biasa.
+  // Aktif hanya kalau SEMUA token terlihat seperti kode item (angka, min 6 digit),
+  // supaya tidak mengubah perilaku search kata/frasa biasa (deskripsi, supplier, dll).
+  var srchTokens = srch.split(/\s+/).filter(Boolean);
+  var isMultiCodeSearch = srchTokens.length > 1 && srchTokens.every(function(t){ return /^\d{6,}$/.test(t); });
+  var srchCodeSet = isMultiCodeSearch ? srchTokens.reduce(function(acc,t){ acc[t]=true; return acc; }, {}) : null;
+
   var allItems = Object.keys(STATE.masterData).filter(function(code) {
     var iType = /^3/.test(code)?'RM':(/^4/.test(code)?'PM':'FG');
     if(iType==='FG') return false;
     if(fType && iType!==fType) return false;
     if(fABC && (STATE.masterData[code].abc||'') !== fABC) return false;
-    if(srch) {
+    if(isMultiCodeSearch) {
+      if(!srchCodeSet[code.toLowerCase()]) return false;
+    } else if(srch) {
       var hay = (code+' '+(STATE.masterData[code].desc||'')+' '+(STATE.masterData[code].supplier||'')+' '+((STATE.realNameData||{})[code]||'')).toLowerCase();
       if(!hay.includes(srch)) return false;
     }
@@ -11700,12 +11711,16 @@ function _fcRenderRekap(el, items, fcData, fStatus) {
   };
 
   var thStyle = 'padding:9px 10px;font-size:10px;font-weight:700;color:#fff;background:#1e4d6b;white-space:nowrap;border-right:1px solid rgba(255,255,255,.15)';
-  var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
+  var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;flex-wrap:wrap">'
     + '<div style="font-size:11px;color:var(--muted)"><b>'+propRows.length+'</b> baris propose PR</div>'
+    + '<div style="display:flex;gap:8px">'
+    + '<button class="btn btn-sm" id="rekap-print-btn" onclick="_fcPrintLampiranPR()" disabled style="font-size:11px;opacity:.5">🖨 Cetak Lampiran</button>'
     + '<button class="btn btn-sm btn-primary" onclick="_fcRekapExportMenu()" style="font-size:11px">↓ Export Rekap PR</button>'
+    + '</div>'
     + '</div>'
     + '<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;min-width:900px;width:100%">'
     + '<thead><tr>'
+    + '<th style="'+thStyle+';text-align:center;width:30px"><input type="checkbox" id="rekap-chk-all" onchange="_fcRekapToggleAll(this)" title="Pilih semua (item terlihat)"></th>'
     + '<th style="'+thStyle+';text-align:center">Site</th>'
     + '<th style="'+thStyle+'">Item No</th>'
     + '<th style="'+thStyle+'">Description</th>'
@@ -11727,6 +11742,7 @@ function _fcRenderRekap(el, items, fcData, fStatus) {
           ? '<span style="color:#c00;font-weight:700">⛔ URGENT</span>'
           : '<span style="color:#856404">🟡 BELUM - Buka: '+fmt(r.createPRBy)+' ('+r.daysLeft+' hari)</span>');
     html += '<tr style="'+rowBg+'">'
+      + '<td style="'+tdS+'text-align:center"><input type="checkbox" class="rekap-chk" data-code="'+r.code+'" onchange="_fcRekapUpdatePrintBtn()"></td>'
       + '<td style="'+tdS+'text-align:center;color:var(--muted);font-size:11px">'+(r.site||'—')+'</td>'
       + '<td style="'+tdS+'font-family:var(--mono);font-size:11px;white-space:nowrap">'+r.code+'</td>'
       + '<td style="'+tdS+'font-weight:500;max-width:220px">'+r.name+'</td>'
@@ -11743,8 +11759,141 @@ function _fcRenderRekap(el, items, fcData, fStatus) {
   html += '</tbody></table></div>';
   el.innerHTML = html;
 
-  // Store for export
+  // Store for export & print lampiran
   window._fcRekapRows = propRows;
+  window._fcRekapFcData = fcData;
+}
+
+// ─── Rekap PR: select-all & checkbox tracking ──────────────────────────────
+function _fcRekapToggleAll(master) {
+  document.querySelectorAll('.rekap-chk').forEach(function(chk){ chk.checked = master.checked; });
+  _fcRekapUpdatePrintBtn();
+}
+
+function _fcRekapUpdatePrintBtn() {
+  var codes = {};
+  document.querySelectorAll('.rekap-chk:checked').forEach(function(chk){ codes[chk.getAttribute('data-code')] = true; });
+  var n = Object.keys(codes).length;
+  var btn = document.getElementById('rekap-print-btn');
+  if(!btn) return;
+  btn.disabled = n === 0;
+  btn.style.opacity = n === 0 ? '.5' : '1';
+  btn.textContent = n === 0 ? '🖨 Cetak Lampiran' : '🖨 Cetak Lampiran ('+n+' item)';
+}
+
+// DOI kalau extraQty (qty Propose PR) ditambahkan di bulan monthIdx — replikasi exact
+// logika calcDOI() di dalam _calcForecast, supaya angka before→after konsisten dengan
+// baris DOI biasa. fc tidak expose WD/avgReq, jadi dihitung ulang dari fc.forecast.
+function _fcCalcDoiAfterPR(forecast, stockArr, monthIdx, extraQty) {
+  var WD = 25;
+  var avgReq = (function(){
+    var sum = 0, cnt = 0;
+    (forecast||[]).forEach(function(v){ if(v > 0){ sum += v; cnt++; } });
+    return cnt > 0 ? sum / cnt : 0;
+  })();
+  var s = (stockArr[monthIdx] || 0) + extraQty;
+  if(s <= 0) return 0;
+  var r0 = forecast[monthIdx] || 0;
+  var r1 = (forecast[monthIdx+1] != null && forecast[monthIdx+1] > 0) ? forecast[monthIdx+1] : avgReq;
+  var r2 = (forecast[monthIdx+2] != null && forecast[monthIdx+2] > 0) ? forecast[monthIdx+2] : avgReq;
+  if(r0 <= 0 && r1 <= 0) return 0;
+  if(r0 > 0 && s < r0) return Math.round(s / r0 * WD);
+  var s1 = s - r0;
+  if(r1 > 0 && s1 < r1) return Math.round(WD + s1 / r1 * WD);
+  var s2 = s1 - r1;
+  if(r2 > 0) return Math.round(WD + WD + s2 / r2 * WD);
+  return WD * 3;
+}
+
+// ─── Cetak Lampiran Forecast (untuk dilampirkan saat buka PR) ─────────────
+// Reuse _calcForecast via window._fcRekapFcData (di-set oleh _fcRenderRekap).
+// Browser print dialog menangani dua kebutuhan sekaligus: cetak fisik & Save as PDF.
+function _fcPrintLampiranPR() {
+  var codesSeen = {};
+  var codes = [];
+  document.querySelectorAll('.rekap-chk:checked').forEach(function(chk){
+    var c = chk.getAttribute('data-code');
+    if(c && !codesSeen[c]) { codesSeen[c] = true; codes.push(c); }
+  });
+  if(!codes.length) { toast('Pilih minimal 1 item dulu','err'); return; }
+
+  var ospoIdx = _buildOSPOIndex();
+  var fcCache = window._fcRekapFcData || {};
+  var monthsHdr = (FC_MONTHS||[]).map(function(m){ return m.slice(0,3); });
+  var nMon = monthsHdr.length;
+
+  var fmt2 = function(v){
+    if(v == null || v === 0) return '–';
+    return v.toLocaleString('id-ID', {minimumFractionDigits: v % 1 !== 0 ? 2 : 0, maximumFractionDigits: 2});
+  };
+  var rowHtml = function(label, arr, hiIdx, doiAfter, bold) {
+    var cells = '';
+    for(var i = 0; i < nMon; i++) {
+      var isHi = i === hiIdx;
+      var val = fmt2((arr||[])[i]);
+      if(isHi && doiAfter != null) val = fmt2((arr||[])[i]) + ' → <span style="color:#1d9e75">' + doiAfter + '</span>';
+      cells += '<td style="text-align:right;padding:1px 3px;' + (isHi ? 'background:#fdf4e3;' : '') + (bold ? 'font-weight:500;' : '') + '">' + val + '</td>';
+    }
+    return '<tr><td style="padding:1px 3px;color:#555;' + (bold ? 'font-weight:500;' : '') + 'white-space:nowrap">' + label + '</td>' + cells + '</tr>';
+  };
+
+  var blocks = '';
+  codes.forEach(function(code) {
+    var fc = fcCache[code];
+    if(!fc) { try { fc = _calcForecast(code, ospoIdx); } catch(e) { return; } }
+    var master = STATE.masterData[code] || {};
+    var realN  = _isAdmin && _rmDisplayMode === 'realname' && (STATE.realNameData||{})[code];
+    var name   = realN ? STATE.realNameData[code] : (master.desc || (STATE.mrpData[code]||{}).desc || '');
+    var iType  = /^3/.test(code) ? 'RM' : 'PM';
+
+    // Cari bulan dengan Propose PR > 0 (boleh lebih dari satu)
+    var hiIdx = -1, hiQty = 0;
+    (fc.propose||[]).forEach(function(v, i){ if(v > 0 && hiIdx < 0) { hiIdx = i; hiQty = v; } });
+
+    var doiAfter = null;
+    if(hiIdx >= 0) doiAfter = _fcCalcDoiAfterPR(fc.forecast, fc.stockFc, hiIdx, hiQty);
+
+    var headBadge = hiIdx >= 0
+      ? '<span style="font-size:12px;color:#996600;font-weight:500;white-space:nowrap">PR ' + fmt2(hiQty) + ' ' + (master.uom||'') + ' @ ' + monthsHdr[hiIdx] + '</span>'
+      : '';
+
+    blocks += '<div style="border-bottom:0.5px solid #ddd;padding-bottom:10px;margin-bottom:10px;page-break-inside:avoid">'
+      + '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:1px">'
+      +   '<p style="font-size:13px;font-weight:500;margin:0">' + code + ' — ' + name + '</p>'
+      +   headBadge
+      + '</div>'
+      + '<p style="font-size:10px;color:#888;margin:0 0 6px">' + (master.uom||'') + ' &middot; SOH ' + fmt2(fc.soh) + ' &middot; DOI sekarang ' + (fc.doiFc[0]||0) + ' hari &middot; L/T ' + (fc.lt_days||0) + ' hari &middot; ' + (master.supplier||master.sup||'—') + '</p>'
+      + '<table style="width:100%;border-collapse:collapse;font-size:9.5px">'
+      +   '<thead><tr style="color:#999">'
+      +     '<td style="padding:1px 3px;width:78px"></td>'
+      +     monthsHdr.map(function(m, i){ return '<td style="text-align:right;padding:1px 3px;' + (i===hiIdx?'background:#fdf4e3;color:#5c4a13;':'') + '">' + m + '</td>'; }).join('')
+      +   '</tr></thead><tbody>'
+      +   rowHtml('Requirement', fc.forecast, hiIdx)
+      +   rowHtml('Adj. OSPO', fc.forecastOspo, hiIdx)
+      +   rowHtml('OSPR', fc.ospr, hiIdx)
+      +   rowHtml('Stock ending', fc.stockFc, hiIdx)
+      +   rowHtml('DOI (hari)', fc.doiFc, hiIdx, doiAfter)
+      +   rowHtml('Propose PR', fc.propose, hiIdx, null, true)
+      + '</tbody></table>'
+      + '</div>';
+  });
+
+  var docHtml = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Lampiran Forecast PR</title>'
+    + '<style>@page{margin:14mm}body{font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;margin:0;padding:20px}</style>'
+    + '</head><body>'
+    + '<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:1.5px solid #1a1a1a;padding-bottom:8px;margin-bottom:14px">'
+    +   '<p style="font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:#555;margin:0">Lampiran forecast — dokumen pendukung PR</p>'
+    +   '<p style="font-size:10px;color:#888;margin:0">Dicetak ' + new Date().toLocaleDateString('id-ID') + ' &middot; ' + codes.length + ' item</p>'
+    + '</div>'
+    + blocks
+    + '</body></html>';
+
+  var w = window.open('', '_blank');
+  if(!w) { toast('Popup diblokir browser — izinkan popup untuk dashboard ini','err'); return; }
+  w.document.write(docHtml);
+  w.document.close();
+  w.focus();
+  setTimeout(function(){ w.print(); }, 300);
 }
 
 
