@@ -824,8 +824,13 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
           </div>
         </div>
       </div>
-      <div style="font-size:10px;color:var(--muted);margin-top:4px">ubah & auto recalc</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:4px;gap:6px">
+        <span style="font-size:10px;color:var(--muted)">ubah & auto recalc</span>
+        <button onclick="_fcOpenBulkDOIPanel()" title="Set target DOI bulan tertentu ke semua item sekaligus"
+          style="font-size:9.5px;padding:2px 7px;border-radius:4px;border:1px solid var(--border2);background:var(--bg3);color:var(--muted);cursor:pointer;white-space:nowrap">✎ Set Massal</button>
+      </div>
       <div id="fc-doi2-panel" style="display:none;position:absolute;top:calc(100% + 4px);right:0;z-index:200;background:var(--bg2);border:1.5px solid var(--border2);border-radius:var(--r);padding:12px;width:260px;box-shadow:0 4px 16px rgba(0,0,0,.18)"></div>
+      <div id="fc-bulk-doi-panel" style="display:none;position:absolute;top:calc(100% + 4px);right:0;z-index:200;background:var(--bg2);border:1.5px solid var(--border2);border-radius:var(--r);padding:12px;width:240px;box-shadow:0 4px 16px rgba(0,0,0,.18)"></div>
     </div>
   </div>
 
@@ -3023,7 +3028,7 @@ var CLOUD_KEYS = [
   'master_data','mrp_data','realname_data','pallet_pm','pallet_rm',
   'wh_capacity_rm','wh_capacity_pm','update_deldate_data',
   'fc_propose','fc_ospo_ovr','fc_ospr_ovr','fc_doi2','fc_doi2_suppliers','mrp_source',
-  'fc_autopropose',
+  'fc_autopropose','fc_doi_item_month_ovr',
   'matcom_monthly','matcom_data','matcom_count','last_matcom_sync',
   'mps_ui_status','bom_ui_status','mrp_last_calc',
   'email_daily_data',
@@ -3358,6 +3363,9 @@ function _applyRealtimeChanges(keys) {
           break;
         case 'fc_doi2_suppliers':
           try { _fcDOI2Suppliers = JSON.parse(val || '[]'); localStorage.setItem('fc_doi2_suppliers', val); } catch(e) {}
+          break;
+        case 'fc_doi_item_month_ovr':
+          try { _fcDOIItemMonthOvr = JSON.parse(val || '{}'); localStorage.setItem('fc_doi_item_month_ovr', val); } catch(e) {}
           break;
         case 'mrp_source':
           try { localStorage.setItem('mrp_source', val || ''); } catch(e) {}
@@ -9779,6 +9787,7 @@ function _appInit() {
     _fcOsprOverride = JSON.parse(localStorage.getItem('fc_ospr_ovr')      || '{}');
     _fcDOI2         = parseInt(localStorage.getItem('fc_doi2') || '60')   || 60;
     _fcDOI2Suppliers= JSON.parse(localStorage.getItem('fc_doi2_suppliers')|| '[]');
+    _fcDOIItemMonthOvr = JSON.parse(localStorage.getItem('fc_doi_item_month_ovr') || '{}');
     // Reset pallet cache supaya direbuild dengan data terbaru
     _ppCache = null;
     console.log('[_appInit] FC globals restored');
@@ -10516,6 +10525,7 @@ function renderPalletPos() {
 var _fcView      = 'detail';
 var _fcExpanded  = {};
 var _fcGridViewMode = 'aktual'; // 'aktual' | 'forecast' — global
+var _fcShowDOITarget = localStorage.getItem('fc_show_doi_target') !== '0'; // default tampil
 var _fcPropose       = (function(){ try{ return JSON.parse(localStorage.getItem('fc_propose')||'{}'); }catch(e){return {};} })();
 var _fcAutoPropose   = localStorage.getItem('fc_autopropose') === '1';
 var _fcOspoOverride  = (function(){ try{ return JSON.parse(localStorage.getItem('fc_ospo_ovr')||'{}'); }catch(e){return {};} })();
@@ -10523,6 +10533,9 @@ var _fcOsprOverride  = (function(){ try{ return JSON.parse(localStorage.getItem(
 var _fcDOI       = 30;
 var _fcDOI2      = (function(){ return parseInt(localStorage.getItem('fc_doi2')||'60')||60; })();
 var _fcDOI2Suppliers = (function(){ try{ return JSON.parse(localStorage.getItem('fc_doi2_suppliers')||'[]'); }catch(e){return [];} })();
+// Override Target DOI per item+bulan: { "3000020041": [null,null,45,null,null,null,null], ... }
+// null/undefined = pakai default (General/Impor berdasar supplier); angka = override eksplisit
+var _fcDOIItemMonthOvr = (function(){ try{ return JSON.parse(localStorage.getItem('fc_doi_item_month_ovr')||'{}'); }catch(e){return {};} })();
 var _fcSupplierByItemCache = {};
 
 function _fcGetDOI() {
@@ -10533,7 +10546,14 @@ function _fcGetDOI2() {
   var el = document.getElementById('fc-doi2-target');
   return el ? (parseInt(el.value) || 60) : (_fcDOI2 || 60);
 }
-function _fcGetDOIForItem(itemCode) {
+// monthIdx opsional — kalau diisi, cek override item+bulan dulu sebelum fallback
+// ke General/Impor berdasar supplier (perilaku lama, tetap sama persis kalau monthIdx
+// tidak diisi — supaya semua pemanggil lama yang belum di-update tidak berubah perilakunya).
+function _fcGetDOIForItem(itemCode, monthIdx) {
+  if(monthIdx != null) {
+    var ovrArr = _fcDOIItemMonthOvr[itemCode];
+    if(ovrArr && ovrArr[monthIdx] != null) return ovrArr[monthIdx];
+  }
   if(_fcDOI2Suppliers.length === 0) return _fcGetDOI();
   var sup = (_fcSupplierByItemCache || {})[itemCode] || '';
   if(sup && _fcDOI2Suppliers.indexOf(sup) !== -1) return _fcGetDOI2();
@@ -10564,6 +10584,69 @@ function _fcOpenDOI2Panel() {
   var visible = panel.style.display !== 'none';
   panel.style.display = visible ? 'none' : 'block';
   if(!visible) _fcRenderDOI2Panel('');
+}
+
+// ─── Set Massal: terapkan/hapus Target DOI satu bulan ke SEMUA item sekaligus ──
+// Reuse _fcDOIItemMonthOvr (struktur sama dengan override per-item manual) —
+// tidak ada perubahan ke engine _calcForecast, jadi tidak perlu divalidasi ulang.
+function _fcOpenBulkDOIPanel() {
+  var panel = document.getElementById('fc-bulk-doi-panel');
+  if(!panel) return;
+  var visible = panel.style.display !== 'none';
+  panel.style.display = visible ? 'none' : 'block';
+  if(!visible) _fcRenderBulkDOIPanel();
+}
+function _fcRenderBulkDOIPanel() {
+  var panel = document.getElementById('fc-bulk-doi-panel');
+  if(!panel) return;
+  var opts = FC_MONTHS.map(function(m, i){ return '<option value="'+i+'">'+m+'</option>'; }).join('');
+  panel.innerHTML = '<div style="font-size:10.5px;font-weight:700;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px">Set Massal — Semua Item</div>'
+    + '<div style="display:flex;gap:6px;margin-bottom:8px">'
+    +   '<select id="bulk-doi-month" style="flex:1;font-size:11.5px;padding:5px;border:1.5px solid var(--border2);border-radius:5px;background:var(--bg3);color:var(--text);outline:none;font-family:var(--font)">'+opts+'</select>'
+    +   '<input id="bulk-doi-val" type="number" min="0" placeholder="hari" style="width:60px;font-size:11.5px;padding:5px;border:1.5px solid var(--border2);border-radius:5px;background:var(--bg3);color:var(--text);outline:none;font-family:var(--mono);text-align:center">'
+    + '</div>'
+    + '<div style="font-size:10px;color:var(--muted);margin-bottom:8px">Berlaku ke seluruh item (RM+PM). Override per-item yang sudah ada untuk bulan ini akan ditimpa.</div>'
+    + '<button onclick="_fcBulkApplyDOI()" style="width:100%;font-size:11px;padding:6px 0;background:var(--amber);border:none;border-radius:5px;cursor:pointer;color:#fff;font-weight:600;margin-bottom:6px">Terapkan ke Semua Item</button>'
+    + '<button onclick="_fcBulkClearDOI()" style="width:100%;font-size:10.5px;padding:5px 0;background:transparent;border:1px solid var(--border2);border-radius:5px;cursor:pointer;color:var(--muted)">Hapus Override Bulan Ini (Semua Item)</button>';
+}
+function _fcBulkApplyDOI() {
+  var mi  = parseInt((document.getElementById('bulk-doi-month')||{}).value, 10);
+  var raw = ((document.getElementById('bulk-doi-val')||{}).value || '').trim();
+  if(isNaN(mi)) { toast('Pilih bulan dulu','err'); return; }
+  if(raw === '') { toast('Isi target DOI dulu','err'); return; }
+  var val = Math.max(0, parseInt(raw, 10) || 0);
+  var codes = Object.keys(STATE.masterData || {});
+  if(!codes.length) { toast('Master data belum dimuat','err'); return; }
+  codes.forEach(function(code){
+    if(!_fcDOIItemMonthOvr[code]) _fcDOIItemMonthOvr[code] = new Array(FC_MONTHS.length).fill(null);
+    _fcDOIItemMonthOvr[code][mi] = val;
+  });
+  try {
+    localStorage.setItem('fc_doi_item_month_ovr', JSON.stringify(_fcDOIItemMonthOvr));
+    cloudSave('fc_doi_item_month_ovr', JSON.stringify(_fcDOIItemMonthOvr));
+  } catch(e){}
+  toast(FC_MONTHS[mi] + ': target ' + val + ' hari diterapkan ke ' + codes.length + ' item ✓', 'ok');
+  document.getElementById('fc-bulk-doi-panel').style.display = 'none';
+  renderForecast();
+}
+function _fcBulkClearDOI() {
+  var mi = parseInt((document.getElementById('bulk-doi-month')||{}).value, 10);
+  if(isNaN(mi)) { toast('Pilih bulan dulu','err'); return; }
+  var n = 0;
+  Object.keys(_fcDOIItemMonthOvr).forEach(function(code){
+    if(_fcDOIItemMonthOvr[code] && _fcDOIItemMonthOvr[code][mi] != null) {
+      _fcDOIItemMonthOvr[code][mi] = null;
+      n++;
+      if(_fcDOIItemMonthOvr[code].every(function(v){ return v == null; })) delete _fcDOIItemMonthOvr[code];
+    }
+  });
+  try {
+    localStorage.setItem('fc_doi_item_month_ovr', JSON.stringify(_fcDOIItemMonthOvr));
+    cloudSave('fc_doi_item_month_ovr', JSON.stringify(_fcDOIItemMonthOvr));
+  } catch(e){}
+  toast('Override ' + FC_MONTHS[mi] + ' dihapus dari ' + n + ' item — balik ke default ✓', 'ok');
+  document.getElementById('fc-bulk-doi-panel').style.display = 'none';
+  renderForecast();
 }
 function _fcRenderDOI2Panel(q) {
   var panel = document.getElementById('fc-doi2-panel');
@@ -10877,6 +10960,7 @@ function _calcForecast(code, ospoIdx) {
   var prevSt = soh;
 
   for(var am = snapMoIdx; am < FC_MONTHS.length; am++) {
+    var am_DOI = _fcGetDOIForItem(code, am); // target DOI khusus bulan ini (override item+bulan jika ada)
     var req_a  = forecast[am];
     var ospr_a = (osprPool2[am]||0) + (osprPulled[am]||0);
 
@@ -10891,7 +10975,7 @@ function _calcForecast(code, ospoIdx) {
     _pfSt[am] = stockAfterOspo;
     for(var _pz = am+1; _pz < FC_MONTHS.length; _pz++) _pfSt[_pz] = 0;
     var _pfD = calcDOI(_pfSt)[am];
-    if(!_amOverridden && !_anyOverridden && _pfD >= 0 && _pfD < maxDOI) {
+    if(!_amOverridden && !_anyOverridden && _pfD >= 0 && _pfD < am_DOI) {
       for(var nx = am+1; nx < FC_MONTHS.length; nx++) {
         // Skip bulan yang sudah di-override manual — jangan ambil dari sana
         var _nxOverridden = _fcOspoOverride[code] && _fcOspoOverride[code][nx] != null;
@@ -10899,7 +10983,7 @@ function _calcForecast(code, ospoIdx) {
         if(ospoPool2[nx] <= 0) continue;
         var step2 = multiple > 0 ? multiple : 1;
         // Pull hanya sebesar deficit ke target DOI — bukan seluruh PO
-        var stockTarget = req_a * (maxDOI / WD);
+        var stockTarget = req_a * (am_DOI / WD);
         var deficit = Math.max(0, stockTarget - stockAfterOspo);
         if(deficit <= 0) break;
         var pullNeeded = Math.ceil(deficit / step2) * step2;
@@ -10911,15 +10995,15 @@ function _calcForecast(code, ospoIdx) {
         pullNotifs.push({ fromMonth: FC_MONTHS[nx], toMonth: FC_MONTHS[am], qty: pull });
         _pfSt[am] = stockAfterOspo;
         _pfD = calcDOI(_pfSt)[am];
-        if(_pfD >= maxDOI) break;
+        if(_pfD >= am_DOI) break;
       }
     }
 
     // Step 1.5: pull OSPR dari bulan berikutnya jika DOI masih kurang
-    if(!_amOverridden && !_anyOverridden && _pfD >= 0 && _pfD < maxDOI) {
+    if(!_amOverridden && !_anyOverridden && _pfD >= 0 && _pfD < am_DOI) {
       for(var nxr = am+1; nxr < FC_MONTHS.length; nxr++) {
         if((osprPool2[nxr]||0) <= 0) continue;
-        var deficit2 = Math.max(0, req_a * (maxDOI / WD) - stockAfterOspo);
+        var deficit2 = Math.max(0, req_a * (am_DOI / WD) - stockAfterOspo);
         if(deficit2 <= 0) break;
         var pullR = Math.min(osprPool2[nxr], Math.ceil(deficit2 / _step) * _step);
         if(pullR <= 0) continue;
@@ -10929,7 +11013,7 @@ function _calcForecast(code, ospoIdx) {
         ospr_a += pullR;
         pullNotifs.push({ fromMonth: FC_MONTHS[nxr], toMonth: FC_MONTHS[am], qty: pullR, type:'OSPR' });
         _pfSt[am] = stockAfterOspo; _pfD = calcDOI(_pfSt)[am];
-        if(_pfD >= maxDOI) break;
+        if(_pfD >= am_DOI) break;
       }
     }
 
@@ -10950,14 +11034,14 @@ function _calcForecast(code, ospoIdx) {
       // Bulan terakhir di FC_MONTHS selalu propose — tidak ada data bulan berikutnya
       var _isLastMonth = (am === FC_MONTHS.length - 1);
       var _skipNoDemand = (!_isLastMonth && _next3Req === 0 && stockAfterOspo >= 0);
-      if(_chkDOI >= 0 && _chkDOI < maxDOI && !_skipNoDemand) {
-        var propNeeded = req_a * (maxDOI / WD) - stockAfterOspo;
+      if(_chkDOI >= 0 && _chkDOI < am_DOI && !_skipNoDemand) {
+        var propNeeded = req_a * (am_DOI / WD) - stockAfterOspo;
         if(propNeeded > 0) {
           propQty = moq > 0 ? Math.max(moq, Math.ceil(propNeeded / _step) * _step) : Math.max(_step||1, Math.ceil(propNeeded / (_step||1)) * (_step||1));
           _chkStock[am] = stockAfterOspo + propQty;
           var _verDOI = calcDOI(_chkStock)[am];
           var _safeIter = 0;
-          while(_verDOI < maxDOI && propQty < req_a * 24 && _safeIter++ < 50) {
+          while(_verDOI < am_DOI && propQty < req_a * 24 && _safeIter++ < 50) {
             propQty += (_step > 0 ? _step : 1);
             _chkStock[am] = stockAfterOspo + propQty;
             _verDOI = calcDOI(_chkStock)[am];
@@ -11011,9 +11095,10 @@ function _calcForecast(code, ospoIdx) {
   var stockFc    = new Array(FC_MONTHS.length).fill(0);
   var prevStFc   = soh;
   for(var fm2 = snapMoIdx; fm2 < FC_MONTHS.length; fm2++) {
+    var fm_DOI = _fcGetDOIForItem(code, fm2); // target DOI khusus bulan ini (override item+bulan jika ada)
     var req_f  = forecast[fm2];
     var ospr_f = (osprPool2[fm2]||0) + (osprPulled[fm2]||0);
-    var minStF = req_f > 0 ? req_f * (maxDOI / WD) : 0;
+    var minStF = req_f > 0 ? req_f * (fm_DOI / WD) : 0;
     var needF  = Math.max(0, minStF + req_f - prevStFc - ospr_f);
     var fromPool = Math.min(needF > 0 ? Math.max(moq, Math.ceil(needF/_step)*_step) : 0, ospoPoolFc);
     ospoPoolFc -= fromPool;
@@ -11398,11 +11483,12 @@ function _fcDetailRow(code, fc, master) {
 
   var isFcView = (_fcGridViewMode === 'forecast');
   var stockClsFn = function(v,i){
-    var _di = fc.doi[i]; var _ti = _fcGetDOIForItem(code);
+    var _di = fc.doi[i]; var _ti = _fcGetDOIForItem(code, i);
     return v<0?'color:var(--red);font-weight:600':(_di>=0&&_di<_ti)?'color:var(--amber);font-weight:500':'color:var(--green)';
   };
-  var doiClsFn = function(v){
-    return v<0?'color:var(--red)':v<_fcGetDOIForItem(code)?'color:var(--amber)':v>99?'color:var(--muted)':'color:var(--green)';
+  var doiClsFn = function(v,i){
+    var _ti = _fcGetDOIForItem(code, i);
+    return v<0?'color:var(--red)':v<_ti?'color:var(--amber)':v>99?'color:var(--muted)':'color:var(--green)';
   };
   var toggleBtn = '<button onclick="_fcToggleGridView()" '
     + 'style="font-size:10px;padding:2px 10px;border-radius:3px;cursor:pointer;font-weight:600;border:1px solid;font-family:var(--font);'
@@ -11410,6 +11496,13 @@ function _fcDetailRow(code, fc, master) {
       ? 'background:rgba(20,184,166,.12);color:var(--teal);border-color:rgba(20,184,166,.3)">'
       : 'background:var(--bg4);color:var(--muted);border-color:var(--border)">')
     + (isFcView ? '⇄ Forecast' : '⇄ Aktual')
+    + '</button>';
+  var doiTargetToggleBtn = '<button onclick="_fcToggleDOITargetRow()" title="'+(_fcShowDOITarget?'Sembunyikan baris Target DOI':'Tampilkan baris Target DOI')+'" '
+    + 'style="font-size:10px;padding:2px 10px;border-radius:3px;cursor:pointer;font-weight:600;border:1px solid;font-family:var(--font);'
+    + (_fcShowDOITarget
+      ? 'background:rgba(245,158,11,.12);color:var(--amber);border-color:rgba(245,158,11,.3)">'
+      : 'background:var(--bg4);color:var(--muted);border-color:var(--border)">')
+    + (_fcShowDOITarget ? '👁 Target DOI' : '🚫 Target DOI')
     + '</button>';
 
   var grid = '<div style="overflow-x:auto;margin-top:10px">'
@@ -11420,10 +11513,37 @@ function _fcDetailRow(code, fc, master) {
     + '<th style="border-bottom:2px solid var(--border2);padding:4px 6px;text-align:right;white-space:nowrap;vertical-align:middle">'
     + '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">'
     + toggleBtn
+    + doiTargetToggleBtn
     + '<button onclick="event.stopPropagation();_fcResetOspoOspr(\'' + code + '\')" style="font-size:10px;padding:2px 8px;border-radius:3px;cursor:pointer;font-weight:600;border:1px solid var(--teal);color:var(--teal);background:transparent;font-family:var(--font)">↺ Reset PO</button>'
     + '</div></th>'
     + '</tr></thead>'
     + '<tbody>'
+    + (_fcShowDOITarget ? (function(){
+        var cells = '';
+        for(var ti = 0; ti < FC_MONTHS.length; ti++) {
+          var ovrArr  = _fcDOIItemMonthOvr[code];
+          var isOvr   = ovrArr && ovrArr[ti] != null;
+          var curVal  = _fcGetDOIForItem(code, ti);
+          var bdr = isOvr ? 'rgba(245,158,11,.4)' : 'var(--border2)';
+          var clr = isOvr ? 'var(--amber)' : 'var(--muted)';
+          var wgt = isOvr ? '700' : '400';
+          var bg  = isOvr ? 'var(--amber-bg)' : 'var(--bg3)';
+          cells += '<td style="padding:2px;width:92px;text-align:right" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()">'
+            + '<div style="display:inline-flex;align-items:stretch;border:1px solid '+bdr+';border-radius:4px;overflow:hidden;background:'+bg+'">'
+            + '<input type="text" inputmode="numeric" value="'+curVal+'"'
+            +   ' data-code="'+code+'" data-mi="'+ti+'"'
+            +   ' oninput="_fcDOITargetEdit(this)" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()"'
+            +   ' style="width:54px;text-align:right;font-family:var(--mono);font-size:11px;font-weight:'+wgt+';color:'+clr+';background:transparent;border:none;padding:3px 4px;outline:none">'
+            + '<button type="button" tabindex="-1" title="Hapus override — pakai default General/Impor lagi"'
+            +   ' data-code="'+code+'" data-mi="'+ti+'"'
+            +   ' onclick="event.stopPropagation();_fcDOITargetClear(this)" onmousedown="event.stopPropagation()"'
+            +   ' style="width:16px;border:none;border-left:1px solid '+bdr+';background:transparent;cursor:pointer;padding:0;color:var(--muted);font-size:9px;line-height:1">↺</button>'
+            + '</div></td>';
+        }
+        return '<tr style="border-bottom:1px dotted var(--border)" data-rowlabel="doitarget">'
+          + '<td style="padding:5px 8px;font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--text);white-space:nowrap;width:140px">Target DOI</td>'
+          + cells + '</tr>';
+      })() : '')
     + gRow('Requirement', fc.forecast, function(){ return 'color:var(--text)'; })
     + (isFcView
         ? gRow('Adjusted OSPO', fc.forecastOspo, function(v){ return v>0?'color:var(--teal);font-weight:600':'color:var(--hint)'; })
@@ -11742,7 +11862,7 @@ function _fcRenderRekap(el, items, fcData, fStatus) {
           ? '<span style="color:#c00;font-weight:700">⛔ URGENT</span>'
           : '<span style="color:#856404">🟡 BELUM - Buka: '+fmt(r.createPRBy)+' ('+r.daysLeft+' hari)</span>');
     html += '<tr style="'+rowBg+'">'
-      + '<td style="'+tdS+'text-align:center"><input type="checkbox" class="rekap-chk" data-code="'+r.code+'" onchange="_fcRekapUpdatePrintBtn()"></td>'
+      + '<td style="'+tdS+'text-align:center"><input type="checkbox" class="rekap-chk" data-code="'+r.code+'" data-idx="'+r.proposeIdx+'" onchange="_fcRekapUpdatePrintBtn()"></td>'
       + '<td style="'+tdS+'text-align:center;color:var(--muted);font-size:11px">'+(r.site||'—')+'</td>'
       + '<td style="'+tdS+'font-family:var(--mono);font-size:11px;white-space:nowrap">'+r.code+'</td>'
       + '<td style="'+tdS+'font-weight:500;max-width:220px">'+r.name+'</td>'
@@ -11818,11 +11938,17 @@ function _fcDoiFromStock(forecast, s, monthIdx) {
 // Reuse _calcForecast via window._fcRekapFcData (di-set oleh _fcRenderRekap).
 // Browser print dialog menangani dua kebutuhan sekaligus: cetak fisik & Save as PDF.
 function _fcPrintLampiranPR() {
-  var codesSeen = {};
+  // Map code -> Set bulan (proposeIdx) yang DICENTANG SAJA, bukan semua bulan
+  // yang punya Propose PR di fc.propose — supaya lampiran hanya menampilkan
+  // apa yang benar-benar dipilih user, bukan seluruh kebutuhan ke depan.
+  var selByCode = {};
   var codes = [];
   document.querySelectorAll('.rekap-chk:checked').forEach(function(chk){
     var c = chk.getAttribute('data-code');
-    if(c && !codesSeen[c]) { codesSeen[c] = true; codes.push(c); }
+    var idx = parseInt(chk.getAttribute('data-idx'), 10);
+    if(!c || isNaN(idx)) return;
+    if(!selByCode[c]) { selByCode[c] = {}; codes.push(c); }
+    selByCode[c][idx] = true;
   });
   if(!codes.length) { toast('Pilih minimal 1 item dulu','err'); return; }
 
@@ -11835,7 +11961,7 @@ function _fcPrintLampiranPR() {
     if(v == null || v === 0) return '–';
     return v.toLocaleString('id-ID', {minimumFractionDigits: v % 1 !== 0 ? 2 : 0, maximumFractionDigits: 2});
   };
-  var rowHtml = function(label, arr, hiSet, doiBeforeMap, bold) {
+  var rowHtml = function(label, arr, hiSet, doiBeforeMap, bold, strongBg) {
     var cells = '';
     for(var i = 0; i < nMon; i++) {
       var isHi = !!hiSet[i];
@@ -11843,7 +11969,8 @@ function _fcPrintLampiranPR() {
       if(isHi && doiBeforeMap && doiBeforeMap[i] != null) {
         val = doiBeforeMap[i] + ' → <span style="color:#1d9e75">' + fmt2((arr||[])[i]) + '</span>';
       }
-      cells += '<td style="text-align:right;padding:1px 3px;' + (isHi ? 'background:#fdf4e3;' : '') + (bold ? 'font-weight:500;' : '') + '">' + val + '</td>';
+      var bg = isHi ? (strongBg ? 'background:#fde047;' : 'background:#fdf4e3;') : '';
+      cells += '<td style="text-align:right;padding:1px 3px;' + bg + (bold ? 'font-weight:500;' : '') + '">' + val + '</td>';
     }
     return '<tr><td style="padding:1px 3px;color:#555;' + (bold ? 'font-weight:500;' : '') + 'white-space:nowrap">' + label + '</td>' + cells + '</tr>';
   };
@@ -11857,17 +11984,20 @@ function _fcPrintLampiranPR() {
     var name   = realN ? STATE.realNameData[code] : (master.desc || (STATE.mrpData[code]||{}).desc || '');
     var iType  = /^3/.test(code) ? 'RM' : 'PM';
 
-    // Semua bulan dengan Propose PR > 0 — bukan cuma yang pertama, karena satu item
-    // bisa butuh PR di lebih dari satu bulan sekaligus.
-    var hiSet = {};
+    // Hanya bulan yang DICENTANG user untuk item ini (selByCode[code]) — bukan
+    // semua bulan yang punya Propose PR > 0 di fc.propose.
+    var hiSet = selByCode[code] || {};
     var doiBeforeMap = {};
-    var badgeParts = [];
-    (fc.propose||[]).forEach(function(v, i){
-      if(v <= 0) return;
-      hiSet[i] = true;
+    Object.keys(hiSet).forEach(function(idxStr){
+      var i = parseInt(idxStr, 10);
+      var v = (fc.propose||[])[i] || 0;
+      if(v <= 0) return; // jaga-jaga, harusnya selalu >0 karena ini sumbernya dari Rekap PR
       var stockBefore = _fcStockBeforePR(fc, i);
       doiBeforeMap[i] = _fcDoiFromStock(fc.forecast, stockBefore, i);
-      badgeParts.push(fmt2(v) + ' ' + (master.uom||'') + ' @ ' + monthsHdr[i]);
+    });
+    // Badge diurutkan berdasar bulan (bukan urutan checkbox dicentang)
+    var badgeParts = Object.keys(hiSet).map(Number).sort(function(a,b){return a-b;}).map(function(i){
+      return fmt2((fc.propose||[])[i]||0) + ' ' + (master.uom||'') + ' @ ' + monthsHdr[i];
     });
 
     var headBadge = badgeParts.length
@@ -11890,13 +12020,13 @@ function _fcPrintLampiranPR() {
       +   rowHtml('OSPR', fc.ospr, hiSet)
       +   rowHtml('Stock ending', fc.stockFc, hiSet)
       +   rowHtml('DOI (hari)', fc.doiFc, hiSet, doiBeforeMap)
-      +   rowHtml('Propose PR', fc.propose, hiSet, null, true)
+      +   rowHtml('Propose PR', fc.propose, hiSet, null, true, true)
       + '</tbody></table>'
       + '</div>';
   });
 
   var docHtml = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Lampiran Forecast PR</title>'
-    + '<style>@page{margin:14mm}body{font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;margin:0;padding:20px}</style>'
+    + '<style>@page{margin:14mm}body{font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;margin:0;padding:20px;-webkit-print-color-adjust:exact;print-color-adjust:exact;color-adjust:exact}*{-webkit-print-color-adjust:exact;print-color-adjust:exact;color-adjust:exact}</style>'
     + '</head><body>'
     + '<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:1.5px solid #1a1a1a;padding-bottom:8px;margin-bottom:14px">'
     +   '<p style="font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:#555;margin:0">Lampiran forecast — dokumen pendukung PR</p>'
@@ -13283,6 +13413,11 @@ function _fcToggleGridView() {
   _fcGridViewMode = (_fcGridViewMode === 'forecast') ? 'aktual' : 'forecast';
   renderForecast();
 }
+function _fcToggleDOITargetRow() {
+  _fcShowDOITarget = !_fcShowDOITarget;
+  localStorage.setItem('fc_show_doi_target', _fcShowDOITarget ? '1' : '0');
+  renderForecast();
+}
 
 // ─── Inline propose edit ──────────────────────────────────────────────────────
 // ─── Reset semua propose PR ──────────────────────────────────────────────────
@@ -13388,7 +13523,6 @@ function _fcLiveRecalc(code) {
   var detEl   = document.getElementById('fc-detail-' + code);
   if(!detEl) return;
   var isFcV   = (_fcGridViewMode === 'forecast');
-  var doi_t   = _fcGetDOIForItem(code);
 
   var stockVals = isFcV ? fc.stockFc : fc.stock;
   var doiVals   = isFcV ? fc.doiFc   : fc.doi;
@@ -13407,13 +13541,15 @@ function _fcLiveRecalc(code) {
       stockVals.forEach(function(v, i) {
         if(!tds[i]) return;
         var _di2 = doiVals[i];
-        var cls = v<0 ? 'color:var(--red);font-weight:600' : (_di2>=0&&_di2<doi_t) ? 'color:var(--amber);font-weight:500' : 'color:var(--green)';
+        var _ti2 = _fcGetDOIForItem(code, i);
+        var cls = v<0 ? 'color:var(--red);font-weight:600' : (_di2>=0&&_di2<_ti2) ? 'color:var(--amber);font-weight:500' : 'color:var(--green)';
         tds[i].innerHTML = '<span style="font-family:var(--mono);font-size:11px;'+cls+'">'+n_id(v)+'</span>';
       });
     } else if(lbl === 'doi') {
       doiVals.forEach(function(v, i) {
         if(!tds[i]) return;
-        var cls = v<0 ? 'color:var(--red)' : v<doi_t ? 'color:var(--amber)' : v>99 ? 'color:var(--muted)' : 'color:var(--green)';
+        var _ti3 = _fcGetDOIForItem(code, i);
+        var cls = v<0 ? 'color:var(--red)' : v<_ti3 ? 'color:var(--amber)' : v>99 ? 'color:var(--muted)' : 'color:var(--green)';
         var txt = v > 0 ? n_id(Math.round(v)) : (v < 0 ? '<span style="color:var(--red)">' + n_id(Math.round(v)) + '</span>' : '—');
         tds[i].innerHTML = '<span style="font-family:var(--mono);font-size:11px;'+cls+'">'+txt+'</span>';
       });
@@ -13440,6 +13576,22 @@ function _fcLiveRecalc(code) {
         inp.style.background = pv > 0 ? 'var(--amber-bg)' : '';
         var wrap = inp.parentNode;
         if(wrap) wrap.style.border = pv > 0 ? '1px solid rgba(245,158,11,.4)' : '1px solid var(--border2)';
+      });
+    } else if(lbl === 'doitarget') {
+      tr.querySelectorAll('input[data-code][data-mi]').forEach(function(inp) {
+        if(document.activeElement === inp) return; // jangan ganggu yang sedang diketik
+        var mi = parseInt(inp.getAttribute('data-mi'));
+        var ovrArr = _fcDOIItemMonthOvr[code];
+        var isOvr = ovrArr && ovrArr[mi] != null;
+        var curVal = _fcGetDOIForItem(code, mi);
+        inp.value = curVal;
+        inp.style.color = isOvr ? 'var(--amber)' : 'var(--muted)';
+        inp.style.fontWeight = isOvr ? '700' : '400';
+        var wrap = inp.parentNode;
+        if(wrap) {
+          wrap.style.borderColor = isOvr ? 'rgba(245,158,11,.4)' : 'var(--border2)';
+          wrap.style.background  = isOvr ? 'var(--amber-bg)' : 'var(--bg3)';
+        }
       });
     }
   });
@@ -13554,6 +13706,42 @@ function _fcProposeEdit(input) {
   input.style.fontWeight = qty > 0 ? '700' : '400';
   // Persist to localStorage
   try { localStorage.setItem('fc_propose', JSON.stringify(_fcPropose)); cloudSave('fc_propose', JSON.stringify(_fcPropose)); } catch(e){}
+  _fcLiveRecalc(code);
+}
+
+// ─── Target DOI override per item+bulan ────────────────────────────────────
+// Kosong/dihapus = pakai default (General/Impor berdasar supplier).
+// Angka eksplisit = override khusus item+bulan itu saja, bulan/item lain tidak berubah.
+function _fcDOITargetEdit(input) {
+  var code = input.getAttribute('data-code');
+  var mi   = parseInt(input.getAttribute('data-mi'));
+  var raw  = (input.value||'').trim();
+  if(!_fcDOIItemMonthOvr[code]) _fcDOIItemMonthOvr[code] = new Array(FC_MONTHS.length).fill(null);
+  if(raw === '') {
+    _fcDOIItemMonthOvr[code][mi] = null;
+  } else {
+    var val = parseInt(raw, 10);
+    _fcDOIItemMonthOvr[code][mi] = isNaN(val) ? null : Math.max(0, val);
+  }
+  if(_fcDOIItemMonthOvr[code].every(function(v){ return v == null; })) delete _fcDOIItemMonthOvr[code];
+  try {
+    localStorage.setItem('fc_doi_item_month_ovr', JSON.stringify(_fcDOIItemMonthOvr));
+    cloudSave('fc_doi_item_month_ovr', JSON.stringify(_fcDOIItemMonthOvr));
+  } catch(e){}
+  _fcLiveRecalc(code);
+}
+
+function _fcDOITargetClear(btn) {
+  var code = btn.getAttribute('data-code');
+  var mi   = parseInt(btn.getAttribute('data-mi'));
+  if(_fcDOIItemMonthOvr[code]) {
+    _fcDOIItemMonthOvr[code][mi] = null;
+    if(_fcDOIItemMonthOvr[code].every(function(v){ return v == null; })) delete _fcDOIItemMonthOvr[code];
+  }
+  try {
+    localStorage.setItem('fc_doi_item_month_ovr', JSON.stringify(_fcDOIItemMonthOvr));
+    cloudSave('fc_doi_item_month_ovr', JSON.stringify(_fcDOIItemMonthOvr));
+  } catch(e){}
   _fcLiveRecalc(code);
 }
 
