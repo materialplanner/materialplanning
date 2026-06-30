@@ -11538,7 +11538,15 @@ function _fcDetailRow(code, fc, master) {
             + '</div></td>';
         }
         return '<tr style="border-bottom:1px dotted var(--border)" data-rowlabel="doitarget">'
-          + '<td style="padding:5px 8px;font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--text);white-space:nowrap;width:140px">Target DOI</td>'
+          + '<td style="padding:5px 8px;font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--text);white-space:nowrap;width:140px">'
+          +   'Target DOI<br>'
+          +   '<span style="display:inline-flex;align-items:center;gap:3px;margin-top:3px;text-transform:none;letter-spacing:0;font-weight:400" onclick="event.stopPropagation()">'
+          +     '<input type="text" inputmode="numeric" id="fc-fillall-'+code+'" placeholder="—" onclick="event.stopPropagation()"'
+          +       ' style="width:30px;font-size:9.5px;padding:1px 3px;border:1px solid var(--border2);border-radius:3px;background:var(--bg3);color:var(--text);text-align:center;font-family:var(--mono)">'
+          +     '<button onclick="event.stopPropagation();_fcDOITargetFillAll(\''+code+'\')" title="Isi semua bulan item ini dengan angka di kiri"'
+          +       ' style="font-size:8.5px;padding:1px 5px;border-radius:3px;border:1px solid var(--border2);background:var(--bg3);color:var(--muted);cursor:pointer;white-space:nowrap">→ Semua</button>'
+          +   '</span>'
+          + '</td>'
           + cells + '</tr>';
       })() : '')
     + gRow('Requirement', fc.forecast, function(){ return 'color:var(--text)'; })
@@ -13761,6 +13769,22 @@ function _fcDOITargetClear(btn) {
     localStorage.setItem('fc_doi_item_month_ovr', JSON.stringify(_fcDOIItemMonthOvr));
     cloudSave('fc_doi_item_month_ovr', JSON.stringify(_fcDOIItemMonthOvr));
   } catch(e){}
+  _fcLiveRecalc(code);
+}
+function _fcDOITargetFillAll(code) {
+  var inp = document.getElementById('fc-fillall-' + code);
+  if(!inp) return;
+  var raw = (inp.value || '').trim();
+  if(raw === '') { toast('Isi angka dulu di kotak kecilnya','err'); return; }
+  var val = Math.max(0, parseInt(raw, 10) || 0);
+  if(!_fcDOIItemMonthOvr[code]) _fcDOIItemMonthOvr[code] = new Array(FC_MONTHS.length).fill(null);
+  for(var i = 0; i < FC_MONTHS.length; i++) _fcDOIItemMonthOvr[code][i] = val;
+  try {
+    localStorage.setItem('fc_doi_item_month_ovr', JSON.stringify(_fcDOIItemMonthOvr));
+    cloudSave('fc_doi_item_month_ovr', JSON.stringify(_fcDOIItemMonthOvr));
+  } catch(e){}
+  inp.value = '';
+  toast('Target DOI semua bulan item ini diset ke ' + val + ' hari ✓','ok');
   _fcLiveRecalc(code);
 }
 
