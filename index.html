@@ -3197,8 +3197,11 @@ function _applyRealtimeChanges(keys) {
           Object.keys(cloudConf).forEach(function(ck){
             var cc = cloudConf[ck], lc = STATE.poConfirmations[ck];
             if(!lc) { STATE.poConfirmations[ck] = cc; return; }
+            // Newest confUpd menang — TANPA pengecualian.
+            // Guard lama (skip kalau cc tidak punya confDate tapi lc punya) memblokir
+            // penghapusan menyebar ke device lain → field terhapus di device A tetap
+            // hidup di device B, lalu ke-push balik ke cloud dan "muncul lagi" di device A.
             if((cc.confUpd||'') > (lc.confUpd||'')) {
-              if(!cc.confDate && lc.confDate) return;
               STATE.poConfirmations[ck] = cc;
             }
           });
@@ -5140,6 +5143,17 @@ function setPOConfQty(el) {
     STATE.poConfirmations[key].confQty = el.value;
   } else {
     delete STATE.poConfirmations[key].confQty;
+    // Hapus juga legacy field di poOverrides (asal dari approve Jadwal Pengiriman)
+    // Tanpa ini, render fallback _pconf.confQty || ovr.confQty membuat nilai lama muncul lagi
+    if(STATE.poOverrides[key]) {
+      delete STATE.poOverrides[key].confQty;
+      if(!STATE.poOverrides[key].confDate) delete STATE.poOverrides[key].confSource;
+      // confUpd di-SET ke timestamp baru, bukan dihapus — supaya penghapusan ini
+      // menang saat di-merge ke device lain (merge pakai "confUpd terbaru menang")
+      STATE.poOverrides[key].confUpd = new Date().toISOString();
+      localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
+      cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
+    }
   }
   STATE.poConfirmations[key].confUpd = new Date().toISOString();
   el.style.color = el.value ? 'var(--amber)' : 'var(--muted)';
@@ -5163,6 +5177,17 @@ function setPOConfDate(el) {
   } else {
     delete STATE.poConfirmations[key].confDate;
     delete STATE.poConfirmations[key].confSource;
+    // Hapus juga legacy field di poOverrides (asal dari approve Jadwal Pengiriman)
+    // Tanpa ini, render fallback _pconf.confDate || ovr.confDate membuat tanggal lama muncul lagi
+    if(STATE.poOverrides[key]) {
+      delete STATE.poOverrides[key].confDate;
+      delete STATE.poOverrides[key].confSource;
+      // confUpd di-SET ke timestamp baru, bukan dihapus — supaya penghapusan ini
+      // menang saat di-merge ke device lain (merge pakai "confUpd terbaru menang")
+      STATE.poOverrides[key].confUpd = new Date().toISOString();
+      localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
+      cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
+    }
   }
   STATE.poConfirmations[key].confUpd = new Date().toISOString();
   el.style.color = el.value ? 'var(--amber)' : 'var(--muted)';
