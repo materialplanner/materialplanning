@@ -7583,24 +7583,39 @@ function generateSchedule(typeFilter) {
     });
 
     // Max per day for this type
-    var maxPerDayType = Math.max(2, Math.ceil(group.length / delivWeek.length));
+    // Hapus Math.max(2,...) — minimum 2 per hari bikin group kecil (PM/FG) numpuk di Senin-Rabu
+    // sehingga Kamis-Jumat selalu kosong. Pakai ceil saja, minimum alami = 1.
+    var maxPerDayType = Math.ceil(group.length / delivWeek.length) || 1;
 
-    for(var iter = 0; iter < 20; iter++) {
-      var moved = false;
-      for(var wi = 0; wi < delivWeek.length - 1; wi++) {
-        var iso  = localISO(delivWeek[wi]);
-        var next = localISO(delivWeek[wi+1]);
-        var list = typeBuckets[iso];
-        if(list && list.length > maxPerDayType) {
+    // Multi-pass cascade (3 kali) supaya distribusi lebih optimal
+    // Single-pass kadang tidak konvergen kalau ada group yang overlapping dari beberapa tipe
+    var delivISOList = delivWeek.map(function(d){ return localISO(d); });
+    for(var _pass = 0; _pass < 3; _pass++) {
+      var _moved = false;
+      for(var wi = 0; wi < delivISOList.length - 1; wi++) {
+        var iso  = delivISOList[wi];
+        var next = delivISOList[wi + 1];
+        var list = typeBuckets[iso] || [];
+        if(list.length > maxPerDayType) {
+          // Sort: paling urgent (coverage terdekat) tetap di hari ini, sisanya geser ke besok
+          // Supplier dengan _isManual=true tidak dipindah (tanggal sudah di-set manual)
           list.sort(function(a,b){ return a.earliestCoverage - b.earliestCoverage; });
-          var toMove = list.pop();
-          toMove.assignedISO = nextWorkday(next);
+          var kept = [], moved = [];
+          list.forEach(function(sup){
+            if(sup._isManual) { kept.push(sup); return; } // jangan pindahkan yang manual
+            if(kept.length < maxPerDayType) kept.push(sup);
+            else moved.push(sup);
+          });
+          typeBuckets[iso] = kept;
           if(!typeBuckets[next]) typeBuckets[next] = [];
-          typeBuckets[next].push(toMove);
-          moved = true;
+          moved.forEach(function(sup){
+            sup.assignedISO = nextWorkday(next);
+            typeBuckets[next].push(sup);
+          });
+          if(moved.length) _moved = true;
         }
       }
-      if(!moved) break;
+      if(!_moved) break; // sudah stabil, tidak perlu pass lagi
     }
   });
 
