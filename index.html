@@ -7776,6 +7776,10 @@ function renderSchedule() {
   }
   var byDate = {};
   items.forEach(function(s){ if(!byDate[s.date]) byDate[s.date]=[]; byDate[s.date].push(s); });
+  // Build lookup: docNum → supplierName dari live poData (supaya nama supplier selalu up-to-date)
+  var _supByDocNum = {};
+  (STATE.poData||[]).forEach(function(p){ if(p.docNum && p.supplierName) _supByDocNum[String(p.docNum)] = p.supplierName; });
+  (STATE.osprData||[]).forEach(function(p){ if(p.docNum && p.supplierName) _supByDocNum[String(p.docNum)] = p.supplierName; });
   var html = '';
   var totalAll = 0;
   Object.keys(byDate).sort(function(a,b){
@@ -7866,7 +7870,12 @@ function renderSchedule() {
       html += '<div class="scard ' + e.status + '">' +
         '<div class="chk ' + (isOn?'on':'') + '" onclick="' + (_isAdmin?'toggleApprove('+idx+')':'_requireAdmin(\'approve\')') + '">' + (isOn?'✓':'') + '</div>' +
         '<div class="sinfo" style="min-width:0">' +
-          '<div class="sinfo-name">' + e.supName + ' ' + sb + typeTags + (e.isManual?'<span class="badge b-amber" style="margin-left:5px">Manual</span>':'') + '</div>' +
+          '<div class="sinfo-name">' + (function(){
+            // Ambil nama supplier dari live poData berdasarkan PO pertama di card
+            var _firstDocNum = e.entries && e.entries[0] && e.entries[0].pos && e.entries[0].pos[0]
+              ? String(e.entries[0].pos[0].docNum) : null;
+            return (_firstDocNum && _supByDocNum[_firstDocNum]) ? _supByDocNum[_firstDocNum] : e.supName;
+          })() + ' ' + sb + typeTags + (e.isManual?'<span class="badge b-amber" style="margin-left:5px">Manual</span>':'') + '</div>' +
           '<div style="display:flex;align-items:center;gap:8px;margin-top:4px">' +
             '<span style="font-size:10.5px;color:var(--muted)">Tgl kirim:</span>' +
             '<input type="date" value="' + dateISO + '" data-sched-idx="' + idx + '" onchange="saveSchedDate(this)" ' + (_isAdmin?'':' disabled ') +
@@ -8090,6 +8099,7 @@ function toggleApprove(idx) {
   // Set / hapus poOverrides.date berdasarkan status approve
   if(e.entries && e.date) {
     var iso = e.date.split('/').reverse().join('-'); // dd/mm/yyyy → yyyy-mm-dd
+    var _approveNow = new Date().toISOString(); // timestamp untuk dateUpd
     (e.entries||[]).forEach(function(en){
       (en.pos||[]).forEach(function(po){
         var key = po.docNum + '_' + po.itemCode;
@@ -8098,11 +8108,13 @@ function toggleApprove(idx) {
           STATE.poOverrides[key].date    = iso;
           STATE.poOverrides[key].isManual = false;
           STATE.poOverrides[key].isAuto   = true;
+          STATE.poOverrides[key].dateUpd  = _approveNow; // ← fix: set dateUpd supaya merge bisa track
         } else {
           // Un-approve → hapus tanggal kalau bukan manual user
           if(!STATE.poOverrides[key].isManual) {
             delete STATE.poOverrides[key].date;
             delete STATE.poOverrides[key].isAuto;
+            STATE.poOverrides[key].dateUpd = _approveNow; // ← fix: update dateUpd saat clear juga
           }
         }
       });
