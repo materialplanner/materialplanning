@@ -2232,7 +2232,7 @@ function _aiToolSearch(query) {
   }
   // Return full detail menggunakan _aiBuildCtx helpers inline
   var out = results.map(function(p){
-    var stok = Math.round(((p.stockBTG||0)+(p.stockSNG||0))*100)/100;
+    var stok = Math.round(((p.stockBTG||0)+(p.stockSNG||0)+(p.stockJTK||0))*100)/100;
     var mrp  = STATE.mrpData && STATE.mrpData[p.productCode];
     var mrpBul={};
     if(mrp&&mrp.months){ var months=typeof FC_MONTHS!=='undefined'?FC_MONTHS:[];
@@ -2465,7 +2465,7 @@ function _aiBuildCtx() {
   }
 
   function buildDetail(p) {
-    var stok = Math.round(((p.stockBTG||0)+(p.stockSNG||0))*100)/100;
+    var stok = Math.round(((p.stockBTG||0)+(p.stockSNG||0)+(p.stockJTK||0))*100)/100;
     var obj = {
       kode: p.productCode,
       nama: dispFn(p) || p.productCode,
@@ -2478,6 +2478,7 @@ function _aiBuildCtx() {
       stok_total: stok,
       stok_BTG: Math.round((p.stockBTG||0)*100)/100,
       stok_SNG: Math.round((p.stockSNG||0)*100)/100,
+      stok_JTK: Math.round((p.stockJTK||0)*100)/100,
       doi_hari: Math.round(p.doiFC||0),
       doi_real_matcom: p.doiMatcom && p.doiMatcom!=='\u221e' ? Math.round(p.doiMatcom) : null,
       coverage_habis: p.coverageDateStr || fmtCov(p.coverageDate),
@@ -2515,7 +2516,7 @@ function _aiBuildCtx() {
   function compact(p){
     return {kode:p.productCode,nama:dispFn(p)||p.productCode,
       doi:Math.round(p.doiFC||0),coverage:p.coverageDateStr||fmtCov(p.coverageDate),
-      supplier:p.supplier,stok:Math.round(((p.stockBTG||0)+(p.stockSNG||0))*100)/100,
+      supplier:p.supplier,stok:Math.round(((p.stockBTG||0)+(p.stockSNG||0)+(p.stockJTK||0))*100)/100,
       mrp_bln:Math.round(p.actualMRP||0),po_open:Math.round(p.totalIncoming||0)};
   }
 
@@ -4097,6 +4098,7 @@ async function testSAP() {
 // ─── LOAD STOCK (ReportId 90) ─────────────────────────────────────────────
 var BTG_WHS = ['GBEX','GBFP','GBHB','GBHK','GBJD','GBNS','GKIB','GSBC','GTIM','PFFG'];
 var SNG_WHS = ['SBFP','SBHB','SBHK','SFFG','SKIB','SSBC'];
+var JTK_WHS = ['GTJT']; // Gudang Jatirangon
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ─── SAP LOAD FUNCTIONS — DIRECT, PARALLEL, WITH TIMEOUT ────────────────────
@@ -4145,7 +4147,7 @@ async function sapFetchTO(reportId, params, _retry) {
 async function loadStock() {
   _setSyncItem('stock', 'loading');
   try {
-    var whsParam = JSON.stringify(BTG_WHS.concat(SNG_WHS));
+    var whsParam = JSON.stringify(BTG_WHS.concat(SNG_WHS).concat(JTK_WHS));
     var itemGroupParam = JSON.stringify([101,102,103,104]);
     var ctrl = new AbortController();
     var timer = setTimeout(function(){ ctrl.abort(); }, 30000);
@@ -4163,9 +4165,10 @@ async function loadStock() {
       if((r.UOM||'').toUpperCase() === 'GR') onHand /= 1000;
       if(whs === 'GBJD' && ic && !/^11|^12/.test(String(ic))) return;
       if(onHand <= 0) return;
-      if(!STATE.stockData[ic]) STATE.stockData[ic] = { btg: 0, sng: 0 };
+      if(!STATE.stockData[ic]) STATE.stockData[ic] = { btg: 0, sng: 0, jtk: 0 };
       if(BTG_WHS.indexOf(whs) >= 0) STATE.stockData[ic].btg += onHand;
       if(SNG_WHS.indexOf(whs) >= 0) STATE.stockData[ic].sng += onHand;
+      if(JTK_WHS.indexOf(whs) >= 0) STATE.stockData[ic].jtk += onHand;
     });
     _setSyncItem('stock', 'ok');
     toast(Object.keys(STATE.stockData).length + ' item stock ✓', 'ok');
@@ -5137,7 +5140,7 @@ function _refreshProjectionIncoming(itemCode) {
   proj.qtyIncoming   = cqTotal > 0 ? Math.round(cqTotal) : 0;
   proj.totalOpenPOQty = Math.round(opqTotal);
   // Recalculate doiAfterIncoming + coverageAfterIncoming
-  var totalStock = (proj.stockBTG||0) + (proj.stockSNG||0);
+  var totalStock = (proj.stockBTG||0) + (proj.stockSNG||0) + (proj.stockJTK||0);
   var estUsgMax  = proj.estUsageMRP || proj.estUsageMax || 0;
   var d = estUsgMax > 0 ? (totalStock + opqTotal) / estUsgMax : (totalStock + opqTotal > 0 ? 999 : 0);
   proj.doiAfterIncoming = d >= 999 ? 999 : Math.floor(d);
@@ -6080,7 +6083,8 @@ function _doBuildProjection() {
 
     var stockBTG = stockData[code] ? Math.round(stockData[code].btg * 100) / 100 : 0;
     var stockSNG = stockData[code] ? Math.round(stockData[code].sng * 100) / 100 : 0;
-    var totalStock = stockBTG + stockSNG;
+    var stockJTK = stockData[code] ? Math.round((stockData[code].jtk||0) * 100) / 100 : 0;
+    var totalStock = stockBTG + stockSNG + stockJTK;
 
     // Total incoming GRPO bulan ini (semua tgl)
     var totalIncoming = grpoByItem[code] || 0;
@@ -6216,8 +6220,8 @@ function _doBuildProjection() {
     projection.push({
       productCode: code, description: description, realName: realName, uom: uom,
       moq: master.moq || 0, supplier: supplier,
-      site: stockBTG > 0 && stockSNG > 0 ? 'BTG&SNG' : (stockBTG > 0 ? 'BTG' : (stockSNG > 0 ? 'SNG' : '')),
-      stockBTG: Math.round(stockBTG), stockSNG: Math.round(stockSNG),
+      site: [stockBTG>0?'BTG':null,stockSNG>0?'SNG':null,stockJTK>0?'JTK':null].filter(Boolean).join('&')||'',
+      stockBTG: Math.round(stockBTG), stockSNG: Math.round(stockSNG), stockJTK: Math.round(stockJTK),
       doiFC: doiFC >= 999 ? '\u221e' : Math.floor(doiFC),
       doiMatcom: doiMatcom >= 999 ? '\u221e' : Math.floor(doiMatcom),
       doiFCNum: doiFC >= 999 ? 999 : doiFC,
@@ -6468,6 +6472,7 @@ function renderProjection() {
       td((p.site||'—'),'site') +
       td('<span class="mono td-right" style="display:block">' + n_id(p.stockBTG||0) + '</span>','stockbtg') +
       td('<span class="mono td-right" style="display:block">' + n_id(p.stockSNG||0) + '</span>','stocksng') +
+      td('<span class="mono td-right" style="display:block">' + n_id(p.stockJTK||0) + '</span>','stockjtk') +
       td('<span class="mono">' + p.doiFC + '</span>','doifc','text-align:right') +
       td('<span class="mono">' + p.doiMatcom + '</span>','doimatcom','text-align:right') +
       td('<span class="mono">' + n_id(p.estUsageMRP||0) + '</span>','estusg','text-align:right') +
@@ -6549,6 +6554,7 @@ function renderProjection() {
     th('Site','site') +
     th('Stock BTG','stockbtg') +
     th('Stock SNG','stocksng') +
+    th('Stock JTK','stockjtk') +
     th('DOI Max','doifc') +
     th('DOI Real','doimatcom') +
     th('Est Usg/day','estusg') +
@@ -7390,7 +7396,7 @@ function generateSchedule(typeFilter) {
       if(typeFilter === 'RM' && p.itemType !== 'RM') return false;
       if(typeFilter === 'PM' && p.itemType !== 'PM') return false;
     }
-    var stockTotal = (p.stockBTG || 0) + (p.stockSNG || 0);
+    var stockTotal = (p.stockBTG || 0) + (p.stockSNG || 0) + (p.stockJTK || 0);
     var confirmed  = confQtyByItem[p.productCode] || 0;
     var scheduled  = scheduledQtyByItem[p.productCode] || 0;
     var totalCover = confirmed + scheduled;
@@ -7631,7 +7637,7 @@ function generateSchedule(typeFilter) {
         if(da !== db) return da.localeCompare(db);
         return String(a.docNum).localeCompare(String(b.docNum));
       });
-      var needed = Math.max(0, (item.max3MRP || 0) - (item.stockBTG||0) - (item.stockSNG||0) - (confQtyByItem[item.productCode] || 0));
+      var needed = Math.max(0, (item.max3MRP || 0) - (item.stockBTG||0) - (item.stockSNG||0) - (item.stockJTK||0) - (confQtyByItem[item.productCode] || 0));
       // Ambil multiple dari master data — PO dengan openQty < multiple dilewati
       var masterItem = STATE.masterData && STATE.masterData[item.productCode];
       var multipleQty = masterItem ? (masterItem.multiple || 0) : 0;
@@ -8598,7 +8604,7 @@ function _projBuildRows() {
   var headers = ['Product Code','Description','Real Name','UOM','Supplier','Site','Stock BTG','Stock SNG','DOI FC','DOI Matcom','Est Usg/day MRP','Actual MRP','MRP 2+1','Avg Usg','GRPO Bln Ini','Actual Usg','OSPR','Est Coverage','Kategori','End Stock','Comment'];
   var data = STATE.projectionData.map(function(p) {
     var pct = p.pctUsageVsForecast !== undefined ? Math.round(p.pctUsageVsForecast*1000)/10 : 0;
-    return [p.productCode,p.description,p.realName||'',p.uom,p.supplier||'',p.site||'',p.stockBTG,p.stockSNG,p.doiFC,p.doiMatcom,p.estUsageMRP,p.actualMRP,p.max3MRP,p.totalIncoming,p.actualUsageDaily||0,p.totalOSPR||0,p.coverageDateStr,p.category,p.endStock,p.comment||''];
+    return [p.productCode,p.description,p.realName||'',p.uom,p.supplier||'',p.site||'',p.stockBTG,p.stockSNG,p.stockJTK||0,p.doiFC,p.doiMatcom,p.estUsageMRP,p.actualMRP,p.max3MRP,p.totalIncoming,p.actualUsageDaily||0,p.totalOSPR||0,p.coverageDateStr,p.category,p.endStock,p.comment||''];
   });
   return { headers: headers, data: data };
 }
@@ -8959,7 +8965,7 @@ function freezeStockToday() {
   var today = new Date().toISOString().split('T')[0];
   if(!STATE.stockHistory[today]) STATE.stockHistory[today] = {};
   Object.keys(STATE.stockData).forEach(function(ic){
-    STATE.stockHistory[today][ic] = { btg: STATE.stockData[ic].btg, sng: STATE.stockData[ic].sng };
+    STATE.stockHistory[today][ic] = { btg: STATE.stockData[ic].btg, sng: STATE.stockData[ic].sng, jtk: STATE.stockData[ic].jtk||0 };
   });
   localStorage.setItem('stock_history', JSON.stringify(STATE.stockHistory));
   cloudSave('stock_history', JSON.stringify(STATE.stockHistory));
@@ -9005,7 +9011,7 @@ function renderStockDaily() {
     Object.keys(snap).sort().forEach(function(ic){
       var itemName = (STATE.masterData && STATE.masterData[ic] ? STATE.masterData[ic].desc : '') ||
                      (STATE.realNameData && STATE.realNameData[ic] ? STATE.realNameData[ic] : '') || '';
-      allRows.push({ date: date, ic: ic, btg: snap[ic].btg||0, sng: snap[ic].sng||0, itemName: itemName });
+      allRows.push({ date: date, ic: ic, btg: snap[ic].btg||0, sng: snap[ic].sng||0, jtk: snap[ic].jtk||0, itemName: itemName });
     });
   });
 
@@ -9033,7 +9039,8 @@ function renderStockDaily() {
       '<td style="font-size:11px;max-width:160px;overflow:hidden;text-overflow:ellipsis">' + _poName(r.ic, r.itemName) + '</td>' +
       '<td class="mono td-right">' + n_id(r.btg) + '</td>' +
       '<td class="mono td-right">' + n_id(r.sng) + '</td>' +
-      '<td class="mono td-right" style="font-weight:500">' + n_id(r.btg+r.sng) + '</td>' +
+      '<td class="mono td-right">' + n_id(r.jtk||0) + '</td>' +
+      '<td class="mono td-right" style="font-weight:500">' + n_id(r.btg+r.sng+(r.jtk||0)) + '</td>' +
     '</tr>';
   }).join('');
 
@@ -9084,7 +9091,7 @@ function saveProjectionSnapshot() {
     return {
       productCode:p.productCode, description:p.description, realName:p.realName||'',
       uom:p.uom, supplier:p.supplier||'', site:p.site||'',
-      stockBTG:p.stockBTG, stockSNG:p.stockSNG,
+      stockBTG:p.stockBTG, stockSNG:p.stockSNG, stockJTK:p.stockJTK||0,
       doiFC:p.doiFC, doiMatcom:p.doiMatcom,
       actualMRP:p.actualMRP, max3MRP:p.max3MRP,
       totalIncoming:p.totalIncoming, totalOSPR:p.totalOSPR||0,
@@ -9131,6 +9138,7 @@ function viewSnapshot(key, rowEl) {
       '<td>'+(p.site||'—')+'</td>' +
       '<td class="mono td-right">'+n_id(p.stockBTG||0)+'</td>' +
       '<td class="mono td-right">'+n_id(p.stockSNG||0)+'</td>' +
+      '<td class="mono td-right">'+n_id(p.stockJTK||0)+'</td>' +
       '<td class="mono td-right">'+p.doiFC+'</td>' +
       '<td class="mono '+covColor+'">'+p.coverageDateStr+'</td>' +
       '<td>'+catBadge(p.category)+'</td>' +
@@ -9417,7 +9425,7 @@ function scheduleAutoRefresh() {
           if(!STATE.stockHistory[today]) {
             STATE.stockHistory[today] = {};
             Object.keys(STATE.stockData).forEach(function(ic){
-              STATE.stockHistory[today][ic] = { btg: STATE.stockData[ic].btg, sng: STATE.stockData[ic].sng };
+              STATE.stockHistory[today][ic] = { btg: STATE.stockData[ic].btg, sng: STATE.stockData[ic].sng, jtk: STATE.stockData[ic].jtk||0 };
             });
             localStorage.setItem('stock_history', JSON.stringify(STATE.stockHistory));
             cloudSave('stock_history', JSON.stringify(STATE.stockHistory));
@@ -10828,7 +10836,7 @@ function _calcForecast(code, ospoIdx) {
 
   // ── SOH dari snapshot ─────────────────────────────────────────────────────
   var stockRaw = (STATE.stockData || {})[code] || {};
-  var soh = (stockRaw.btg || 0) + (stockRaw.sng || 0);
+  var soh = (stockRaw.btg || 0) + (stockRaw.sng || 0) + (stockRaw.jtk || 0);
 
   var curYear = snapYear;
   var ospr_total = (STATE.osprByItem || {})[code] || 0;
@@ -10892,7 +10900,7 @@ function _calcForecast(code, ospoIdx) {
     var histKeys = Object.keys(STATE.stockHistory||{}).filter(function(d){ return d.slice(0,7)===moPrefix; }).sort();
     if(histKeys.length > 0) {
       var ea = ((STATE.stockHistory[histKeys[0]]||{})[code]) || {};
-      stockAwalM = (ea.btg||0)+(ea.sng||0);
+      stockAwalM = (ea.btg||0)+(ea.sng||0)+(ea.jtk||0);
     } else {
       stockAwalM = soh; // tidak ada data awal bulan, gunakan SOH saja
     }
@@ -11797,7 +11805,7 @@ function _fcRenderRekap(el, items, fcData, fStatus) {
     var realN  = _isAdmin && _rmDisplayMode === 'realname' && (STATE.realNameData||{})[code];
     var name   = realN ? STATE.realNameData[code] : (master.desc || mrp.desc || '');
     var site   = (STATE.stockData && STATE.stockData[code])
-                 ? ((STATE.stockData[code].btg>0?'BITUNG':'')+(STATE.stockData[code].sng>0?(STATE.stockData[code].btg>0?' & SANGIANG':'SANGIANG'):''))
+                 ? ([STATE.stockData[code].btg>0?'BITUNG':null,STATE.stockData[code].sng>0?'SANGIANG':null,STATE.stockData[code].jtk>0?'JATIRANGON':null].filter(Boolean).join(' & '))
                  : '';
     fc.suggestions.forEach(function(s) {
       propRows.push({
@@ -13868,7 +13876,7 @@ function _fcBuildRows(target) {
       var m=STATE.masterData[code]||{}, fc=fcD[code];
       var iT=/^3/.test(code)?'RM':'PM';
       var site=(STATE.stockData&&STATE.stockData[code])
-        ? ((STATE.stockData[code].btg>0?'BITUNG':'')+(STATE.stockData[code].sng>0?(STATE.stockData[code].btg>0?' & SANGIANG':'SANGIANG'):'')) : '';
+        ? ([STATE.stockData[code].btg>0?'BITUNG':null,STATE.stockData[code].sng>0?'SANGIANG':null,STATE.stockData[code].jtk>0?'JATIRANGON':null].filter(Boolean).join(' & ')) : '';
       fc.suggestions.forEach(function(s){
         rows.push([code,m.desc||'',m.abc||'',site,s.qty,m.uom||'',fmt(s.delivDate),fmt(s.createPRBy),iT,
           s.isOverdue?'Terlambat':s.isUrgent?'Segera':'Oke']);
