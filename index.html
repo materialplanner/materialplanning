@@ -3038,8 +3038,7 @@ var CLOUD_KEYS = [
   'mps_ui_status','bom_ui_status','mrp_last_calc',
   'email_daily_data',
   'ai_api_key',
-  'ai_model',
-  'fc_result'
+  'ai_model'
 ];
 
 // ── Sync indicator di header ──────────────────────────────────────────────────
@@ -6305,28 +6304,6 @@ function _doBuildProjection() {
   if(_lastSyncMsg) document.getElementById('dash-sub').textContent = _lastSyncMsg;
   // Update seluruh dashboard (stat cards, stock bars, jadwal, item kritis)
   try { updateDashStats(); } catch(e) { console.error('[build] updateDashStats CRASH:', e.message, e.stack); }
-  // ─── WA BOT: simpan snapshot fc_result ke Firestore ───────────────────────
-  try {
-    var _fcSnap = {
-      ts: new Date().toISOString(),
-      items: projection.map(function(p) {
-        return {
-          code: p.productCode || '', name: p.description || '', realName: p.realName || '',
-          uom: p.uom || '', supplier: p.supplier || '', site: p.site || '',
-          stockBTG: p.stockBTG || 0, stockSNG: p.stockSNG || 0,
-          stockTotal: (p.stockBTG||0) + (p.stockSNG||0),
-          doiFC: p.doiFC || 0, doiMatcom: p.doiMatcom || 0,
-          reqThisMonth: p.actualMRP || 0, reqMax3: p.max3MRP || 0,
-          incoming: p.totalIncoming || 0, ospr: p.totalOSPR || 0,
-          coverageDate: p.coverageDateStr || '', category: p.category || '',
-          abc: p.abc || '', itemType: p.itemType || ''
-        };
-      })
-    };
-    cloudSave('fc_result', JSON.stringify(_fcSnap));
-    console.log('[WA] fc_result saved:', _fcSnap.items.length, 'items | ts:', _fcSnap.ts);
-  } catch(e) { console.warn('[WA] fc_result save failed:', e.message); }
-  // ───────────────────────────────────────────────────────────────────────────
   toast('Projection: ' + projection.length + ' item, ' + urgentCount + ' urgent \u2713', 'ok');
 }
 function getCutoff() {
@@ -7655,10 +7632,13 @@ function generateSchedule(typeFilter) {
       var item = e.item;
       // Tidak skip item hanya karena ada di kartu jadwal — mungkin masih perlu PO tambahan
       // Yang di-skip hanya PO yang sudah ada di kartu (cek via scheduledPOKeys di bawah)
+      // FIFO: sort by docNum dulu (PO lebih kecil = lebih tua = harus dikirim duluan)
+      // prReqDate hanya sebagai tiebreaker kalau docNum sama (tidak mungkin, tapi untuk safety)
       var sortedPOs = (e.pos||[]).slice().sort(function(a,b){
+        var na = String(a.docNum), nb = String(b.docNum);
+        if(na !== nb) return na.localeCompare(nb); // FIFO: PO lebih tua (nomor lebih kecil) duluan
         var da = _dateToSortISO(a.prReqDate), db = _dateToSortISO(b.prReqDate);
-        if(da !== db) return da.localeCompare(db);
-        return String(a.docNum).localeCompare(String(b.docNum));
+        return da.localeCompare(db);
       });
       var needed = Math.max(0, (item.max3MRP || 0) - (item.stockBTG||0) - (item.stockSNG||0) - (item.stockJTK||0) - (confQtyByItem[item.productCode] || 0));
       // Ambil multiple dari master data — PO dengan openQty < multiple dilewati
@@ -8434,9 +8414,10 @@ function openFbModal(idx) {
       var poKey = po.docNum && po.docNum !== '—' ? (po.docNum + '_' + itemCode) : null;
       var ovr = poKey && STATE.poOverrides[poKey] ? STATE.poOverrides[poKey] : {};
       var origQty = po.openQty || 0;
-      // QTY REQUEST = pakai reqQtyOverride kalau user sudah ubah qty (> 0)
-      // reqQtyOverride = 0 artinya PO pernah di-clear dari jadwal lain → fallback ke openQty SAP
-      // reqQtyOverride = undefined artinya belum pernah diubah → fallback ke openQty SAP
+      // reqQtyOverride = 0 artinya PO ini di-nol/dihapus dari card ini secara eksplisit → skip baris
+      // Menampilkannya dengan qty SAP asli (origQty) menyesatkan — PO ini bukan bagian dari pengiriman ini
+      if(ovr.reqQtyOverride !== undefined && ovr.reqQtyOverride === 0) return;
+      // reqQtyOverride > 0: pakai override; undefined: pakai origQty dari SAP
       var reqQty = (ovr.reqQtyOverride !== undefined && ovr.reqQtyOverride > 0) ? ovr.reqQtyOverride : origQty;
       var _ccM = _poConfData(poKey);
       var confQty = _ccM.confQty != null ? _ccM.confQty : reqQty;
