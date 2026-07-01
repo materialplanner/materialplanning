@@ -3038,7 +3038,8 @@ var CLOUD_KEYS = [
   'mps_ui_status','bom_ui_status','mrp_last_calc',
   'email_daily_data',
   'ai_api_key',
-  'ai_model'
+  'ai_model',
+  'fc_result'
 ];
 
 // ── Sync indicator di header ──────────────────────────────────────────────────
@@ -6304,6 +6305,28 @@ function _doBuildProjection() {
   if(_lastSyncMsg) document.getElementById('dash-sub').textContent = _lastSyncMsg;
   // Update seluruh dashboard (stat cards, stock bars, jadwal, item kritis)
   try { updateDashStats(); } catch(e) { console.error('[build] updateDashStats CRASH:', e.message, e.stack); }
+  // ─── WA BOT: simpan snapshot fc_result ke Firestore ───────────────────────
+  try {
+    var _fcSnap = {
+      ts: new Date().toISOString(),
+      items: projection.map(function(p) {
+        return {
+          code: p.productCode || '', name: p.description || '', realName: p.realName || '',
+          uom: p.uom || '', supplier: p.supplier || '', site: p.site || '',
+          stockBTG: p.stockBTG || 0, stockSNG: p.stockSNG || 0,
+          stockTotal: (p.stockBTG||0) + (p.stockSNG||0),
+          doiFC: p.doiFC || 0, doiMatcom: p.doiMatcom || 0,
+          reqThisMonth: p.actualMRP || 0, reqMax3: p.max3MRP || 0,
+          incoming: p.totalIncoming || 0, ospr: p.totalOSPR || 0,
+          coverageDate: p.coverageDateStr || '', category: p.category || '',
+          abc: p.abc || '', itemType: p.itemType || ''
+        };
+      })
+    };
+    cloudSave('fc_result', JSON.stringify(_fcSnap));
+    console.log('[WA] fc_result saved:', _fcSnap.items.length, 'items | ts:', _fcSnap.ts);
+  } catch(e) { console.warn('[WA] fc_result save failed:', e.message); }
+  // ───────────────────────────────────────────────────────────────────────────
   toast('Projection: ' + projection.length + ' item, ' + urgentCount + ' urgent \u2713', 'ok');
 }
 function getCutoff() {
