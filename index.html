@@ -3198,10 +3198,30 @@ function _applyRealtimeChanges(keys) {
     var val = localStorage.getItem(k);
     try {
       switch(k) {
-        case 'schedule':
-          STATE.scheduleData = JSON.parse(val || '[]');
+        case 'schedule': {
+          var _inSched = JSON.parse(val || '[]');
+          if(!STATE.scheduleData || !STATE.scheduleData.length) {
+            STATE.scheduleData = _inSched;
+          } else {
+            // Smart merge: status card tidak boleh didowngrade oleh push yang lebih stale
+            // (confirmed → pending terjadi kalau device lain push schedule lama setelah kita confirm)
+            var _sRank = {pending:0, approved:1, sent:2, partial:3, confirmed:4};
+            var _lMap = {};
+            STATE.scheduleData.forEach(function(c){
+              _lMap[(c.supName||'')+'|||'+(c.date||'')] = c;
+            });
+            STATE.scheduleData = _inSched.map(function(c){
+              var k = (c.supName||'')+'|||'+(c.date||'');
+              var l = _lMap[k];
+              if(!l) return c;
+              // Kalau lokal punya status lebih tinggi → pertahankan kartu lokal
+              if((_sRank[l.status]||0) > (_sRank[c.status]||0)) return l;
+              return c;
+            });
+          }
           renderFlags.sched = true; renderFlags.dash = true;
           break;
+        }
         case 'po_confirmations':
           var cloudConf = JSON.parse(val || '{}');
           if(!STATE.poConfirmations) STATE.poConfirmations = {};
@@ -7632,13 +7652,12 @@ function generateSchedule(typeFilter) {
       var item = e.item;
       // Tidak skip item hanya karena ada di kartu jadwal — mungkin masih perlu PO tambahan
       // Yang di-skip hanya PO yang sudah ada di kartu (cek via scheduledPOKeys di bawah)
-      // FIFO: sort by docNum dulu (PO lebih kecil = lebih tua = harus dikirim duluan)
-      // prReqDate hanya sebagai tiebreaker kalau docNum sama (tidak mungkin, tapi untuk safety)
+      // FIFO: sort by prReqDate dulu (PR REQ DATE terdekat = harus dikirim duluan)
+      // docNum hanya tiebreaker kalau prReqDate sama persis
       var sortedPOs = (e.pos||[]).slice().sort(function(a,b){
-        var na = String(a.docNum), nb = String(b.docNum);
-        if(na !== nb) return na.localeCompare(nb); // FIFO: PO lebih tua (nomor lebih kecil) duluan
         var da = _dateToSortISO(a.prReqDate), db = _dateToSortISO(b.prReqDate);
-        return da.localeCompare(db);
+        if(da !== db) return da.localeCompare(db);
+        return String(a.docNum).localeCompare(String(b.docNum));
       });
       var needed = Math.max(0, (item.max3MRP || 0) - (item.stockBTG||0) - (item.stockSNG||0) - (item.stockJTK||0) - (confQtyByItem[item.productCode] || 0));
       // Ambil multiple dari master data — PO dengan openQty < multiple dilewati
@@ -8423,7 +8442,9 @@ function openFbModal(idx) {
       var confQty = _ccM.confQty != null ? _ccM.confQty : reqQty;
       // Auto-fill: jika belum ada confQty, isi dengan reqQty
       if(!_ccM.confQty && !_ccM.confDate) confQty = reqQty;
-      var isConf = ovr.confDate ? true : false;
+      // isConf: cek KEDUA store (poConfirmations + poOverrides) via _poConfData
+      // Bug lama: hanya cek ovr.confDate (poOverrides), miss konfirmasi dari PO list (poConfirmations)
+      var isConf = !!_ccM.confDate;
       html += '<tr style="border-bottom:1px solid rgba(36,45,64,.4)">';
       var _rmName = _poName(itemCode, po.itemName);
       html += '<td style="padding:7px 10px">'
@@ -8471,9 +8492,15 @@ function saveFeedback() {
   var dateISO = document.getElementById('fb-date').value;
   var note = document.getElementById('fb-note').value;
   var todayISO = new Date().toISOString().split('T')[0];
+  // Pakai FULL ISO timestamp untuk confUpd — bukan date-only (todayISO)
+  // Bug lama: todayISO = '2026-07-01', sedangkan setPOConfDate pakai '2026-07-01T10:05:00.000Z'
+  // Merge handler pakai string comparison: '2026-07-01' < '2026-07-01T...' → konfirmasi selalu kalah
+  // Akibatnya device lain yang sudah punya confUpd full-timestamp akan menimpa balik konfirmasi ini
+  var nowISO = new Date().toISOString();
 
   var anyConfirmed = false;
   var confirmedItems = [];
+  if(!STATE.poConfirmations) STATE.poConfirmations = {};
   document.querySelectorAll('#fb-items-list .fb-conf-chk').forEach(function(chk){
     var poKey = chk.getAttribute('data-po-key');
     if(!poKey) return;
@@ -8481,23 +8508,37 @@ function saveFeedback() {
     var qInput = row ? row.querySelector('.fb-qty-input') : null;
     var qty = qInput ? (parseFloat(qInput.value) || 0) : 0;
     if(!STATE.poOverrides[poKey]) STATE.poOverrides[poKey] = {};
+    if(!STATE.poConfirmations[poKey]) STATE.poConfirmations[poKey] = {};
     if(chk.checked) {
+      // Simpan ke KEDUA store (poOverrides + poConfirmations) untuk double-layer persistence
+      // Sehingga isConf = !!_ccM.confDate pasti true meski salah satu store ter-overwrite
       STATE.poOverrides[poKey].confQty = qty;
       STATE.poOverrides[poKey].confDate = dateISO || todayISO;
-      STATE.poOverrides[poKey].confUpd = todayISO;
+      STATE.poOverrides[poKey].confUpd = nowISO;    // full ISO timestamp
       STATE.poOverrides[poKey].confSource = 'schedule';
+      STATE.poConfirmations[poKey].confQty = qty;
+      STATE.poConfirmations[poKey].confDate = dateISO || todayISO;
+      STATE.poConfirmations[poKey].confUpd = nowISO; // full ISO timestamp
+      STATE.poConfirmations[poKey].confSource = 'schedule';
       anyConfirmed = true;
       var us = poKey.indexOf('_');
       if(us >= 0) confirmedItems.push(poKey.slice(us+1));
     } else {
       STATE.poOverrides[poKey].confQty = '';
       STATE.poOverrides[poKey].confDate = '';
-      STATE.poOverrides[poKey].confUpd = '';
+      STATE.poOverrides[poKey].confUpd = nowISO;    // full ISO timestamp saat clearing juga
       STATE.poOverrides[poKey].confSource = '';
+      // poConfirmations: hapus field tapi set confUpd baru supaya clearing propagate ke device lain
+      delete STATE.poConfirmations[poKey].confDate;
+      delete STATE.poConfirmations[poKey].confQty;
+      delete STATE.poConfirmations[poKey].confSource;
+      STATE.poConfirmations[poKey].confUpd = nowISO;
     }
   });
   localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
   cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
+  localStorage.setItem('po_confirmations', JSON.stringify(STATE.poConfirmations));
+  cloudSave('po_confirmations', JSON.stringify(STATE.poConfirmations));
 
   var totalChks = document.querySelectorAll('#fb-items-list .fb-conf-chk').length;
   var doneChks  = document.querySelectorAll('#fb-items-list .fb-conf-chk:checked').length;
