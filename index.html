@@ -4745,9 +4745,17 @@ function generateUpdateDelDate() {
       var _ovrUDD = STATE.poOverrides[key] || STATE.poOverrides[keyLegacy];
       if(_ovrUDD && _ovrUDD.date){
         newUpdateDelDate[key] = _ovrUDD.date;
-        if(pPtr < placements.length){
-          placements[pPtr].remaining -= poQty;
-          if(placements[pPtr].remaining <= 0) pPtr++;
+        // Drain poQty across buckets — sama seperti kasus non-manual
+        var _drain0 = poQty;
+        while(_drain0 > 0 && pPtr < placements.length) {
+          if(placements[pPtr].remaining > _drain0) {
+            placements[pPtr].remaining -= _drain0;
+            _drain0 = 0;
+          } else {
+            _drain0 -= placements[pPtr].remaining;
+            placements[pPtr].remaining = 0;
+            pPtr++;
+          }
         }
         return;
       }
@@ -4787,8 +4795,20 @@ function generateUpdateDelDate() {
         }
 
         newUpdateDelDate[key] = assignedISO;
-        pl.remaining -= poQty;
-        if(pl.remaining <= 0) pPtr++;
+        // Drain poQty ke multiple buckets — kalau PO qty > satu bulan, overflow dikurangi dari bulan berikutnya
+        // Bug lama: hanya pl.remaining -= poQty → pPtr++ satu kali → overflow tidak dikurangi dari bucket berikut
+        // → PO berikutnya masuk bulan yang sebenernya sudah di-cover oleh PO ini
+        var _drain = poQty;
+        while(_drain > 0 && pPtr < placements.length) {
+          if(placements[pPtr].remaining > _drain) {
+            placements[pPtr].remaining -= _drain;
+            _drain = 0;
+          } else {
+            _drain -= placements[pPtr].remaining;
+            placements[pPtr].remaining = 0;
+            pPtr++;
+          }
+        }
       } else {
         // PO di luar horizon forecast → distribusikan ke 2027 dengan state bersama antar PO
         // extReq, extStockPrev, extMonStart sudah dihitung di atas (per-item, bukan per-PO)
