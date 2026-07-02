@@ -3336,7 +3336,7 @@ function _applyRealtimeChanges(keys) {
         case 'sap_cache_po':
           var rawP = JSON.parse(val || '[]');
           STATE.poData = _filterPOBlacklist(rawP.map(function(p){
-            if(p.d !== undefined) return {docNum:p.d,itemCode:p.i,itemName:p.n,supplierName:p.s,openQty:p.q,uom:p.u,prReqDate:fmtSAPDate(p.r),site:p.t};
+            if(p.d !== undefined) return {docNum:p.d,itemCode:p.i,itemName:p.n,supplierName:p.s,openQty:p.q,uom:p.u,prReqDate:fmtSAPDate(p.r),site:p.t,lineNum:(p.l!=null?parseInt(p.l):null)};
             return p;
           }));
           loadOSPO();
@@ -4246,11 +4246,13 @@ async function loadPO() {
         prReqDate: fmtSAPDate(r.PR_Req_Date), site: r.U_ReqSite||'',
         supplierName: r.CardName, itemCode: r.ItemCode,
         itemName: r.Dscription, openQty: r.OpenQty, uom: r.unitMsr,
-        status: r.DocStatus, lineStatus: r.PO_LineStatus };
+        status: r.DocStatus, lineStatus: r.PO_LineStatus,
+        lineNum: (r.PO_Line != null ? parseInt(r.PO_Line) : null) };
     }));
     var spo = document.getElementById('s-po'); if(spo) spo.textContent = STATE.poData.length;
     // Cleanup hanya kalau SAP return data penuh — hindari hapus data saat partial load
     if(STATE.poData.length > 50) _cleanupStalePoOverridesOnLoad();
+    _migratePoOverridesLineNum();
     renderPO();
     _setSyncItem('po', 'ok');
     toast(STATE.poData.length + ' PO aktif ✓', 'ok');
@@ -4508,7 +4510,7 @@ async function syncAll() {
       var sStock = JSON.stringify(STATE.stockData);
       // Compress PO: short keys, hanya field esensial
       var compPO = (STATE.poData||[]).map(function(p){
-        return {d:p.docNum,i:p.itemCode,n:p.itemName,s:p.supplierName,q:p.openQty,u:p.uom,r:p.prReqDate,t:p.site};
+        return {d:p.docNum,i:p.itemCode,n:p.itemName,s:p.supplierName,q:p.openQty,u:p.uom,r:p.prReqDate,t:p.site,l:p.lineNum};
       });
       var sPO = JSON.stringify(compPO);
       // Compress GRPO
@@ -4735,12 +4737,14 @@ function generateUpdateDelDate() {
     var _extMonStart2  = 0; // pointer bulan 2027, dipertahankan antar PO
 
     pos.forEach(function(p){
-      var key = p.docNum+'_'+p.itemCode;
+      var key = _poKey(p);
+      var keyLegacy = String(p.docNum)+'_'+p.itemCode;
       var poQty = p.openQty || 0;
 
       // Priority 1: sudah ada Tgl Request Kirim manual → pakai itu
-      if(STATE.poOverrides[key] && STATE.poOverrides[key].date){
-        newUpdateDelDate[key] = STATE.poOverrides[key].date;
+      var _ovrUDD = STATE.poOverrides[key] || STATE.poOverrides[keyLegacy];
+      if(_ovrUDD && _ovrUDD.date){
+        newUpdateDelDate[key] = _ovrUDD.date;
         if(pPtr < placements.length){
           placements[pPtr].remaining -= poQty;
           if(placements[pPtr].remaining <= 0) pPtr++;
@@ -4830,7 +4834,7 @@ function generateUpdateDelDate() {
     var pos = byItem[code]; // sudah FIFO sorted
     var prevISO = null;
     pos.forEach(function(p){
-      var key = p.docNum+'_'+p.itemCode;
+      var key = _poKey(p);
       var d = newUpdateDelDate[key];
       if(!d || d === '2027-01-01') { prevISO = d; return; }
       if(prevISO && d < prevISO) {
@@ -4853,16 +4857,18 @@ function exportPOExcel() {
   var headers = ['Doc Num','Supplier','Item Code','Item Name','Site','Open Qty','UOM',
                  'PR Req Date','Tgl Request Kirim','Qty Konfirm','Tgl Konfirmasi','Notes','Update DelDate'];
   var rows = STATE.poData.map(function(p) {
-    var key = p.docNum + '_' + p.itemCode;
-    var ovr = STATE.poOverrides[key] || {};
-    var uddRaw = ovr.date || (STATE.updateDelDateData && STATE.updateDelDateData[key]) || '';
+    var key = _poKey(p); var keyL = p.docNum+'_'+p.itemCode;
+    var ovr = STATE.poOverrides[key] || STATE.poOverrides[keyL] || {};
+    var uddRaw = ovr.date || (STATE.updateDelDateData && (STATE.updateDelDateData[key]||STATE.updateDelDateData[keyL])) || '';
     var uddDisp = uddRaw ? (uddRaw.indexOf('-')>0 ? uddRaw.split('-').reverse().join('/') : uddRaw) : '';
+    var _pcdX = _poConfData(key); var _pcdL = _poConfData(keyL);
+    var _pcd = (_pcdX && _pcdX.confDate) ? _pcdX : _pcdL;
     return [
       p.docNum, p.supplierName||'', p.itemCode||'', p.itemName||'', p.site||'',
       p.openQty||0, p.uom||'', p.prReqDate||'',
       ovr.date ? ovr.date.split('-').reverse().join('/') : '',
-      (_poConfData(String(p.docNum)+'_'+p.itemCode).confQty)||'',
-      (function(cd){return cd?(function(s){var pp=s.split('-');return pp[2]+'-'+pp[1]+'-'+pp[0];})(cd):'';})(_poConfData(String(p.docNum)+'_'+p.itemCode).confDate),
+      (_pcd.confQty)||'',
+      (function(cd){return cd?(function(s){var pp=s.split('-');return pp[2]+'-'+pp[1]+'-'+pp[0];})(cd):'';})(_pcd.confDate),
       ovr.notes||'', uddDisp
     ];
   });
@@ -4909,16 +4915,18 @@ function _doExportPOGSheet() {
   var headers = ['Doc Num','Supplier','Item Code','Item Name','Site','Open Qty','UOM',
                  'PR Req Date','Tgl Request Kirim','Qty Konfirm','Tgl Konfirmasi','Notes','Update DelDate'];
   var rows = STATE.poData.map(function(p) {
-    var key = p.docNum + '_' + p.itemCode;
-    var ovr = STATE.poOverrides[key] || {};
-    var uddRaw = ovr.date || (STATE.updateDelDateData && STATE.updateDelDateData[key]) || '';
+    var key = _poKey(p); var keyL = p.docNum+'_'+p.itemCode;
+    var ovr = STATE.poOverrides[key] || STATE.poOverrides[keyL] || {};
+    var uddRaw = ovr.date || (STATE.updateDelDateData && (STATE.updateDelDateData[key]||STATE.updateDelDateData[keyL])) || '';
     var uddDisp = uddRaw ? (uddRaw.indexOf('-')>0 ? uddRaw.split('-').reverse().join('/') : uddRaw) : '';
+    var _pcdX = _poConfData(key); var _pcdL = _poConfData(keyL);
+    var _pcd = (_pcdX && _pcdX.confDate) ? _pcdX : _pcdL;
     return [
       p.docNum, p.supplierName||'', p.itemCode||'', p.itemName||'', p.site||'',
       p.openQty||0, p.uom||'', p.prReqDate||'',
       ovr.date ? ovr.date.split('-').reverse().join('/') : '',
-      (_poConfData(String(p.docNum)+'_'+p.itemCode).confQty)||'',
-      (function(cd){return cd?(function(s){var pp=s.split('-');return pp[2]+'-'+pp[1]+'-'+pp[0];})(cd):'';})(_poConfData(String(p.docNum)+'_'+p.itemCode).confDate),
+      (_pcd.confQty)||'',
+      (function(cd){return cd?(function(s){var pp=s.split('-');return pp[2]+'-'+pp[1]+'-'+pp[0];})(cd):'';})(_pcd.confDate),
       ovr.notes||'', uddDisp
     ];
   });
@@ -4956,8 +4964,9 @@ function renderPO() {
     if(fpoType) { var t=/^3/.test(p.itemCode||'')?'RM':(/^4/.test(p.itemCode||'')?'PM':'FG'); if(t!==fpoType) return false; }
     if(srch && !String(p.docNum).includes(srch) && !(p.itemCode||'').toLowerCase().includes(srch) && !(p.itemName||'').toLowerCase().includes(srch) && !(p.supplierName||'').toLowerCase().includes(srch)) return false;
     if(site && !(p.site||'').toUpperCase().includes(site)) return false;
-    var ovr = STATE.poOverrides[p.docNum + '_' + p.itemCode] || {};
-    var _poKeyF = p.docNum + '_' + p.itemCode;
+    var _poKeyF = _poKey(p);
+    var _poKeyFL = p.docNum + '_' + p.itemCode;
+    var ovr = STATE.poOverrides[_poKeyF] || STATE.poOverrides[_poKeyFL] || {};
     if(reqFilter === 'has' && !ovr.date && !p._reqDate) return false;
     if(reqFilter === 'none' && (ovr.date || p._reqDate)) return false;
     if(reqFilter === 'manual' && !ovr.isManual) return false;
@@ -4997,14 +5006,15 @@ function renderPO() {
   var limited = (!_poShowAll && filtered.length > _PO_LIMIT) ? filtered.slice(0, _PO_LIMIT) : filtered;
 
   var rows = limited.map(function(p){
-    var key = p.docNum + '_' + p.itemCode;
-    var ovr = STATE.poOverrides[key] || {};
+    var key = _poKey(p);
+    var keyL2 = p.docNum + '_' + p.itemCode;
+    var ovr = STATE.poOverrides[key] || STATE.poOverrides[keyL2] || {};
     var reqDate = ovr.date || (p._reqDate || '');
     var isManual = ovr.isManual;
     var isAuto   = ovr.isAuto;
     var reqStyle = isManual ? 'color:var(--amber)' : (isAuto ? 'color:var(--teal)' : '');
     var reqTitle = isManual ? 'Edit manual' : (isAuto ? 'Auto-generate' : '');
-    var _pconf  = (STATE.poConfirmations && STATE.poConfirmations[key]) || {};
+    var _pconf  = (STATE.poConfirmations && STATE.poConfirmations[key]) || (STATE.poConfirmations && STATE.poConfirmations[keyL2]) || {};
     var confQty    = _pconf.confQty  || ovr.confQty  || '';
     var confDate   = _pconf.confDate || ovr.confDate || '';
     var confUpd    = _pconf.confUpd  ? _pconf.confUpd.substring(0,10) : (ovr.confUpd||'');
@@ -5042,10 +5052,11 @@ function renderPO() {
     // Tgl Update — read-only
     row += '<td class="mono tgl-update" style="font-size:10.5px;color:var(--muted);text-align:center">' + (confUpd||'—') + '</td>';
     // Update DelDate — dari generate, priority: request kirim > generated
-    var uddRaw = ovr.date || (STATE.updateDelDateData && STATE.updateDelDateData[key]) || '';
+    var uddRaw = ovr.date || (STATE.updateDelDateData && (STATE.updateDelDateData[key]||STATE.updateDelDateData[keyL2])) || '';
     var uddDisp = uddRaw ? (uddRaw.indexOf('-')>0 ? uddRaw.split('-').reverse().join('/') : uddRaw) : '—';
-    var uddStyle = ovr.date ? 'color:var(--teal)' : (STATE.updateDelDateData && STATE.updateDelDateData[key] ? 'color:var(--text)' : 'color:var(--hint)');
-    var uddTitle = ovr.date ? 'Dari Tgl Request Kirim' : (STATE.updateDelDateData && STATE.updateDelDateData[key] ? 'Generated dari forecast' : 'Belum di-generate');
+    var _uddHas = !!(STATE.updateDelDateData && (STATE.updateDelDateData[key]||STATE.updateDelDateData[keyL2]));
+    var uddStyle = ovr.date ? 'color:var(--teal)' : (_uddHas ? 'color:var(--text)' : 'color:var(--hint)');
+    var uddTitle = ovr.date ? 'Dari Tgl Request Kirim' : (_uddHas ? 'Generated dari forecast' : 'Belum di-generate');
     row += '<td class="mono update-deldate-cell" style="font-size:10.5px;text-align:center;' + uddStyle + '" title="' + uddTitle + '">' + uddDisp + '</td>';
     // Notes — editable
     row += '<td>'
@@ -5134,7 +5145,7 @@ function _refreshProjectionIncoming(itemCode) {
   var proj = STATE.projectionData && STATE.projectionData.find(function(p){ return p.productCode === itemCode; });
   if(!proj) return;
   var _aPK = {};
-  (STATE.poData||[]).forEach(function(p){ _aPK[p.docNum+'_'+p.itemCode]=true; });
+  (STATE.poData||[]).forEach(function(p){ _aPK[p.docNum+'_'+p.itemCode]=true; _aPK[_poKey(p)]=true; });
   var _aK = {}, cdList = [], cqTotal = 0, opqTotal = 0;
   Object.keys(STATE.poOverrides||{}).forEach(function(k){ _aK[k]=1; });
   Object.keys(STATE.poConfirmations||{}).forEach(function(k){ _aK[k]=1; });
@@ -5249,7 +5260,7 @@ function updateProjComment(key) {
   // Build comment dari PO yg masih open saja
   var totalQty = 0; var confDates = [];
   var _activePOKeys2 = {};
-  (STATE.poData || []).forEach(function(p){ _activePOKeys2[p.docNum + '_' + p.itemCode] = true; });
+  (STATE.poData || []).forEach(function(p){ _activePOKeys2[p.docNum+'_'+p.itemCode]=true; _activePOKeys2[_poKey(p)]=true; });
   Object.keys(STATE.poOverrides).forEach(function(k){
     var u2 = k.indexOf('_');
     if(u2 < 0 || k.slice(u2+1) !== itemCode) return;
@@ -7106,6 +7117,42 @@ function _isAutoComment(comment) {
   return comment && /^\d{2}\/\d{2}\/\d{4}/.test(comment.trim()) && comment.includes('Qty:');
 }
 
+// _poKey: key unik per baris PO (docNum_lineNum_itemCode)
+// Kalau lineNum tidak ada (data lama / schedule card lama), fallback ke docNum_itemCode
+function _poKey(po) {
+  if(!po) return '';
+  if(po.lineNum != null) return String(po.docNum)+'_'+po.lineNum+'_'+po.itemCode;
+  return String(po.docNum)+'_'+po.itemCode;
+}
+
+// Migration: salin data dari key lama (docNum_itemCode) ke key baru (docNum_lineNum_itemCode)
+// Dijalankan setelah STATE.poData terisi — data existing tidak hilang
+function _migratePoOverridesLineNum() {
+  if(!STATE.poData || !STATE.poData.length) return;
+  var changed = false;
+  STATE.poData.forEach(function(po) {
+    if(po.lineNum == null) return; // tidak ada info lineNum, skip
+    var oldKey = String(po.docNum)+'_'+po.itemCode;
+    var newKey = _poKey(po);
+    if(oldKey === newKey) return; // single-line PO, key sama
+    if(STATE.poOverrides[oldKey] && !STATE.poOverrides[newKey]) {
+      STATE.poOverrides[newKey] = Object.assign({}, STATE.poOverrides[oldKey]);
+      changed = true;
+    }
+    if(STATE.poConfirmations[oldKey] && !STATE.poConfirmations[newKey]) {
+      STATE.poConfirmations[newKey] = Object.assign({}, STATE.poConfirmations[oldKey]);
+      changed = true;
+    }
+  });
+  if(changed) {
+    localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
+    cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
+    localStorage.setItem('po_confirmations', JSON.stringify(STATE.poConfirmations));
+    cloudSave('po_confirmations', JSON.stringify(STATE.poConfirmations));
+    console.log('[migration] po_overrides migrated to lineNum-aware keys');
+  }
+}
+
 function _poConfData(key) {
   // Konfirmasi PO: po_confirmations (utama) → po_overrides (legacy fallback)
   var pc = (STATE.poConfirmations||{})[key] || {};
@@ -7645,7 +7692,7 @@ function generateSchedule(typeFilter) {
     (s.entries||[]).forEach(function(en){
       if(en.item && en.item.productCode) scheduledItemCodes[en.item.productCode] = true;
       (en.pos||[]).forEach(function(po){
-        if(po.docNum && po.itemCode) scheduledPOKeys[po.docNum + '_' + po.itemCode] = true;
+        if(po.docNum && po.itemCode) { scheduledPOKeys[_poKey(po)]=true; scheduledPOKeys[po.docNum+'_'+po.itemCode]=true; }
       });
     });
   });
