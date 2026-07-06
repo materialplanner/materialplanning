@@ -11035,6 +11035,12 @@ function _calcForecast(code, ospoIdx) {
     return Math.max(0, mrpVal - consumed);
   });
 
+  // forecastRaw: MRP asli tanpa pengurangan matcom — dipakai calcDOI supaya rate konsisten
+  // forecast[i] bulan berjalan = MRP - matcom (sudah dikurangi) → tidak bisa dipakai sebagai "forecast asli"
+  var forecastRaw = FC_MONTHS.map(function(m) {
+    return (mrp.months && mrp.months[m] != null) ? (mrp.months[m] || 0) : 0;
+  });
+
   // OSPO per month — manual override jika ada
   var ospoBase = FC_MONTHS.map(function(_, i) {
     var yyyymm = curYear * 100 + FC_MONTH_NUMS[i];
@@ -11122,8 +11128,13 @@ function _calcForecast(code, ospoIdx) {
   // fwd forecast: forecast[i+1] kalau ada, avgReq kalau bulan terakhir horizon
   // DOI = stockFc[i] / (rate / 25)  →  25 hari kerja per bulan
   function calcDOI(stockArr) {
-    var _currMoNum = new Date().getMonth() + 1; // bulan berjalan (1-indexed)
+    var _currMoNum = new Date().getMonth() + 1;
     var _mc = (STATE.matcomMonthly && STATE.matcomMonthly[code]) ? STATE.matcomMonthly[code] : {};
+    var _avgReqRaw = (function() {
+      var sum = 0, cnt = 0;
+      forecastRaw.forEach(function(v){ if(v > 0){ sum += v; cnt++; } });
+      return cnt > 0 ? sum / cnt : 0;
+    })();
     return FC_MONTHS.map(function(_, i) {
       var s = stockArr[i]; if(s <= 0) return 0;
       var moNum     = FC_MONTH_NUMS[i];
@@ -11132,18 +11143,18 @@ function _calcForecast(code, ospoIdx) {
       // matcomEff: bulan lalu sudah selesai → pakai actual, belum → pakai forecast
       var matcomEff;
       if(prevMoNum < _currMoNum) {
-        // Bulan lalu sudah lewat — pakai matcom aktual SAP
-        matcomEff = _mc[prevMoNum] || 0;
+        // Bulan lalu sudah selesai — pakai matcom aktual SAP, konversi unit jika perlu
+        matcomEff = (_mc[prevMoNum] || 0) * _matcomFactor;
       } else {
-        // Bulan lalu sedang berjalan atau belum terjadi — pakai forecast bulan itu
-        matcomEff = (i > 0 && forecast[i-1] != null) ? (forecast[i-1] || 0) : avgReq;
+        // Bulan lalu sedang berjalan atau belum terjadi — pakai forecastRaw (MRP asli)
+        matcomEff = (i > 0 && forecastRaw[i-1] != null) ? (forecastRaw[i-1] || 0) : _avgReqRaw;
       }
 
-      // Forward forecast: bulan depan kalau ada, avgReq kalau horizon habis
-      var fwdFc = (forecast[i+1] != null && forecast[i+1] > 0) ? forecast[i+1] : avgReq;
+      // Forward forecast: forecastRaw bulan depan, avgReqRaw kalau horizon habis
+      var fwdFc = (forecastRaw[i+1] != null && forecastRaw[i+1] > 0) ? forecastRaw[i+1] : _avgReqRaw;
 
-      // Rate = average 3 komponen
-      var rate = (matcomEff + (forecast[i] || 0) + fwdFc) / 3;
+      // Rate = average 3 komponen — semua pakai forecastRaw (MRP asli tanpa pengurangan matcom)
+      var rate = (matcomEff + (forecastRaw[i] || 0) + fwdFc) / 3;
 
       if(rate <= 0) return s > 0 ? 999 : 0;
       return Math.round(s / (rate / WD));
