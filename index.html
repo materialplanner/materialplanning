@@ -4418,7 +4418,9 @@ async function loadMatcomSAP() {
   try {
   var _nowM = new Date(); var _yr = _nowM.getFullYear();
   var _mo   = String(_nowM.getMonth()+1).padStart(2,'0');
-  var startDate = _yr + '-' + _mo + '-01T00:00:00.000Z';
+  // Query mulai bulan lalu supaya matcom bulan sebelumnya tersedia untuk formula DOI
+  var _prevM = new Date(_nowM.getFullYear(), _nowM.getMonth() - 1, 1);
+  var startDate = _prevM.getFullYear() + '-' + String(_prevM.getMonth()+1).padStart(2,'0') + '-01T00:00:00.000Z';
   var endDate   = _yr + '-12-31T00:00:00.000Z';
     var raw = await sapFetchTO(80, { '[%0]': startDate, '[%1]': endDate });
     if(!Array.isArray(raw)) throw new Error('Format data tidak valid');
@@ -4436,7 +4438,9 @@ async function loadMatcomSAP() {
       Object.keys(MONTH_MAP).forEach(function(mName) {
         var mo  = MONTH_MAP[mName];
         var qty = parseFloat(r[mName]) || 0;
-        if(mo < (new Date().getMonth()+1) || mo > 12) return;
+        // Simpan dari bulan lalu (prevMoNum) — untuk formula DOI sliding
+        var _prevMoNum = new Date().getMonth() === 0 ? 12 : new Date().getMonth();
+        if(mo < _prevMoNum || mo > 12) return;
         if(qty <= 0) return;
         if(!byItem[code]) byItem[code] = {};
         byItem[code][mo] = (byItem[code][mo] || 0) + qty;
@@ -4535,7 +4539,9 @@ async function syncAll() {
     } catch(e) { console.warn('[syncAll] Cache FAILED:', e.message); }
   }
 
-  if(STATE.mrpData) buildProjection();
+  // Selalu build projection setelah sync — fc_result harus tersave meski mrpData belum ada
+  // Kalau mrpData null, projection tetap jalan dengan stock data saja
+  buildProjection();
   updateDashStats();
 
   if(!failed.length) {
@@ -6348,6 +6354,41 @@ function _doBuildProjection() {
     var emailData = { date:todayISO2, urgent:urgentItems, under:underItems, over:overItems, totalItems:projection.length, urgentCount:urgentCount };
     cloudSave('email_daily_data', JSON.stringify(emailData));
   } catch(e) { console.warn('[build] email_daily_data save fail:', e.message); }
+
+  // ── Simpan fc_result ke Firebase untuk WA Bot ────────────────────────────
+  // Berisi semua data projection yang bisa dijawab bot (stok, DOI, jadwal, dll)
+  try {
+    var fcResultItems = projection.map(function(p){
+      return {
+        code: p.productCode, name: p.description, realName: p.realName||'',
+        uom: p.uom||'', supplier: p.supplier||'', site: p.site||'',
+        itemType: p.itemType||'',
+        stockBTG: p.stockBTG||0, stockSNG: p.stockSNG||0, stockJTK: p.stockJTK||0,
+        stockTotal: (p.stockBTG||0)+(p.stockSNG||0)+(p.stockJTK||0),
+        doiFC: p.doiFC||0, doiMatcom: p.doiMatcom||0,
+        actualMRP: p.actualMRP||0, max3MRP: p.max3MRP||0,
+        totalIncoming: p.totalIncoming||0,
+        coverageDate: p.coverageDateStr||'',
+        category: p.category||'',
+        isUrgent: !!p.isUrgent,
+        reqThisMonth: p.actualMRP||0,
+        incoming: p.totalIncoming||0,
+        endStock: p.endStock||0
+      };
+    });
+    var fcResultPayload = {
+      ts: new Date().toISOString(),
+      items: fcResultItems,
+      summary: {
+        total: projection.length,
+        urgent: projection.filter(function(p){return p.isUrgent;}).length,
+        under:  projection.filter(function(p){return p.category==='UNDER';}).length,
+        over:   projection.filter(function(p){return p.category==='OVER';}).length
+      }
+    };
+    cloudSave('fc_result', JSON.stringify(fcResultPayload));
+    console.log('[build] fc_result saved:', fcResultItems.length, 'items');
+  } catch(e) { console.warn('[build] fc_result save fail:', e.message); }
 
   try { renderProjection(); } catch(e) { console.error('[build] renderProjection CRASH:', e.message, e.stack); }
   try { populateSKUFilter(); } catch(e) { console.warn('[build] populateSKUFilter fail:', e.message); }
@@ -11076,21 +11117,36 @@ function _calcForecast(code, ospoIdx) {
     return cnt > 0 ? sum / cnt : 0;
   })();
 
+  // calcDOI — formula baru: average(matcom_bulan_lalu, forecast_bulan_ini, forecast_bulan_depan)
+  // matcom_bulan_lalu: pakai actual kalau bulan sudah selesai, forecast kalau belum
+  // fwd forecast: forecast[i+1] kalau ada, avgReq kalau bulan terakhir horizon
+  // DOI = stockFc[i] / (rate / 25)  →  25 hari kerja per bulan
   function calcDOI(stockArr) {
+    var _currMoNum = new Date().getMonth() + 1; // bulan berjalan (1-indexed)
+    var _mc = (STATE.matcomMonthly && STATE.matcomMonthly[code]) ? STATE.matcomMonthly[code] : {};
     return FC_MONTHS.map(function(_, i) {
-      var s  = stockArr[i]; if(s <= 0) return 0;
-      var r0 = forecast[i]   || 0;
-      // Kalau bulan berikutnya di luar horizon, pakai avgReq sebagai estimasi
-      var r1 = (forecast[i+1] != null && forecast[i+1] > 0) ? forecast[i+1] : avgReq;
-      var r2 = (forecast[i+2] != null && forecast[i+2] > 0) ? forecast[i+2] : avgReq;
-      if(r0 <= 0 && r1 <= 0) return s > 0 ? 0 : 0;
-      if(r0 > 0 && s < r0)   return Math.round(s / r0 * WD);
-      var s1 = s - r0;
-      if(r1 > 0 && s1 < r1)  return Math.round(WD + s1 / r1 * WD);
-      var s2 = s1 - r1;
-      if(r2 > 0)              return Math.round(WD + WD + s2 / r2 * WD);
-      // Stock masih besar tapi sudah tidak ada req beyond → cap at 3 bulan (75 hari)
-      return WD * 3;
+      var s = stockArr[i]; if(s <= 0) return 0;
+      var moNum     = FC_MONTH_NUMS[i];
+      var prevMoNum = moNum === 1 ? 12 : moNum - 1;
+
+      // matcomEff: bulan lalu sudah selesai → pakai actual, belum → pakai forecast
+      var matcomEff;
+      if(prevMoNum < _currMoNum) {
+        // Bulan lalu sudah lewat — pakai matcom aktual SAP
+        matcomEff = _mc[prevMoNum] || 0;
+      } else {
+        // Bulan lalu sedang berjalan atau belum terjadi — pakai forecast bulan itu
+        matcomEff = (i > 0 && forecast[i-1] != null) ? (forecast[i-1] || 0) : avgReq;
+      }
+
+      // Forward forecast: bulan depan kalau ada, avgReq kalau horizon habis
+      var fwdFc = (forecast[i+1] != null && forecast[i+1] > 0) ? forecast[i+1] : avgReq;
+
+      // Rate = average 3 komponen
+      var rate = (matcomEff + (forecast[i] || 0) + fwdFc) / 3;
+
+      if(rate <= 0) return s > 0 ? 999 : 0;
+      return Math.round(s / (rate / WD));
     });
   }
 
