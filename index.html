@@ -11564,16 +11564,22 @@ function _fcDetailRow(code, fc, master) {
   var meta = '<div style="display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-size:11px;padding:12px 14px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r)">';
   var matcomM = (STATE.matcomMonthly || {})[code] || {};
   var _MNAME = ['','Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agt','Sep','Okt','Nov','Des'];
-  var curMo = new Date().getMonth() + 1;
-  // Hanya bulan berjalan, konversi gram → kg jika perlu
+  var curMo  = new Date().getMonth() + 1;
+  var prevMo = curMo === 1 ? 12 : curMo - 1;
   var matcomRows = [];
   var _mcUom = (master.uom||'').toLowerCase();
-  var _mcQty = matcomM[curMo] || 0;
-  var _mcUomDisplay = master.uom || '';
-  if(_mcUom === 'g' || _mcUom === 'gr' || _mcUom === 'gram') {
-    _mcQty = _mcQty / 1000;
-    _mcUomDisplay = 'KG';
-  }
+  var _isGram = (_mcUom === 'g' || _mcUom === 'gr' || _mcUom === 'gram');
+  var _mcUomDisplay = _isGram ? 'KG' : (master.uom || '');
+
+  // Matcom bulan lalu (dipakai formula DOI)
+  var _mcPrevQty = (_isGram ? (matcomM[prevMo]||0)/1000 : (matcomM[prevMo]||0));
+  matcomRows.push(['Matcom '+_MNAME[prevMo],
+    '<span style="color:'+(_mcPrevQty>0?'var(--seafoam)':'var(--muted)')+';font-weight:600">'+n_id(_mcPrevQty)+'</span>'
+    +' <small style="color:var(--muted)">'+_mcUomDisplay+'</small>'
+    +' <small style="color:var(--muted);font-size:9px">(dipakai DOI)</small>']);
+
+  // Matcom bulan berjalan (partial)
+  var _mcQty = _isGram ? (matcomM[curMo]||0)/1000 : (matcomM[curMo]||0);
   matcomRows.push(['Matcom '+_MNAME[curMo],
     '<span style="color:'+(_mcQty>0?'var(--teal)':'var(--muted)')+';font-weight:600">'+n_id(_mcQty)+'</span>'
     +' <small style="color:var(--muted)">'+_mcUomDisplay+'</small>']);
