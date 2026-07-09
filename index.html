@@ -598,11 +598,10 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
           <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;padding:3px 0;cursor:pointer;color:var(--text);margin:0"><input type="checkbox" checked onchange="toggleProjCol('site',this)"> Site</label>
           <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;padding:3px 0;cursor:pointer;color:var(--text);margin:0"><input type="checkbox" checked onchange="toggleProjCol('stockbtg',this)"> Stock BTG</label>
           <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;padding:3px 0;cursor:pointer;color:var(--text);margin:0"><input type="checkbox" checked onchange="toggleProjCol('stocksng',this)"> Stock SNG</label>
-          <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;padding:3px 0;cursor:pointer;color:var(--text);margin:0"><input type="checkbox" checked onchange="toggleProjCol('doifc',this)"> DOI Max</label>
-          <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;padding:3px 0;cursor:pointer;color:var(--text);margin:0"><input type="checkbox" checked onchange="toggleProjCol('doimatcom',this)"> DOI Real</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;padding:3px 0;cursor:pointer;color:var(--text);margin:0"><input type="checkbox" checked onchange="toggleProjCol('doifc',this)"> DOI</label>
           <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;padding:3px 0;cursor:pointer;color:var(--text);margin:0"><input type="checkbox" checked onchange="toggleProjCol('estusg',this)"> Est Usg/day</label>
           <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;padding:3px 0;cursor:pointer;color:var(--text);margin:0"><input type="checkbox" checked onchange="toggleProjCol('actualmrp',this)"> Actual MRP</label>
-          <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;padding:3px 0;cursor:pointer;color:var(--text);margin:0"><input type="checkbox" checked onchange="toggleProjCol('mrp21',this)"> MRP Max</label>
+          
           
           <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;padding:3px 0;cursor:pointer;color:var(--text);margin:0"><input type="checkbox" checked onchange="toggleProjCol('grpo',this)"> GRPO Bln Ini</label>
           <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;padding:3px 0;cursor:pointer;color:var(--text);margin:0"><input type="checkbox" checked onchange="toggleProjCol('actualusg',this)"> Actual Usg</label>
@@ -2252,7 +2251,7 @@ function _aiToolSearch(query) {
       doi_hari:Math.round(p.doiFC||0),
       coverage_habis:p.coverageDateStr||'?',
       mrp_bulan_ini:Math.round(p.actualMRP||0),
-      mrp_max_3bln:Math.round(p.max3MRP||0),
+      mrp_bln_ini:Math.round(p.actualMRP||0),
       mrp_bulan_depan:Math.round(p.mrpNextMonth||0),
       end_stock_bln_ini:Math.round(p.endStock||0),
       total_po_open:Math.round(p.totalIncoming||0),
@@ -2480,7 +2479,7 @@ function _aiBuildCtx() {
       stok_SNG: Math.round((p.stockSNG||0)*100)/100,
       stok_JTK: Math.round((p.stockJTK||0)*100)/100,
       doi_hari: Math.round(p.doiFC||0),
-      doi_real_matcom: p.doiMatcom && p.doiMatcom!=='\u221e' ? Math.round(p.doiMatcom) : null,
+
       coverage_habis: p.coverageDateStr || fmtCov(p.coverageDate),
       est_pakai_per_hari: Math.round((p.estUsageMRP||p.estUsgDay||0)*100)/100,
       mrp_bulan_ini: Math.round(p.actualMRP||0),
@@ -6163,12 +6162,11 @@ function _doBuildProjection() {
 
     // DOI Max = stock / (MRP Max / days) — basis coverage & kategori
     // Pakai totalStock murni dari SAP, bukan termasuk confirmed incoming
-    var estUsgMax  = max3MRP > 0 ? max3MRP / daysInMonth : 0;
+    var estUsgMax  = actualMRP > 0 ? actualMRP / daysInMonth : 0;
     var doiFC      = estUsgMax > 0 ? totalStock / estUsgMax : (totalStock > 0 ? 999 : 0);
 
-    // DOI Real = stock / (Actual MRP / days)
-    var estUsgReal = actualMRP > 0 ? actualMRP / daysInMonth : 0;
-    var doiMatcom  = estUsgReal > 0 ? totalStock / estUsgReal : (totalStock > 0 ? 999 : 0);
+    // doiMatcom = sama dengan doiFC setelah konsolidasi, pertahankan untuk backward compat
+    var doiMatcom  = doiFC;
 
     // Est Usg/day ditampilkan dari MRP Max (untuk coverage calculation)
     var estUsageMRP = estUsgMax;
@@ -6197,9 +6195,9 @@ function _doBuildProjection() {
     // End Stock vs MRP:
     // Jika actual usage > MRP 2+1 → Stock BTG + Stock SNG
     // Jika actual usage ≤ MRP 2+1 → Stock BTG + Stock SNG + actual usage - MRP 2+1
-    var endStock = actualUsageDaily > max3MRP
+    var endStock = actualUsageDaily > actualMRP
       ? totalStock
-      : totalStock + actualUsageDaily - max3MRP;
+      : totalStock + actualUsageDaily - actualMRP;
 
     var ospoRaw = ospoByItem[code] || {};
     // Compute 4 OSPO buckets: sd Apr 2026, Mei 2026, Juni 2026, Juli dst
@@ -6268,11 +6266,11 @@ function _doBuildProjection() {
     var itemType = /^3/.test(code) ? 'RM' : (/^4/.test(code) ? 'PM' : (/^1/.test(code) ? 'FG' : 'OTHER'));
 
     // Urgent: skip if no demand at all (MRP=0, max3MRP=0, avgUsg=0)
-    var hasNoDemand = actualMRP === 0 && max3MRP === 0;
+    var hasNoDemand = actualMRP === 0;
     var isUrgent = !hasNoDemand && coverageDate <= getCutoff();
 
     // % Usage vs Forecast: if(MRP2+1=0; if(actualUsage<=0; 0; 1); actualUsage/MRP2+1)
-    var pctUsageVsForecast = max3MRP === 0 ? (actualUsageDaily <= 0 ? 0 : 1) : actualUsageDaily / max3MRP;
+    var pctUsageVsForecast = actualMRP === 0 ? (actualUsageDaily <= 0 ? 0 : 1) : actualUsageDaily / actualMRP;
 
     projection.push({
       productCode: code, description: description, realName: realName, uom: uom,
@@ -6497,7 +6495,7 @@ function renderProjection() {
       });
       if(!_matchAbc) return false;
     }
-    if(fMrpNonzero && (p.max3MRP||0) === 0) return false;
+    if(fMrpNonzero && (p.actualMRP||0) === 0) return false;
     // Coverage filter — pakai f-proj-coverage (satu input untuk display + jadwal)
     if(fCoverage) {
       var covISO = p.coverageDateISO || p.coverageDateStr || '';
@@ -6566,7 +6564,6 @@ function renderProjection() {
       td('<span class="mono td-right" style="display:block">' + n_id(p.stockSNG||0) + '</span>','stocksng') +
       td('<span class="mono td-right" style="display:block">' + n_id(p.stockJTK||0) + '</span>','stockjtk') +
       td('<span class="mono">' + p.doiFC + '</span>','doifc','text-align:right') +
-      td('<span class="mono">' + p.doiMatcom + '</span>','doimatcom','text-align:right') +
       td('<span class="mono">' + n_id(p.estUsageMRP||0) + '</span>','estusg','text-align:right') +
       td('<span class="mono">' + n_id(p.actualMRP||0) + '</span>','actualmrp','text-align:right') +
       td('<span class="mono">' + n_id(p.max3MRP||0) + '</span>','mrp21','text-align:right') +
@@ -6647,8 +6644,7 @@ function renderProjection() {
     th('Stock BTG','stockbtg') +
     th('Stock SNG','stocksng') +
     th('Stock JTK','stockjtk') +
-    th('DOI Max','doifc') +
-    th('DOI Real','doimatcom') +
+    th('DOI','doifc') +
     th('Est Usg/day','estusg') +
     th('Actual MRP','actualmrp') +
     th('MRP Max','mrp21') +
@@ -6748,7 +6744,7 @@ function checkNotifications() {
   if(!STATE.projectionData.length) return;
   var now = new Date();
   var todayISO = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-'+String(now.getDate()).padStart(2,'0');
-  var currentUrgent = STATE.projectionData.filter(function(p){ return p.isUrgent && p.max3MRP > 0; }).map(function(p){ return p.productCode; });
+  var currentUrgent = STATE.projectionData.filter(function(p){ return p.isUrgent && p.actualMRP > 0; }).map(function(p){ return p.productCode; });
   var prevSet = _prevUrgentSet;
 
   currentUrgent.forEach(function(code) {
@@ -7517,7 +7513,7 @@ function generateSchedule(typeFilter) {
   });
 
   var urgentItems = STATE.projectionData.filter(function(p){
-    if(!(p.max3MRP > 0)) return false;
+    if(!(p.actualMRP > 0)) return false;
     // Filter berdasarkan tipe yang dipilih
     if(typeFilter && typeFilter !== 'all') {
       if(typeFilter === 'FG' && p.itemType !== 'FG') return false;
@@ -7536,7 +7532,7 @@ function generateSchedule(typeFilter) {
       if(doiAfterIncoming >= (p.maxDOI || 30)) return false;
     } else if(totalCover > 0) {
       // Tidak bisa hitung DOI (estUsg=0), fallback ke cek qty vs needed
-      var needed = Math.max(0, (p.max3MRP || 0) - stockTotal);
+      var needed = Math.max(0, (p.actualMRP || 0) - stockTotal);
       if(needed > 0 && totalCover >= needed) return false;
     }
     return p.coverageDate <= coverageCutoff;
@@ -7782,7 +7778,7 @@ function generateSchedule(typeFilter) {
         if(da !== db) return da.localeCompare(db);
         return String(a.docNum).localeCompare(String(b.docNum));
       });
-      var needed = Math.max(0, (item.max3MRP || 0) - (item.stockBTG||0) - (item.stockSNG||0) - (item.stockJTK||0) - (confQtyByItem[item.productCode] || 0));
+      var needed = Math.max(0, (item.actualMRP || 0) - (item.stockBTG||0) - (item.stockSNG||0) - (item.stockJTK||0) - (confQtyByItem[item.productCode] || 0));
       // Ambil multiple dari master data — PO dengan openQty < multiple dilewati
       var masterItem = STATE.masterData && STATE.masterData[item.productCode];
       var multipleQty = masterItem ? (masterItem.multiple || 0) : 0;
@@ -7951,7 +7947,7 @@ function renderSchedule() {
         // Pakai doiAfterIncoming (sudah hitung confirmed PO) bukan doiFC (stock saja)
         var doiNow = proj ? Math.round(proj.doiAfterIncoming != null ? proj.doiAfterIncoming : (proj.doiFC||0)) : 0;
         var daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth()+1, 0).getDate();
-        var dailyUsg = (proj && proj.max3MRP > 0) ? proj.max3MRP / daysInMonth : 0;
+        var dailyUsg = (proj && proj.actualMRP > 0) ? proj.actualMRP / daysInMonth : 0;
         var addDays = dailyUsg > 0 ? Math.round(dispQty / dailyUsg) : 0;
         var doiAfter = doiNow + addDays;
         var doiColor = doiNow < 7 ? 'var(--red)' : (doiNow < 14 ? 'var(--amber)' : 'var(--muted)');
