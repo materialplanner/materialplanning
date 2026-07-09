@@ -7763,7 +7763,9 @@ function generateSchedule(typeFilter) {
         if(da !== db) return da.localeCompare(db);
         return String(a.docNum).localeCompare(String(b.docNum));
       });
-      var needed = Math.max(0, (item.actualMRP || 0) - (item.stockBTG||0) - (item.stockSNG||0) - (item.stockJTK||0) - (confQtyByItem[item.productCode] || 0));
+      var needed = Math.max(0, (item.actualMRP || 0) - (item.stockBTG||0) - (item.stockSNG||0) - (item.stockJTK||0) - (confQtyByItem[item.productCode] || 0) - (scheduledQtyByItem[item.productCode] || 0));
+      // Kalau tidak ada kekurangan dan bukan manual, skip — jangan muncul di kartu dengan qty 0
+      if(needed === 0 && !item._manualForced) return;
       // Ambil multiple dari master data — PO dengan openQty < multiple dilewati
       var masterItem = STATE.masterData && STATE.masterData[item.productCode];
       var multipleQty = masterItem ? (masterItem.multiple || 0) : 0;
@@ -7818,6 +7820,9 @@ function generateSchedule(typeFilter) {
       var _manualTag = item._manualForced ? ' · 📋 Manual' : '';
       itemSummaryParts.push((_dispName(item)||'') + (qtySum ? ' · ' + n_id(qtySum) + ' ' + uom : '') + _manualTag);
       selectedEntries.push({ item: item, pos: pickedPOs, isManual: !!item._manualForced });
+      // Update scheduledQtyByItem agar supplier berikutnya dalam run ini tidak double-pick item yang sama
+      var _pickedQty = pickedPOs.reduce(function(s,po){ return s+(po.openQty||0); }, 0);
+      scheduledQtyByItem[item.productCode] = (scheduledQtyByItem[item.productCode]||0) + _pickedQty;
     });
 
     var poNums = selectedPOs.map(function(p){ return p.docNum; }).filter(Boolean);
