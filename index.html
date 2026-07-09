@@ -961,21 +961,6 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
       </div>
     </div>
 
-    <div class="card">
-      <div class="card-hdr"><span class="card-title">📊 MRP</span><span id="mrp-status" class="dot off"></span></div>
-      <div style="padding:14px">
-        <div class="fg"><label style="font-size:11px">Google Sheets URL</label><input id="mrp-url" placeholder="https://docs.google.com/spreadsheets/d/..." style="width:100%;font-size:11px"></div>
-        <div class="fg"><label style="font-size:11px">Nama Tab (opsional)</label><input id="mrp-sheet" placeholder="Sheet1" style="width:100%;font-size:11px"></div>
-        <button class="btn btn-sm btn-primary" onclick="loadSheetData('mrp')" style="width:100%;margin-top:6px">Muat MRP</button>
-        <div id="mrp-source-badge" style="display:none;margin-top:6px;padding:5px 8px;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);border-radius:5px;font-size:10.5px;color:var(--amber)">
-          ⚡ MRP <b>months</b> dari MPS→MRP (GSheet hanya update max3MRP)
-          <button onclick="localStorage.removeItem('mrp_source');document.getElementById('mrp-source-badge').style.display='none';toast('Flag reset. Muat ulang untuk pakai GSheet.','ok')"
-            style="margin-left:8px;font-size:9.5px;padding:1px 7px;border-radius:3px;border:1px solid rgba(245,158,11,.5);background:transparent;color:var(--amber);cursor:pointer">Reset</button>
-        </div>
-        <div id="mrp-info" style="margin-top:8px;font-size:11px;color:var(--muted)"></div>
-        <div id="mrp-ts" style="font-size:10px;color:var(--muted);margin-top:2px"></div>
-      </div>
-    </div>
 
     <div class="card">
       <div class="card-hdr"><span class="card-title">🏷️ Real Name</span><span id="realname-status" class="dot off"></span></div>
@@ -6566,7 +6551,7 @@ function renderProjection() {
       td('<span class="mono">' + p.doiFC + '</span>','doifc','text-align:right') +
       td('<span class="mono">' + n_id(p.estUsageMRP||0) + '</span>','estusg','text-align:right') +
       td('<span class="mono">' + n_id(p.actualMRP||0) + '</span>','actualmrp','text-align:right') +
-      td('<span class="mono">' + n_id(p.max3MRP||0) + '</span>','mrp21','text-align:right') +
+
       td('<span class="mono">' + n_id(p.totalIncoming||0) + '</span>','grpo','text-align:right') +
       td('<span class="mono" style="color:var(--amber)">' + n_id(p.actualUsageDaily||0) + '</span>','actualusg','text-align:right') +
       pctStr +
@@ -6647,7 +6632,7 @@ function renderProjection() {
     th('DOI','doifc') +
     th('Est Usg/day','estusg') +
     th('Actual MRP','actualmrp') +
-    th('MRP Max','mrp21') +
+
     th('GRPO Bln Ini','grpo') +
     th('Actual Usg','actualusg') +
     th('% Usg vs FC','pctusage') +
