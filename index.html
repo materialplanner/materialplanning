@@ -6281,7 +6281,7 @@ function _doBuildProjection() {
       doiMatcom: doiMatcom >= 999 ? '\u221e' : Math.floor(doiMatcom),
       doiFCNum: doiFC >= 999 ? 999 : doiFC,
       estUsageMRP: Math.round(estUsageMRP * 100) / 100,
-      estUsageMatcom: Math.round(estUsgReal * 100) / 100,
+      estUsageMatcom: Math.round(estUsgMax * 100) / 100,
       actualMRP: actualMRP, max3MRP: max3MRP,
       actualUsageDaily: Math.round(actualUsageDaily * 100) / 100,
       totalIncoming: Math.round(totalIncoming), totalOSPR: Math.round(totalOSPR),
