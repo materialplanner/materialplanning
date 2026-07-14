@@ -7842,6 +7842,17 @@ function generateSchedule(typeFilter) {
     // (tanggal request kirim akan muncul di list PO setelah jadwal di-approve)
   });
 
+  // Hapus kartu PENDING dari supplier yang akan di-generate ulang
+  // Kartu approved/sent/confirmed tetap dipertahankan
+  // Ini mencegah duplikat ketika user generate lebih dari sekali
+  var suppliersToGenerate = {};
+  Object.keys(bySupplier).forEach(function(k){ suppliersToGenerate[bySupplier[k].supName] = true; });
+  STATE.scheduleData = STATE.scheduleData.filter(function(card){
+    if(card.status !== 'pending') return true;
+    if(!suppliersToGenerate[card.supName]) return true;
+    return false;
+  });
+
   STATE.scheduleData = STATE.scheduleData.concat(newSchedule);
   localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData));
   localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
