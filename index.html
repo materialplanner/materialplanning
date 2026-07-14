@@ -7763,7 +7763,19 @@ function generateSchedule(typeFilter) {
         if(da !== db) return da.localeCompare(db);
         return String(a.docNum).localeCompare(String(b.docNum));
       });
-      var needed = Math.max(0, (item.actualMRP || 0) - (item.stockBTG||0) - (item.stockSNG||0) - (item.stockJTK||0) - (confQtyByItem[item.productCode] || 0) - (scheduledQtyByItem[item.productCode] || 0));
+      var needed = (function() {
+        // Hitung needed berbasis DOI target — lebih akurat dari sekedar actualMRP - stock
+        // Kalau pakai actualMRP - stock saja, item dengan stock sedikit di atas bulan ini
+        // tapi DOI rendah bisa false negative (needed=0 padahal DOI < target)
+        var _estUsgDay = item.estUsageMRP || item.estUsageMax || 0;
+        if(_estUsgDay > 0) {
+          var _targetDOI   = _fcGetDOIForItem(item.productCode) || 30;
+          var _targetStock = _estUsgDay * _targetDOI; // stok ideal untuk nutup target DOI
+          return Math.max(0, _targetStock - stockTotal - (confQtyByItem[item.productCode]||0) - (scheduledQtyByItem[item.productCode]||0));
+        }
+        // Fallback kalau tidak ada data usage
+        return Math.max(0, (item.actualMRP||0) - stockTotal - (confQtyByItem[item.productCode]||0) - (scheduledQtyByItem[item.productCode]||0));
+      })();
       // Kalau tidak ada kekurangan dan bukan manual, skip — jangan muncul di kartu dengan qty 0
       if(needed === 0 && !item._manualForced) return;
       // Ambil multiple dari master data — PO dengan openQty < multiple dilewati
