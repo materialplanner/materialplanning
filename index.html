@@ -7765,13 +7765,22 @@ function generateSchedule(typeFilter) {
       });
       var needed = (function() {
         var _stockTotal = (item.stockBTG||0) + (item.stockSNG||0) + (item.stockJTK||0);
-        var _conf = confQtyByItem[item.productCode] || 0;
+        var _conf  = confQtyByItem[item.productCode] || 0;
         var _sched = scheduledQtyByItem[item.productCode] || 0;
-        var _estUsgDay = item.estUsageMRP || item.estUsageMax || 0;
-        if(_estUsgDay > 0) {
-          var _targetDOI   = _fcGetDOIForItem(item.productCode) || 30;
-          var _targetStock = _estUsgDay * _targetDOI;
+        var _targetDOI = _fcGetDOIForItem(item.productCode) || 30;
+        // Back-calculate effective daily rate dari doiFC yang ditampilkan ke user
+        // Ini memastikan needed konsisten dengan DOI yang terlihat di projection stock
+        // (doiFC pakai 3-way average, estUsageMRP hanya dari actualMRP — beda formula)
+        var _doi = (typeof item.doiFC === 'number' && isFinite(item.doiFC) && item.doiFC > 0)
+                   ? item.doiFC : null;
+        if(_doi && _stockTotal > 0) {
+          var _effDaily   = _stockTotal / _doi;
+          var _targetStock = _effDaily * _targetDOI;
           return Math.max(0, _targetStock - _stockTotal - _conf - _sched);
+        }
+        if(_stockTotal === 0) {
+          // Tidak ada stok — order minimal untuk nutup target DOI
+          return Math.max(0, (item.estUsageMRP || 0) * _targetDOI - _conf - _sched);
         }
         return Math.max(0, (item.actualMRP||0) - _stockTotal - _conf - _sched);
       })();
