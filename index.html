@@ -5161,7 +5161,7 @@ function _refreshProjectionIncoming(itemCode) {
   Object.keys(STATE.poConfirmations||{}).forEach(function(k){ _aK[k]=1; });
   Object.keys(_aK).forEach(function(k){
     var kp = k.split('_');
-    if(kp.length < 2 || kp.slice(1).join('_') !== itemCode) return;
+    if(kp.length < 2 || kp[kp.length-1] !== itemCode) return; // support both key formats
     if(!_aPK[k]) return;
     var ovr = STATE.poOverrides[k] || {};
     var pcc = (STATE.poConfirmations||{})[k] || {};
@@ -6218,10 +6218,10 @@ function _doBuildProjection() {
     Object.keys(STATE.poConfirmations||{}).forEach(function(k){ _allConfKeys[k]=1; });
     Object.keys(_allConfKeys).forEach(function(k){
       var kp = k.split('_');
-      if(kp.length >= 2 && kp.slice(1).join('_') === code) {
+      if(kp.length >= 2 && kp[kp.length-1] === code) { // support both docNum_itemCode dan docNum_lineNum_itemCode
         if(!_activePOKeys[k]) return; // PO sudah datang/hilang — skip
         var ovr = STATE.poOverrides[k] || {};
-        var po  = (STATE.poData||[]).find(function(p){ return p.docNum+'_'+p.itemCode === k; });
+        var po  = (STATE.poData||[]).find(function(p){ return _poKey(p) === k || p.docNum+'_'+p.itemCode === k; });
         // Read from po_confirmations first, fallback to po_overrides (legacy)
         var _pcc = (STATE.poConfirmations && STATE.poConfirmations[k]) || {};
         var _confDate = _pcc.confDate || ovr.confDate || null;
