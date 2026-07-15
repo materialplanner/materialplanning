@@ -10758,14 +10758,47 @@ function _fcGetDOI2() {
 // ke General/Impor berdasar supplier (perilaku lama, tetap sama persis kalau monthIdx
 // tidak diisi — supaya semua pemanggil lama yang belum di-update tidak berubah perilakunya).
 function _fcGetDOIForItem(itemCode, monthIdx) {
+  // 1. Override manual per item per bulan → menang mutlak
   if(monthIdx != null) {
     var ovrArr = _fcDOIItemMonthOvr[itemCode];
     if(ovrArr && ovrArr[monthIdx] != null) return ovrArr[monthIdx];
   }
-  if(_fcDOI2Suppliers.length === 0) return _fcGetDOI();
-  var sup = (_fcSupplierByItemCache || {})[itemCode] || '';
-  if(sup && _fcDOI2Suppliers.indexOf(sup) !== -1) return _fcGetDOI2();
-  return _fcGetDOI();
+
+  // 2. Base DOI dari supplier rule (Impor) atau General
+  var baseDOI;
+  if(_fcDOI2Suppliers.length === 0) {
+    baseDOI = _fcGetDOI();
+  } else {
+    var sup = (_fcSupplierByItemCache || {})[itemCode] || '';
+    baseDOI = (sup && _fcDOI2Suppliers.indexOf(sup) !== -1) ? _fcGetDOI2() : _fcGetDOI();
+  }
+
+  // 3. Aturan LT — Opsi B: memperhitungkan sisa HK bulan berjalan
+  // Bulan yang jaraknya (dalam HK) > LT item → target setengah
+  // Override manual (step 1) sudah menang sebelum sampai sini
+  if(monthIdx != null && monthIdx >= 0) {
+    var _master = (STATE.masterData || {})[itemCode] || {};
+    var _lt     = _master.lt || 0;
+    var _ltEff  = Math.max(_lt, 30); // minimum 30 HK (LT < 30 diperlakukan sebagai 30)
+
+    // Sisa HK bulan berjalan — proporsional dari sisa hari kalender
+    var _tod     = new Date();
+    var _lastDay = new Date(_tod.getFullYear(), _tod.getMonth() + 1, 0).getDate();
+    var _daysLeft = _lastDay - _tod.getDate();
+    var _sisaHK  = Math.round(_daysLeft * 25 / _lastDay);
+
+    // Jarak ke bulan monthIdx dalam HK
+    // i=0 (bulan berjalan): selalu 0 → selalu target penuh
+    // i=1: sisa HK bulan ini
+    // i=2: sisa HK + 25 (satu bulan penuh berikutnya)
+    var _jarak = monthIdx === 0 ? 0 : (_sisaHK + (monthIdx - 1) * 25);
+
+    if(_jarak > _ltEff) {
+      baseDOI = Math.round(baseDOI / 2);
+    }
+  }
+
+  return baseDOI;
 }
 function _fcDOIChange(val) {
   _fcDOI = parseInt(val) || 30;
@@ -12225,43 +12258,81 @@ function _fcPrintLampiranPR() {
     var name   = realN ? STATE.realNameData[code] : (master.desc || (STATE.mrpData[code]||{}).desc || '');
     var iType  = /^3/.test(code) ? 'RM' : 'PM';
 
-    // Hanya bulan yang DICENTANG user untuk item ini (selByCode[code]) — bukan
-    // semua bulan yang punya Propose PR > 0 di fc.propose.
+    // Normalisasi UOM — item GR/G/gram, nilai kalkulasi sudah dalam KG
+    var _isGramUom = /^(g|gr|gram)$/i.test((master.uom||'').trim());
+    var _displayUom = _isGramUom ? 'KG' : (master.uom||'');
+
+    // Matcom bulan lalu
+    var _mc = (STATE.matcomMonthly && STATE.matcomMonthly[code]) ? STATE.matcomMonthly[code] : {};
+    var _prevMo = new Date().getMonth() === 0 ? 12 : new Date().getMonth();
+    var _mcFactor = _isGramUom ? 0.001 : 1;
+    var _mcPrevVal = (_mc[_prevMo] || 0) * _mcFactor;
+    var _MNAME2 = ['','Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agt','Sep','Okt','Nov','Des'];
+
+    // Hanya bulan yang DICENTANG user untuk item ini
     var hiSet = selByCode[code] || {};
     var doiBeforeMap = {};
     Object.keys(hiSet).forEach(function(idxStr){
       var i = parseInt(idxStr, 10);
       var v = (fc.propose||[])[i] || 0;
-      if(v <= 0) return; // jaga-jaga, harusnya selalu >0 karena ini sumbernya dari Rekap PR
+      if(v <= 0) return;
       var stockBefore = _fcStockBeforePR(fc, i);
       doiBeforeMap[i] = _fcDoiFromStock(fc.forecast, stockBefore, i);
     });
-    // Badge diurutkan berdasar bulan (bukan urutan checkbox dicentang)
+
+    // Badge — pakai _displayUom (KG untuk item gram)
     var badgeParts = Object.keys(hiSet).map(Number).sort(function(a,b){return a-b;}).map(function(i){
-      return fmt2((fc.propose||[])[i]||0) + ' ' + (master.uom||'') + ' @ ' + monthsHdr[i];
+      return fmt2((fc.propose||[])[i]||0) + ' ' + _displayUom + ' @ ' + monthsHdr[i];
     });
 
     var headBadge = badgeParts.length
       ? '<span style="font-size:12px;color:#996600;font-weight:500;white-space:nowrap">PR ' + badgeParts.join(', ') + '</span>'
       : '';
 
+    // rowHtml dengan kolom SOH sebelum bulan pertama
+    var rowHtmlSoh = function(label, arr, hiSet2, doiBefore, bold, strongBg, sohVal) {
+      var sohTd = sohVal != null
+        ? '<td style="text-align:right;padding:1px 3px;color:#1d4ed8;font-weight:600">' + fmt2(sohVal) + '</td>'
+        : '<td style="text-align:right;padding:1px 3px;color:#ccc">–</td>';
+      var cells = '';
+      for(var ii = 0; ii < nMon; ii++) {
+        var isHi = !!(hiSet2||{})[ii];
+        var val = fmt2((arr||[])[ii]);
+        if(isHi && doiBefore && doiBefore[ii] != null) {
+          val = doiBefore[ii] + ' → <span style="color:#1d9e75">' + fmt2((arr||[])[ii]) + '</span>';
+        }
+        var bg = isHi ? (strongBg ? 'background:#fde047;' : 'background:#fdf4e3;') : '';
+        cells += '<td style="text-align:right;padding:1px 3px;' + bg + (bold?'font-weight:500;':'') + '">' + val + '</td>';
+      }
+      return '<tr><td style="padding:1px 3px;color:#555;' + (bold?'font-weight:500;':'') + 'white-space:nowrap">' + label + '</td>' + sohTd + cells + '</tr>';
+    };
+
     blocks += '<div style="border-bottom:0.5px solid #ddd;padding-bottom:10px;margin-bottom:10px;page-break-inside:avoid">'
       + '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:1px">'
       +   '<p style="font-size:13px;font-weight:500;margin:0">' + code + ' — ' + name + '</p>'
       +   headBadge
       + '</div>'
-      + '<p style="font-size:10px;color:#888;margin:0 0 6px">' + (master.uom||'') + ' &middot; SOH ' + fmt2(fc.soh) + ' &middot; DOI sekarang ' + (fc.doiFc[0]||0) + ' hari &middot; L/T ' + (fc.lt_days||0) + ' hari &middot; ' + (master.supplier||master.sup||'—') + '</p>'
+      + '<p style="font-size:10px;color:#888;margin:0 0 6px">'
+      +   _displayUom
+      +   ' &middot; MOQ ' + fmt2(master.moq||0)
+      +   ' &middot; Multiple ' + fmt2(master.multiple||master.mult||0)
+      +   ' &middot; Matcom ' + _MNAME2[_prevMo] + ' ' + fmt2(_mcPrevVal) + ' ' + _displayUom
+      +   ' &middot; DOI ' + (fc.doiFc[0]||0) + ' hari'
+      +   ' &middot; L/T ' + (fc.lt_days||0) + ' hari'
+      +   ' &middot; ' + (master.supplier||master.sup||'—')
+      + '</p>'
       + '<table style="width:100%;border-collapse:collapse;font-size:9.5px">'
       +   '<thead><tr style="color:#999">'
       +     '<td style="padding:1px 3px;width:78px"></td>'
+      +     '<td style="text-align:right;padding:1px 3px;color:#1d4ed8;font-style:italic;font-size:8.5px">SOH</td>'
       +     monthsHdr.map(function(m, i){ return '<td style="text-align:right;padding:1px 3px;' + (hiSet[i]?'background:#fdf4e3;color:#5c4a13;':'') + '">' + m + '</td>'; }).join('')
       +   '</tr></thead><tbody>'
-      +   rowHtml('Requirement', fc.forecast, hiSet)
-      +   rowHtml('Adj. OSPO', fc.forecastOspo, hiSet)
-      +   rowHtml('OSPR', fc.ospr, hiSet)
-      +   rowHtml('Stock ending', fc.stockFc, hiSet)
-      +   rowHtml('DOI (hari)', fc.doiFc, hiSet, doiBeforeMap)
-      +   rowHtml('Propose PR', fc.propose, hiSet, null, true, true)
+      +   rowHtmlSoh('Requirement',  fc.forecast,     hiSet)
+      +   rowHtmlSoh('Adj. OSPO',    fc.forecastOspo, hiSet)
+      +   rowHtmlSoh('OSPR',         fc.ospr,         hiSet)
+      +   rowHtmlSoh('Stock ending', fc.stockFc,      hiSet, null, false, false, fc.soh)
+      +   rowHtmlSoh('DOI (hari)',   fc.doiFc,        hiSet, doiBeforeMap)
+      +   rowHtmlSoh('Propose PR',   fc.propose,      hiSet, null, true, true)
       + '</tbody></table>'
       + '</div>';
   });
