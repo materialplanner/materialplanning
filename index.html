@@ -10779,7 +10779,7 @@ function _fcGetDOIForItem(itemCode, monthIdx) {
   if(monthIdx != null && monthIdx >= 0) {
     var _master = (STATE.masterData || {})[itemCode] || {};
     var _lt     = _master.lt || 0;
-    var _ltEff  = Math.max(_lt, 30); // minimum 30 HK (LT < 30 diperlakukan sebagai 30)
+    var _ltEff  = Math.round(Math.max(_lt, 30) * 25 / 30); // konversi hari kalender → HK
 
     // Sisa HK bulan berjalan — proporsional dari sisa hari kalender
     var _tod     = new Date();
