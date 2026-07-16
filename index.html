@@ -4100,6 +4100,20 @@ async function testSAP() {
 }
 
 // ─── LOAD STOCK (ReportId 90) ─────────────────────────────────────────────
+// BOM virtual stock: komponen → parent assembly (1:1, BTG only)
+// Tambah entri di sini kalau ada item BOM baru
+var BOM_PARENTS = {
+  '4000020043': ['4000020018','4000020042'],  // Glass Pipet ← Serum + Serum Renew
+  '4000020016': ['4000020018'],               // Rubber Pipet Brown ← Serum
+  '4000020017': ['4000020018'],               // Head Pipet Brown ← Serum
+  '4000020044': ['4000020042'],               // Ring Pipet ← Serum Renew
+  '4000020045': ['4000020042'],               // Rubber Pipet ← Serum Renew
+  '4000020083': ['4000020082'],               // Ring Pipet ← Power Serum
+  '4000020084': ['4000020082'],               // Glass Pipet ← Power Serum
+  '4000020008': ['4000020082'],               // Head Pipet Intense ← Power Serum
+  '4000020085': ['4000020082'],               // Plug Hanasui ← Power Serum
+};
+
 var BTG_WHS = ['GBEX','GBFP','GBHB','GBHK','GBJD','GBNS','GKIB','GSBC','GTIM','PFFG'];
 var SNG_WHS = ['SBFP','SBHB','SBHK','SFFG','SKIB','SSBC'];
 var JTK_WHS = ['GTJT']; // Gudang Jatirangon
@@ -6126,20 +6140,8 @@ function _doBuildProjection() {
     var stockSNG = stockData[code] ? Math.round(stockData[code].sng * 100) / 100 : 0;
     var stockJTK = stockData[code] ? Math.round((stockData[code].jtk||0) * 100) / 100 : 0;
 
-    // BOM virtual stock: komponen dapat tambahan SOH dari parent assembly (BTG only, 1:1)
-    // Hardcoded sementara untuk item Pipet Hanasui
-    var _BOM_PARENTS = {
-      '4000020043': ['4000020018','4000020042'],  // Glass Pipet ← Serum + Serum Renew
-      '4000020016': ['4000020018'],               // Rubber Pipet Brown ← Serum
-      '4000020017': ['4000020018'],               // Head Pipet Brown ← Serum
-      '4000020044': ['4000020042'],               // Ring Pipet ← Serum Renew
-      '4000020045': ['4000020042'],               // Rubber Pipet ← Serum Renew
-      '4000020083': ['4000020082'],               // Ring Pipet ← Power Serum
-      '4000020084': ['4000020082'],               // Glass Pipet ← Power Serum
-      '4000020008': ['4000020082'],               // Head Pipet Intense ← Power Serum
-      '4000020085': ['4000020082'],               // Plug Hanasui ← Power Serum
-    };
-    var _bomParents = _BOM_PARENTS[code];
+    // BOM virtual stock: pakai konstanta global BOM_PARENTS
+    var _bomParents = BOM_PARENTS[code];
     if(_bomParents) {
       _bomParents.forEach(function(pCode) {
         var pStock = stockData[pCode];
@@ -11089,6 +11091,14 @@ function _calcForecast(code, ospoIdx) {
   // ── SOH dari snapshot ─────────────────────────────────────────────────────
   var stockRaw = (STATE.stockData || {})[code] || {};
   var soh = (stockRaw.btg || 0) + (stockRaw.sng || 0) + (stockRaw.jtk || 0);
+  // BOM virtual stock: tambah SOH parent assembly ke komponen (sama dengan buildProjectionData)
+  var _fcBomParents = BOM_PARENTS[code];
+  if(_fcBomParents) {
+    _fcBomParents.forEach(function(pCode) {
+      var pSt = STATE.stockData[pCode];
+      if(pSt && pSt.btg > 0) soh += pSt.btg;
+    });
+  }
 
   var curYear = snapYear;
   var ospr_total = (STATE.osprByItem || {})[code] || 0;
