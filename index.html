@@ -11676,9 +11676,26 @@ function _fcDetailRow(code, fc, master) {
   matcomRows.push(['Matcom '+_MNAME[curMo],
     '<span style="color:'+(_mcQty>0?'var(--teal)':'var(--muted)')+';font-weight:600">'+n_id(_mcQty)+'</span>'
     +' <small style="color:var(--muted)">'+_mcUomDisplay+'</small>']);
+  // SOH display: kalau ada BOM parents, tampilkan "asli + assembly" bukan langsung total
+  var _sohDisplay = (function() {
+    var _bomPar = BOM_PARENTS[code];
+    if(!_bomPar || !_bomPar.length) return n_id(fc.soh);
+    var _rawSoh = STATE.stockData[code] ? (STATE.stockData[code].btg||0) : 0;
+    var _asmSoh = 0;
+    _bomPar.forEach(function(pCode) {
+      var pSt = STATE.stockData[pCode];
+      if(pSt && pSt.btg > 0) _asmSoh += pSt.btg;
+    });
+    if(_asmSoh <= 0) return n_id(fc.soh);
+    return n_id(_rawSoh)
+      + ' <span style="color:var(--muted);font-size:10px">+</span> '
+      + '<span style="color:var(--teal);font-size:10.5px" title="Dari assembly parent">'
+      + n_id(_asmSoh) + '</span>';
+  })();
+
   var mRows = [['Kode','<span style="font-family:var(--mono)">'+code+'</span>'],['Tipe',iType],['UoM',master.uom||'—'],
     ['MOQ',n_id(master.moq||0)],['Multiple',n_id(master.multiple||1)],['Lead Time',fc.lt_days+' hari'],
-    ['SOH',n_id(fc.soh)],['ABC','<span style="font-weight:700;color:'+abcColor+'">'+( abc||'—')+'</span>']];
+    ['SOH',_sohDisplay],['ABC','<span style="font-weight:700;color:'+abcColor+'">'+( abc||'—')+'</span>']];
   // Sisipkan matcom rows sebelum ABC
   matcomRows.forEach(function(r,i){ mRows.splice(mRows.length-1, 0, r); });
   if(rn && _isAdmin) mRows.splice(1,0,['Real Name','<span style="color:var(--teal)">'+rn+'</span>']);
