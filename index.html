@@ -6125,6 +6125,29 @@ function _doBuildProjection() {
     var stockBTG = stockData[code] ? Math.round(stockData[code].btg * 100) / 100 : 0;
     var stockSNG = stockData[code] ? Math.round(stockData[code].sng * 100) / 100 : 0;
     var stockJTK = stockData[code] ? Math.round((stockData[code].jtk||0) * 100) / 100 : 0;
+
+    // BOM virtual stock: komponen dapat tambahan SOH dari parent assembly (BTG only, 1:1)
+    // Hardcoded sementara untuk item Pipet Hanasui
+    var _BOM_PARENTS = {
+      '4000020043': ['4000020018','4000020042'],  // Glass Pipet ← Serum + Serum Renew
+      '4000020016': ['4000020018'],               // Rubber Pipet Brown ← Serum
+      '4000020017': ['4000020018'],               // Head Pipet Brown ← Serum
+      '4000020044': ['4000020042'],               // Ring Pipet ← Serum Renew
+      '4000020045': ['4000020042'],               // Rubber Pipet ← Serum Renew
+      '4000020083': ['4000020082'],               // Ring Pipet ← Power Serum
+      '4000020084': ['4000020082'],               // Glass Pipet ← Power Serum
+      '4000020008': ['4000020082'],               // Head Pipet Intense ← Power Serum
+      '4000020085': ['4000020082'],               // Plug Hanasui ← Power Serum
+    };
+    var _bomParents = _BOM_PARENTS[code];
+    if(_bomParents) {
+      _bomParents.forEach(function(pCode) {
+        var pStock = stockData[pCode];
+        if(pStock && pStock.btg > 0) {
+          stockBTG += Math.round(pStock.btg * 100) / 100;
+        }
+      });
+    }
     var totalStock = stockBTG + stockSNG + stockJTK;
 
     // Total incoming GRPO bulan ini (semua tgl)
