@@ -4728,14 +4728,18 @@ function generateUpdateDelDate() {
     // → semua PO outside-horizon hitung dari stock yang sama → numpuk di bulan yang sama
     var _lastFcIdx2  = FC_MONTHS.length - 1;
     var _fcLen2      = fcReq2.length;
-    var _extReq2     = [];
+    // avgReq untuk simulasi 2027 — pakai rata-rata forecast (konstan per bulan)
+    // Bug lama: sliding average yang makin decay ke 0 setelah bulan ke-3
+    // karena fcReq2[6+] = undefined → treatment sebagai 0 → requirement merosot → stock tidak habis → UDD = 2027-12-31 (hard cap)
+    var _avgReq2 = 0;
+    if(_fcLen2 > 0) {
+      var _s2 = 0, _c2 = 0;
+      fcReq2.forEach(function(v){ if(v > 0){ _s2 += v; _c2++; } });
+      _avgReq2 = _c2 > 0 ? _s2 / _c2 : 0;
+    }
+    var _extReq2 = [];
     for(var _em0 = 0; _em0 < 12; _em0++) {
-      var _r1 = _fcLen2 > 0 ? (fcReq2[Math.max(0, _lastFcIdx2 - 2 + _em0)] || 0) : 0;
-      var _r2 = _fcLen2 > 0 ? (fcReq2[Math.max(0, _lastFcIdx2 - 1 + _em0)] || 0) : 0;
-      var _r3 = _em0 === 0
-        ? (_fcLen2 > 0 ? (fcReq2[_lastFcIdx2] || 0) : 0)
-        : (_extReq2[_em0 - 1] || 0);
-      _extReq2[_em0] = (_r1 + _r2 + _r3) / 3;
+      _extReq2[_em0] = _avgReq2; // konstan per bulan
     }
     var _extStockPrev2 = fcStock && fcStock[_lastFcIdx2] != null ? fcStock[_lastFcIdx2] : 0;
     var _extMonStart2  = 0; // pointer bulan 2027, dipertahankan antar PO
