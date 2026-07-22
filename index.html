@@ -6312,6 +6312,14 @@ function _doBuildProjection() {
         dt.setDate(dt.getDate() + Math.floor(Math.min(d, 999)));
         return fmtDateID(dt);
       })(),
+      coverageDateAfterIncoming: (function(){
+        // Sama seperti coverageAfterIncoming tapi disimpan sebagai Date object,
+        // dipakai generateSchedule agar tidak generate ulang item yg sudah tercover incoming
+        var d = estUsgMax > 0 ? (totalStock + totalOpenPOQty) / estUsgMax : (totalStock+totalOpenPOQty > 0 ? 999 : 0);
+        var dt = new Date(now);
+        dt.setDate(dt.getDate() + Math.floor(Math.min(d, 999)));
+        return dt;
+      })(),
       category: category, endStock: Math.round(endStock),
       ospoSdApr: Math.round(ospoSdApr), ospoMei: Math.round(ospoMei),
       ospoJuni: Math.round(ospoJuni), ospoJulDst: Math.round(ospoJulDst),
@@ -7549,7 +7557,10 @@ function generateSchedule(typeFilter) {
       var needed = Math.max(0, (p.actualMRP || 0) - stockTotal);
       if(needed > 0 && totalCover >= needed) return false;
     }
-    return p.coverageDate <= coverageCutoff;
+    // Pakai coverage SETELAH incoming (stock + totalOpenPOQty), bukan coverage sebelum incoming.
+    // Kalau item sudah punya PO open/confirmed yg bikin coverage aman s/d cutoff, jangan generate lagi.
+    var covForFilter = p.coverageDateAfterIncoming || p.coverageDate;
+    return covForFilter <= coverageCutoff;
   });
 
   // Tambah item yang ada manual date di poOverrides meski tidak urgent
@@ -9435,14 +9446,18 @@ function renderDailyList() {
   var sDailyText = (document.getElementById('srch-daily')||{value:''}).value.toLowerCase();
   var entries = [];
   STATE.poData.forEach(function(p){
-    var key = p.docNum + '_' + p.itemCode;
-    var ovr = STATE.poOverrides[key] || {};
-    var reqDate = ovr.date || '';
-    if(!reqDate) return;
+    var key = _poKey(p);
+    var keyL2 = p.docNum + '_' + p.itemCode;
+    var ovr = STATE.poOverrides[key] || STATE.poOverrides[keyL2] || {};
+    // List Kiriman Daily dikelompokkan berdasarkan TANGGAL KONFIRMASI (confDate),
+    // bukan tanggal request kirim — karena ini adalah realisasi kiriman dari supplier.
+    var _cc = _poConfData(key) || _poConfData(keyL2);
+    var confDateRaw = _cc.confDate || '';
+    if(!confDateRaw) return; // belum ada konfirmasi supplier → tidak masuk list kiriman
     var _dtype = /^3/.test(p.itemCode||'') ? 'RM' : (/^4/.test(p.itemCode||'') ? 'PM' : (/^1/.test(p.itemCode||'') ? 'FG' : 'OTHER'));
     if(fDailyType && _dtype !== fDailyType) return;
     if(sDailyText && !(p.supplierName||'').toLowerCase().includes(sDailyText) && !(p.itemCode||'').toLowerCase().includes(sDailyText) && !(p.itemName||'').toLowerCase().includes(sDailyText)) return;
-    var isoDate = reqDate.includes('/') ? reqDate.split('/').reverse().join('-') : reqDate;
+    var isoDate = confDateRaw.includes('/') ? confDateRaw.split('/').reverse().join('-') : confDateRaw;
     if(fromVal && isoDate < fromVal) return;
     if(toVal && isoDate > toVal) return;
     var itemType = /^3/.test(p.itemCode||'') ? 'RM' : (/^4/.test(p.itemCode||'') ? 'PM' : (/^1/.test(p.itemCode||'') ? 'FG' : 'OTHER'));
@@ -9456,8 +9471,8 @@ function renderDailyList() {
       site: (p.site||'').toUpperCase(),
       openQty: ovr.reqQtyOverride !== undefined ? ovr.reqQtyOverride : (p.openQty||0),
       uom: p.uom||'',
-      confQty: ovr.confQty||'',
-      confDate: ovr.confDate||'',
+      confQty: _cc.confQty||'',
+      confDate: _cc.confDate||'',
       notes: ovr.notes||'',
       isManual: ovr.isManual,
       isAuto: ovr.isAuto,
@@ -9605,16 +9620,19 @@ function exportDailyListCSV() {
   function esc(v){var s=String(v===null||v===undefined?'':v);return s.includes(',')||s.includes('"')||s.includes('\n')?'"'+s.replace(/"/g,'""')+'"':s;}
   var entries = [];
   STATE.poData.forEach(function(p){
-    var key = p.docNum + '_' + p.itemCode;
-    var ovr = STATE.poOverrides[key] || {};
-    var reqDate = ovr.date || '';
-    if(!reqDate) return;
-    if(fromVal && reqDate < fromVal) return;
-    if(toVal && reqDate > toVal) return;
-    entries.push([reqDate, p.docNum, p.supplierName||'', p.itemCode||'', p.itemName||'', (STATE.realNameData&&STATE.realNameData[p.itemCode])||'', p.site||'', p.openQty||0, p.uom||'', ovr.confQty||'', ovr.confDate||'', ovr.notes||'', ovr.isManual?'Manual':(ovr.isAuto?'Auto':'')]);
+    var key = _poKey(p);
+    var keyL2 = p.docNum + '_' + p.itemCode;
+    var ovr = STATE.poOverrides[key] || STATE.poOverrides[keyL2] || {};
+    var _cc = _poConfData(key) || _poConfData(keyL2);
+    var confDateRaw = _cc.confDate || '';
+    if(!confDateRaw) return;
+    var isoDate = confDateRaw.includes('/') ? confDateRaw.split('/').reverse().join('-') : confDateRaw;
+    if(fromVal && isoDate < fromVal) return;
+    if(toVal && isoDate > toVal) return;
+    entries.push([isoDate, p.docNum, p.supplierName||'', p.itemCode||'', p.itemName||'', (STATE.realNameData&&STATE.realNameData[p.itemCode])||'', p.site||'', p.openQty||0, p.uom||'', _cc.confQty||'', ovr.notes||'', ovr.isManual?'Manual':(ovr.isAuto?'Auto':'')]);
   });
   if(!entries.length){toast('Tidak ada data','err');return;}
-  var headers = ['Tgl Request','Doc Num','Supplier','Item Code','Item Name','Real Name','Site','Open Qty','UOM','Qty Konfirm','Tgl Konfirm','Notes','Jenis'];
+  var headers = ['Tgl Konfirm','Doc Num','Supplier','Item Code','Item Name','Real Name','Site','Open Qty','UOM','Qty Konfirm','Notes','Jenis'];
   var csv = headers.map(esc).join(',') + '\n' + entries.map(function(r){return r.map(esc).join(',')}).join('\n');
   var a = document.createElement('a');
   a.href = 'data:text/csv;charset=utf-8,\uFEFF' + encodeURIComponent(csv);
