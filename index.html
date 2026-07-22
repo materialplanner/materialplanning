@@ -686,6 +686,7 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
     <select id="f-po-site" onchange="_poShowAll=false;renderPO()"><option value="">Semua Site</option><option>BITUNG</option><option>SANGIANG</option></select>
     <select id="f-po-req" onchange="_poShowAll=false;renderPO()"><option value="">Semua Status Request</option><option value="has">Sudah Dijadwal</option><option value="none">Belum Dijadwal</option><option value="manual">Edit Manual</option></select>
     <select id="f-po-conf" onchange="_poShowAll=false;renderPO()"><option value="">Semua Status Konfirmasi</option><option value="confirmed">Sudah Konfirmasi</option><option value="unconfirmed">Belum Konfirmasi</option></select>
+    <button class="btn btn-sm" onclick="_poColClearAll()" title="Hapus semua filter dropdown kolom (Doc Num, Supplier, dst)">✕ Hapus Filter Kolom</button>
   </div>
   <div id="po-table"><div class="loading"><div class="spin"></div>Klik Refresh SAP untuk memuat PO...</div></div>
 </div>
@@ -4972,46 +4973,9 @@ function _doExportPOGSheet() {
 }
 
 function renderPO() {
-  var srch = (document.getElementById('srch-po')||{value:''}).value.toLowerCase();
-  var site = (document.getElementById('f-po-site')||{value:''}).value;
-  var reqFilter = (document.getElementById('f-po-req')||{value:''}).value;
-  var confFilter = (document.getElementById('f-po-conf')||{value:''}).value;
-  // Column header filters
-  var hfDoc   = (document.getElementById('hf-doc')  ||{value:''}).value.toLowerCase();
-  var hfSup   = (document.getElementById('hf-sup')  ||{value:''}).value.toLowerCase();
-  var hfCode  = (document.getElementById('hf-code') ||{value:''}).value.toLowerCase();
-  var hfName  = (document.getElementById('hf-name') ||{value:''}).value.toLowerCase();
-  var hfSite  = (document.getElementById('hf-site2')||{value:''}).value.toLowerCase();
-  var hfReq   = (document.getElementById('hf-req')  ||{value:''}).value.toLowerCase();
-  var _reqDates = window._poReqDateFilter || []; // array tanggal terpilih
-  var hfConf  = (document.getElementById('hf-conf') ||{value:''}).value.toLowerCase();
-  var hfNotes = (document.getElementById('hf-notes')||{value:''}).value.toLowerCase();
-
   var fpoType = (document.getElementById('f-po-type')||{value:''}).value;
-  var filtered = STATE.poData.filter(function(p){
-    if(fpoType) { var t=/^3/.test(p.itemCode||'')?'RM':(/^4/.test(p.itemCode||'')?'PM':'FG'); if(t!==fpoType) return false; }
-    if(srch && !String(p.docNum).includes(srch) && !(p.itemCode||'').toLowerCase().includes(srch) && !(p.itemName||'').toLowerCase().includes(srch) && !(p.supplierName||'').toLowerCase().includes(srch)) return false;
-    if(site && !(p.site||'').toUpperCase().includes(site)) return false;
-    var _poKeyF = _poKey(p);
-    var _poKeyFL = p.docNum + '_' + p.itemCode;
-    var ovr = STATE.poOverrides[_poKeyF] || STATE.poOverrides[_poKeyFL] || {};
-    if(reqFilter === 'has' && !ovr.date && !p._reqDate) return false;
-    if(reqFilter === 'none' && (ovr.date || p._reqDate)) return false;
-    if(reqFilter === 'manual' && !ovr.isManual) return false;
-    var _ccF = _poConfData(_poKeyF);
-    if(confFilter === 'confirmed' && !_ccF.confDate) return false;
-    if(confFilter === 'unconfirmed' && _ccF.confDate) return false;
-    if(hfDoc   && !String(p.docNum).toLowerCase().includes(hfDoc)) return false;
-    if(hfSup   && !(p.supplierName||'').toLowerCase().includes(hfSup)) return false;
-    if(hfCode  && !(p.itemCode||'').toLowerCase().includes(hfCode)) return false;
-    if(hfName  && !(p.itemName||'').toLowerCase().includes(hfName)) return false;
-    if(hfSite  && !(p.site||'').toLowerCase().includes(hfSite)) return false;
-    if(_reqDates.length > 0 && _reqDates.indexOf(ovr.date||'') < 0) return false;
-    if(!_reqDates.length && hfReq && !(ovr.date||'').includes(hfReq)) return false;
-    if(hfConf  && !((_poConfData(_poKeyF).confDate)||'').includes(hfConf)) return false;
-    if(hfNotes && !(ovr.notes||'').toLowerCase().includes(hfNotes)) return false;
-    return true;
-  });
+  var filtered = _poBaseFilteredData(null);
+
 
   if(!filtered.length){
     document.getElementById('po-table').innerHTML = '<div class="empty"><div class="empty-ico">📦</div><h3>Tidak ada PO</h3><p>Refresh SAP atau ubah filter</p></div>';
@@ -5095,28 +5059,16 @@ function renderPO() {
     return row;
   }).join('');
 
-  // Header filter row — aligned to 13 columns
-  var frow = '<tr style="background:var(--bg4)">'
-    + '<th><input class="th-filter" id="hf-doc"   oninput="_poDeb()" placeholder="filter..." value="' + hfDoc   + '"></th>'
-    + '<th><input class="th-filter" id="hf-sup"   oninput="_poDeb()" placeholder="filter..." value="' + hfSup   + '"></th>'
-    + '<th><input class="th-filter" id="hf-code"  oninput="_poDeb()" placeholder="filter..." value="' + hfCode  + '"></th>'
-    + '<th><input class="th-filter" id="hf-name"  oninput="_poDeb()" placeholder="filter..." value="' + hfName  + '"></th>'
-    + '<th><input class="th-filter" id="hf-site2" oninput="_poDeb()" placeholder="filter..." value="' + hfSite  + '"></th>'
-    + '<th></th>'  // Open Qty
-    + '<th></th>'  // UOM
-    + '<th></th>'  // PR Req Date
-    + '<th style="position:relative"><div id="hf-req-wrap" style="position:relative">'
-    + '<button id="hf-req" onclick="_poReqDateDropdown()" style="width:100%;text-align:left;font-size:11px;padding:3px 6px;background:var(--bg3);border:1px solid var(--border2);border-radius:4px;cursor:pointer;color:' + (_reqDates.length?'var(--teal)':'var(--muted)') + ';white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'
-    + (_reqDates.length ? _reqDates.map(function(d){return d.split('-').reverse().join('/')}).join(', ') : 'tgl...')
-    + '</button>'
-    + '<div id="hf-req-panel" style="display:none;position:absolute;top:100%;left:0;z-index:300;background:var(--bg2);border:1.5px solid var(--border2);border-radius:6px;padding:8px;min-width:180px;box-shadow:0 4px 16px rgba(0,0,0,.15)">'
-    + '</div></div></th>'
-    + '<th></th>'  // Qty Konfirm
-    + '<th><input class="th-filter" id="hf-conf"  oninput="_poDeb()" placeholder="tgl..." value="' + hfConf  + '"></th>'
-    + '<th></th>'  // Tgl Update
-    + '<th></th>'  // Update DelDate
-    + '<th><input class="th-filter" id="hf-notes" oninput="_poDeb()" placeholder="filter..." value="' + hfNotes + '"></th>'
-    + '</tr>';
+  // Header filter row — dropdown Excel-style untuk semua kolom (lihat _PO_COL_DEFS)
+  var frow = '<tr style="background:var(--bg4)">' + _PO_COL_DEFS.map(function(def){
+    var active = (window._poColFilter[def.id]||[]).length > 0;
+    return '<th style="position:relative"><div style="position:relative">'
+      + '<button id="hfbtn-'+def.id+'" onclick="_poColDropdown(&quot;'+def.id+'&quot;)" style="width:100%;text-align:left;font-size:11px;padding:3px 6px;background:var(--bg3);border:1px solid var(--border2);border-radius:4px;cursor:pointer;color:'+(active?'var(--teal)':'var(--muted)')+';white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="Filter '+def.label+'">'
+      + (active ? '✓ ('+(window._poColFilter[def.id]||[]).length+')' : 'filter...')
+      + '</button>'
+      + '<div id="hfp-'+def.id+'" class="po-colfilter-panel" style="display:none;position:absolute;top:100%;left:0;z-index:300;background:var(--bg2);border:1.5px solid var(--border2);border-radius:6px;padding:8px;min-width:190px;box-shadow:0 4px 16px rgba(0,0,0,.15)"></div>'
+      + '</div></th>';
+  }).join('') + '</tr>';
 
   document.getElementById('po-table').innerHTML =
     '<div class="card"><div class="tbl-wrap"><table id="po-tbl" style="table-layout:fixed;width:100%">'
@@ -5432,76 +5384,206 @@ function cleanupProjHistory() {
   toast('History dipangkas: ' + before + ' → ' + after + ' hari. Tersimpan lokal ✓', 'ok');
 }
 
-function _poReqDateDropdown() {
-  var panel = document.getElementById('hf-req-panel');
+// ─── GENERIC EXCEL-STYLE COLUMN FILTER — List Pengiriman (PO) ──────────────
+// Setiap kolom bisa difilter seperti Excel/Google Sheets: dropdown checkbox
+// berisi semua nilai unik, ada search box, Pilih Semua, dan tombol OK/Reset.
+window._poColFilter = window._poColFilter || {}; // colId -> array nilai terpilih (kosong = tidak difilter)
+
+function _poOvr(p) {
+  var k = _poKey(p), k2 = p.docNum + '_' + p.itemCode;
+  return (STATE.poOverrides||{})[k] || (STATE.poOverrides||{})[k2] || {};
+}
+function _poConf(p) {
+  var k = _poKey(p), k2 = p.docNum + '_' + p.itemCode;
+  var pc = (STATE.poConfirmations||{})[k] || (STATE.poConfirmations||{})[k2] || {};
+  var ov = (STATE.poOverrides||{})[k] || (STATE.poOverrides||{})[k2] || {};
+  return {
+    confQty: pc.confQty || ov.confQty || null,
+    confDate: pc.confDate || ov.confDate || null,
+    confUpd: pc.confUpd ? String(pc.confUpd).substring(0,10) : (ov.confUpd || null)
+  };
+}
+
+var _PO_COL_DEFS = [
+  {id:'doc',     label:'Doc Num',           get:function(p){ return String(p.docNum||''); }},
+  {id:'sup',     label:'Supplier',          get:function(p){ return p.supplierName||''; }},
+  {id:'code',    label:'Item Code',         get:function(p){ return p.itemCode||''; }},
+  {id:'name',    label:'Item Name',         get:function(p){ return _poName(p.itemCode,p.itemName)||''; }},
+  {id:'site',    label:'Site',              get:function(p){ return (p.site||'').toUpperCase(); }},
+  {id:'qty',     label:'Open Qty',          get:function(p){ return String(Math.round(p.openQty||0)); }, numeric:true},
+  {id:'uom',     label:'UOM',               get:function(p){ return p.uom||''; }},
+  {id:'prreq',   label:'PR Req Date',       get:function(p){ return p.prReqDate||''; }, isDate:true},
+  {id:'req',     label:'Tgl Request Kirim', get:function(p){ return _poOvr(p).date||''; }, isDate:true},
+  {id:'confqty', label:'Qty Konfirm',       get:function(p){ var c=_poConf(p).confQty; return c?String(Math.round(c)):''; }, numeric:true},
+  {id:'conf',    label:'Tgl Konfirmasi',    get:function(p){ return _poConf(p).confDate||''; }, isDate:true},
+  {id:'upd',     label:'Tgl Update',        get:function(p){ return _poConf(p).confUpd||''; }, isDate:true},
+  {id:'udd',     label:'Update DelDate',    get:function(p){ var k=_poKey(p),k2=p.docNum+'_'+p.itemCode; return _poOvr(p).date || (STATE.updateDelDateData&&(STATE.updateDelDateData[k]||STATE.updateDelDateData[k2]))||''; }, isDate:true},
+  {id:'notes',   label:'Notes',             get:function(p){ return _poOvr(p).notes||''; }}
+];
+
+// Filter dasar (search global, tipe, site, status request/konfirmasi) + semua filter kolom
+// kecuali excludeColId — dipakai untuk hitung opsi dropdown kolom itu sendiri agar tetap lengkap.
+function _poBaseFilteredData(excludeColId) {
+  var srch = (document.getElementById('srch-po')||{value:''}).value.toLowerCase();
+  var site = (document.getElementById('f-po-site')||{value:''}).value;
+  var reqFilter = (document.getElementById('f-po-req')||{value:''}).value;
+  var confFilter = (document.getElementById('f-po-conf')||{value:''}).value;
+  var fpoType = (document.getElementById('f-po-type')||{value:''}).value;
+  return (STATE.poData||[]).filter(function(p){
+    if(fpoType) { var t=/^3/.test(p.itemCode||'')?'RM':(/^4/.test(p.itemCode||'')?'PM':'FG'); if(t!==fpoType) return false; }
+    if(srch && !String(p.docNum).includes(srch) && !(p.itemCode||'').toLowerCase().includes(srch) && !(p.itemName||'').toLowerCase().includes(srch) && !(p.supplierName||'').toLowerCase().includes(srch)) return false;
+    if(site && !(p.site||'').toUpperCase().includes(site)) return false;
+    var ovr = _poOvr(p);
+    if(reqFilter === 'has' && !ovr.date && !p._reqDate) return false;
+    if(reqFilter === 'none' && (ovr.date || p._reqDate)) return false;
+    if(reqFilter === 'manual' && !ovr.isManual) return false;
+    var _ccF = _poConf(p);
+    if(confFilter === 'confirmed' && !_ccF.confDate) return false;
+    if(confFilter === 'unconfirmed' && _ccF.confDate) return false;
+    if(!_poColPassAll(p, excludeColId)) return false;
+    return true;
+  });
+}
+
+// Cek apakah row p lolos SEMUA filter kolom yang aktif (kecuali excludeColId)
+function _poColPassAll(p, excludeColId) {
+  for (var i = 0; i < _PO_COL_DEFS.length; i++) {
+    var def = _PO_COL_DEFS[i];
+    if (excludeColId && def.id === excludeColId) continue;
+    var sel = window._poColFilter[def.id];
+    if (sel && sel.length) {
+      if (sel.indexOf(def.get(p)) < 0) return false;
+    }
+  }
+  return true;
+}
+
+// Nilai unik yang tersedia untuk kolom (berdasarkan data yg sudah lolos filter LAIN)
+function _poColOptions(colId) {
+  var def = _PO_COL_DEFS.find(function(d){ return d.id===colId; });
+  if(!def) return [];
+  var base = _poBaseFilteredData(colId);
+  var vals = [];
+  base.forEach(function(p){
+    var v = def.get(p);
+    if(v === '' || v == null) return;
+    if(vals.indexOf(v) < 0) vals.push(v);
+  });
+  if(def.numeric) vals.sort(function(a,b){ return parseFloat(a)-parseFloat(b); });
+  else if(def.isDate) vals.sort(function(a,b){ return _dateToSortISO(a).localeCompare(_dateToSortISO(b)); });
+  else vals.sort(function(a,b){ return String(a).localeCompare(String(b)); });
+  return vals;
+}
+
+// Tampilan nilai (tanggal dinormalisasi ke DD/MM/YYYY biar konsisten & enak dibaca)
+function _poColDisp(def, v) {
+  if(def.isDate && v) {
+    var iso = _dateToSortISO(v);
+    if(/^\d{4}-\d{2}-\d{2}$/.test(iso)) { var pp = iso.split('-'); return pp[2]+'/'+pp[1]+'/'+pp[0]; }
+  }
+  return v;
+}
+
+function _poColDropdown(colId) {
+  var panel = document.getElementById('hfp-'+colId);
   if(!panel) return;
+  // Tutup panel kolom lain yang mungkin masih terbuka
+  document.querySelectorAll('.po-colfilter-panel').forEach(function(el){ if(el.id !== 'hfp-'+colId) el.style.display = 'none'; });
   var visible = panel.style.display !== 'none';
   panel.style.display = visible ? 'none' : 'block';
-  if(!visible) _poReqDateRender();
+  if(!visible) { window._poColFilterSearchTxt = ''; window._poColFilterPending = null; _poColRender(colId); }
 }
-function _poReqDateRender() {
-  var panel = document.getElementById('hf-req-panel');
+
+function _poColRender(colId) {
+  var panel = document.getElementById('hfp-'+colId);
   if(!panel) return;
-  var dates = [];
-  Object.keys(STATE.poOverrides||{}).forEach(function(k){
-    var d = (STATE.poOverrides[k]||{}).date;
-    if(d && dates.indexOf(d) < 0) dates.push(d);
-  });
-  dates.sort();
-  window._poReqDates = dates;
-  // Pending = pilihan sementara sebelum OK
-  if(!window._poReqDatePending) window._poReqDatePending = (window._poReqDateFilter||[]).slice();
-  var pend = window._poReqDatePending;
-  var allChecked = dates.length > 0 && dates.every(function(d){ return pend.indexOf(d)>=0; });
-  var html = '<div style="font-size:10px;font-weight:600;color:var(--muted);letter-spacing:.07em;text-transform:uppercase;margin-bottom:6px">Filter Tgl Request Kirim</div>';
-  if(!dates.length) {
-    html += '<div style="font-size:11px;color:var(--muted)">Belum ada tanggal</div>';
+  var def = _PO_COL_DEFS.find(function(d){ return d.id===colId; });
+  if(!def) return;
+  var allVals = _poColOptions(colId);
+  if(!window._poColFilterPending || window._poColFilterPending.col !== colId) {
+    window._poColFilterPending = { col: colId, values: (window._poColFilter[colId]||[]).slice() };
+  }
+  var pend = window._poColFilterPending.values;
+  var searchTxt = (window._poColFilterSearchTxt||'').toLowerCase();
+  var shownVals = searchTxt ? allVals.filter(function(v){ return String(_poColDisp(def,v)).toLowerCase().includes(searchTxt); }) : allVals;
+  var allChecked = shownVals.length > 0 && shownVals.every(function(v){ return pend.indexOf(v) >= 0; });
+  var html = '<div style="font-size:10px;font-weight:600;color:var(--muted);letter-spacing:.07em;text-transform:uppercase;margin-bottom:6px">Filter ' + def.label + '</div>';
+  html += '<input type="text" placeholder="Cari nilai..." value="' + (window._poColFilterSearchTxt||'').replace(/"/g,'&quot;') + '" oninput="_poColSearch(&quot;'+colId+'&quot;,this.value)" style="width:100%;font-size:11px;padding:4px 6px;margin-bottom:6px;border:1px solid var(--border2);border-radius:4px;background:var(--bg3);color:var(--text);box-sizing:border-box">';
+  if(!allVals.length) {
+    html += '<div style="font-size:11px;color:var(--muted)">Belum ada data</div>';
+  } else if(!shownVals.length) {
+    html += '<div style="font-size:11px;color:var(--muted)">Tidak ditemukan</div>';
   } else {
-    // Select All
     html += '<label style="display:flex;align-items:center;gap:6px;font-size:11.5px;cursor:pointer;padding:4px;border-radius:4px;border-bottom:0.5px solid var(--border);margin-bottom:4px;font-weight:500;color:var(--text)">'
-          + '<input type="checkbox" id="req-date-all" '+(allChecked?'checked':'')+' onchange="(function(el){_poReqDateSelectAll(el.checked);})(this)" style="accent-color:var(--teal)">'
-          + 'Pilih Semua</label>';
-    html += '<div style="max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:2px">';
-    dates.forEach(function(d, di){
-      var chk = pend.indexOf(d) >= 0;
-      var disp = d.split('-').reverse().join('/');
-      var cbId = 'req-date-cb-' + di;
-      html += '<label for="'+cbId+'" style="display:flex;align-items:center;gap:6px;font-size:11.5px;cursor:pointer;padding:3px 4px;border-radius:4px;'+(chk?'background:rgba(20,184,166,.1);color:var(--teal)':'color:var(--text)')+'">'
-            + '<input type="checkbox" id="'+cbId+'" '+(chk?'checked':'')+' onchange="(function(el){_poReqDateToggle(window._poReqDates['+di+'],el.checked);})(this)" style="accent-color:var(--teal)">'
-            + disp + '</label>';
+          + '<input type="checkbox" ' + (allChecked?'checked':'') + ' onchange="_poColSelectAll(&quot;'+colId+'&quot;,this.checked)" style="accent-color:var(--teal)">'
+          + 'Pilih Semua (' + shownVals.length + ')</label>';
+    html += '<div style="max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:2px">';
+    shownVals.forEach(function(v){
+      var chk = pend.indexOf(v) >= 0;
+      var disp = _poColDisp(def, v);
+      html += '<label style="display:flex;align-items:center;gap:6px;font-size:11.5px;cursor:pointer;padding:3px 4px;border-radius:4px;' + (chk?'background:rgba(20,184,166,.1);color:var(--teal)':'color:var(--text)') + '">'
+            + '<input type="checkbox" ' + (chk?'checked':'') + ' onchange="_poColToggle(&quot;'+colId+'&quot;,&quot;'+String(v).replace(/"/g,'&quot;')+'&quot;,this.checked)" style="accent-color:var(--teal)">'
+            + (disp !== '' ? disp : '(kosong)') + '</label>';
     });
     html += '</div>';
   }
   html += '<div style="display:flex;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">'
-        + '<button onclick="_poReqDateClear()" style="flex:1;font-size:10px;padding:4px 0;background:var(--bg3);border:1px solid var(--border2);border-radius:4px;cursor:pointer;color:var(--muted)">Reset</button>'
-        + '<button onclick="_poReqDateApply()" style="flex:1;font-size:10px;padding:4px 0;background:var(--teal);border:1px solid var(--teal);border-radius:4px;cursor:pointer;color:#fff;font-weight:600">OK</button>'
+        + '<button onclick="_poColClear(&quot;'+colId+'&quot;)" style="flex:1;font-size:10px;padding:4px 0;background:var(--bg3);border:1px solid var(--border2);border-radius:4px;cursor:pointer;color:var(--muted)">Reset</button>'
+        + '<button onclick="_poColApply(&quot;'+colId+'&quot;)" style="flex:1;font-size:10px;padding:4px 0;background:var(--teal);border:1px solid var(--teal);border-radius:4px;cursor:pointer;color:#fff;font-weight:600">OK</button>'
         + '</div>';
   panel.innerHTML = html;
 }
-function _poReqDateToggle(d, checked) {
-  if(!window._poReqDatePending) window._poReqDatePending = [];
-  if(checked) { if(window._poReqDatePending.indexOf(d)<0) window._poReqDatePending.push(d); }
-  else { window._poReqDatePending = window._poReqDatePending.filter(function(x){return x!==d;}); }
-  _poReqDateRender();
+
+function _poColSearch(colId, txt) {
+  window._poColFilterSearchTxt = txt;
+  _poColRender(colId);
 }
-function _poReqDateSelectAll(checked) {
-  window._poReqDatePending = checked ? (window._poReqDates||[]).slice() : [];
-  _poReqDateRender();
+function _poColToggle(colId, val, checked) {
+  if(!window._poColFilterPending || window._poColFilterPending.col !== colId) window._poColFilterPending = { col: colId, values: (window._poColFilter[colId]||[]).slice() };
+  var pend = window._poColFilterPending.values;
+  if(checked) { if(pend.indexOf(val) < 0) pend.push(val); }
+  else { window._poColFilterPending.values = pend.filter(function(x){ return x !== val; }); }
+  _poColRender(colId);
 }
-function _poReqDateApply() {
-  window._poReqDateFilter = (window._poReqDatePending||[]).slice();
-  window._poReqDatePending = null;
-  var panel = document.getElementById('hf-req-panel');
+function _poColSelectAll(colId, checked) {
+  var def = _PO_COL_DEFS.find(function(d){ return d.id===colId; });
+  var allVals = _poColOptions(colId);
+  var searchTxt = (window._poColFilterSearchTxt||'').toLowerCase();
+  var shownVals = searchTxt ? allVals.filter(function(v){ return String(_poColDisp(def,v)).toLowerCase().includes(searchTxt); }) : allVals;
+  if(!window._poColFilterPending || window._poColFilterPending.col !== colId) window._poColFilterPending = { col: colId, values: (window._poColFilter[colId]||[]).slice() };
+  var pend = window._poColFilterPending.values;
+  if(checked) { shownVals.forEach(function(v){ if(pend.indexOf(v) < 0) pend.push(v); }); }
+  else { window._poColFilterPending.values = pend.filter(function(v){ return shownVals.indexOf(v) < 0; }); }
+  _poColRender(colId);
+}
+function _poColApply(colId) {
+  window._poColFilter[colId] = (window._poColFilterPending && window._poColFilterPending.col===colId) ? window._poColFilterPending.values.slice() : [];
+  window._poColFilterPending = null;
+  window._poColFilterSearchTxt = '';
+  var panel = document.getElementById('hfp-'+colId);
   if(panel) panel.style.display = 'none';
   renderPO();
 }
-function _poReqDateClear() {
-  window._poReqDateFilter = [];
-  window._poReqDatePending = null;
-  var panel = document.getElementById('hf-req-panel');
+function _poColClear(colId) {
+  window._poColFilter[colId] = [];
+  window._poColFilterPending = null;
+  window._poColFilterSearchTxt = '';
+  var panel = document.getElementById('hfp-'+colId);
   if(panel) panel.style.display = 'none';
   renderPO();
 }
+function _poColClearAll() {
+  window._poColFilter = {};
+  window._poColFilterPending = null;
+  renderPO();
+}
+// Tutup panel filter kolom kalau klik di luar area-nya
+document.addEventListener('click', function(e){
+  if(!e.target.closest('.po-colfilter-panel') && !e.target.closest('[id^="hfbtn-"]')) {
+    document.querySelectorAll('.po-colfilter-panel').forEach(function(el){ el.style.display = 'none'; });
+  }
+});
+
 
 function resetPOOverrides() {
   if(!_requireAdmin('reset PO')) return;
@@ -13255,11 +13337,6 @@ document.addEventListener('click', function(e) {
   var doi2panel = document.getElementById('fc-doi2-panel');
   if(doi2panel && doi2panel.style.display!=='none' && !doi2panel.contains(e.target) && !(e.target.closest && e.target.closest('[onclick*="_fcOpenDOI2Panel"]')))
     doi2panel.style.display = 'none';
-  var reqPanel = document.getElementById('hf-req-panel');
-  if(reqPanel && reqPanel.style.display!=='none' && !reqPanel.contains(e.target) && !(e.target.id==='hf-req')) {
-    reqPanel.style.display = 'none';
-    window._poReqDatePending = null; // buang pending kalau tutup tanpa OK
-  }
   var genMenu = document.getElementById('gen-jadwal-menu');
   if(genMenu && genMenu.style.display!=='none' && !genMenu.contains(e.target) && !e.target.closest('[onclick*="_toggleGenDropdown"]'))
     genMenu.style.display = 'none';
