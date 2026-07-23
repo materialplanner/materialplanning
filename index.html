@@ -3255,6 +3255,15 @@ function _applyRealtimeChanges(keys) {
               merged.confQty    = lOvr.confQty;
               merged.confUpd    = lOvr.confUpd;
             }
+            // reqQtyOverride (qty di kartu Jadwal Pengiriman, termasuk yang sudah Approved):
+            // pakai yang lebih baru (qtyUpd). BUG LAMA: field ini tidak pernah di-merge sama
+            // sekali, sehingga kalau device/tab lain push seluruh blob po_overrides yang masih
+            // stale (misal generate jadwal di device B sebelum sempat terima update qty dari
+            // device A), qty di kartu approved bisa "berubah sendiri" tanpa alasan jelas.
+            if((cOvr.qtyUpd||'') > (lOvr.qtyUpd||'')) {
+              merged.reqQtyOverride = cOvr.reqQtyOverride;
+              merged.qtyUpd         = cOvr.qtyUpd;
+            }
             STATE.poOverrides[k] = merged;
           });
           // Tambah key cloud yang tidak ada di local
@@ -8295,6 +8304,7 @@ function saveSchedQty(input) {
       if(!STATE.poOverrides[pk]) STATE.poOverrides[pk] = {};
       var poQty = Math.min(remaining, po.openQty || 0);
       STATE.poOverrides[pk].reqQtyOverride = poQty;
+      STATE.poOverrides[pk].qtyUpd = new Date().toISOString();
       remaining -= poQty;
       if(poQty > 0 && dateISO) {
         STATE.poOverrides[pk].date = dateISO;
@@ -8322,6 +8332,7 @@ function saveSchedQty(input) {
     // Fallback: single PO
     if(!STATE.poOverrides[poKey]) STATE.poOverrides[poKey] = {};
     STATE.poOverrides[poKey].reqQtyOverride = newQty;
+    STATE.poOverrides[poKey].qtyUpd = new Date().toISOString();
   }
 
   // Update items summary
