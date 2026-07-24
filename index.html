@@ -3423,13 +3423,21 @@ function _applyRealtimeChanges(keys) {
           try {
             localStorage.setItem('mps_ui_status', val||'');
             var _mpsStatusEl = document.getElementById('mps-status');
-            if(_mpsStatusEl && val) { _mpsStatusEl.textContent = val + ' \u2605Firebase'; _mpsStatusEl.style.color='var(--teal)'; }
+            var _mpsHasLocal = _mpsData && Object.keys(_mpsData).length > 0;
+            if(_mpsStatusEl && val) {
+              _mpsStatusEl.textContent = val + (_mpsHasLocal ? ' \u2605Firebase' : ' — data mentah lokal di laptop lain, upload ulang di sini utk Where Used/Export');
+              _mpsStatusEl.style.color = _mpsHasLocal ? 'var(--teal)' : 'var(--amber)';
+            }
           } catch(e) {} break;
         case 'bom_ui_status':
           try {
             localStorage.setItem('bom_ui_status', val||'');
             var _bomStatusEl = document.getElementById('bom-status');
-            if(_bomStatusEl && val) { _bomStatusEl.textContent = val + ' \u2605Firebase'; _bomStatusEl.style.color='var(--teal)'; }
+            var _bomHasLocal = _bomData && _bomData.length > 0;
+            if(_bomStatusEl && val) {
+              _bomStatusEl.textContent = val + (_bomHasLocal ? ' \u2605Firebase' : ' — data mentah lokal di laptop lain, upload ulang di sini utk Where Used/Export');
+              _bomStatusEl.style.color = _bomHasLocal ? 'var(--teal)' : 'var(--amber)';
+            }
           } catch(e) {} break;
         case 'mrp_last_calc':
           try {
@@ -3904,7 +3912,7 @@ function _whereUsedRender() {
 
   var bom = _bomData || [];
   if(!bom.length) {
-    el.innerHTML = '<div style="color:var(--muted);padding:8px">Upload BOM terlebih dahulu.</div>';
+    el.innerHTML = '<div style="color:var(--muted);padding:8px">Belum ada data BOM di laptop ini. BOM (49rb+ baris) disimpan lokal per-laptop (IndexedDB), bukan di Firebase — jadi kalau sudah upload di laptop lain, tetap perlu upload ulang file BOM.xlsx di laptop ini juga (menu MPS → MRP).</div>';
     return;
   }
 
@@ -11841,8 +11849,11 @@ function _fcDetailRow(code, fc, master) {
     });
     sug += '</div>';
   }
-  // Per-item generate button
-  sug += '<button class="btn btn-sm" onclick="_fcGenerateItem(this)" data-code="'+code+'" style="font-size:10.5px;margin-top:8px;width:100%">&#x26A1; Generate Propose PR</button>';
+  // Per-item generate button + reset button (buat benerin item yang kena bug lama)
+  sug += '<div style="display:flex;gap:6px;margin-top:8px">'
+    + '<button class="btn btn-sm" onclick="_fcGenerateItem(this)" data-code="'+code+'" style="font-size:10.5px;flex:1">&#x26A1; Generate Propose PR</button>'
+    + '<button class="btn btn-sm btn-red" onclick="if(confirm(\'Reset Propose PR untuk item ini ke 0 di semua bulan?\'))_fcResetProposeItem(\''+code+'\')" title="Reset Propose PR item ini ke 0 (semua bulan) — pakai ini kalau angkanya kelihatan aneh/salah" style="font-size:10.5px">&#8635; Reset</button>'
+    + '</div>';
 
   // Forecast grid
   var mhdr = FC_MONTHS.map(function(m) {
@@ -11894,7 +11905,7 @@ function _fcDetailRow(code, fc, master) {
         return '<td style="padding:2px;width:92px;overflow:hidden;text-align:right" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()">'
           + '<div style="display:inline-flex;align-items:stretch;border:1px solid '+bdr+';border-radius:4px;overflow:hidden;background:'+inp_bg+'">'
           + '<input type="text" inputmode="numeric" value="'+(cur>0?n_id(cur):'0')+'"'
-          +   ' data-code="'+fieldCode+'" data-mi="'+i+'" data-moq="'+moqV+'"'
+          +   ' data-code="'+fieldCode+'" data-mi="'+i+'" data-moq="'+moqV+'" data-rowtype="propose"'
           +   ' oninput="_fcProposeEdit(this)" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()"'
           +   ' style="width:62px;text-align:right;font-family:var(--mono);font-size:11px;font-weight:'+inp_weight+';color:'+inp_color+';background:transparent;border:none;padding:3px 4px;outline:none">'
           + '<div style="display:flex;flex-direction:column;width:14px;border-left:1px solid '+bdr+'">'
@@ -11962,7 +11973,7 @@ function _fcDetailRow(code, fc, master) {
           cells += '<td style="padding:2px;width:92px;text-align:right" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()">'
             + '<div style="display:inline-flex;align-items:stretch;border:1px solid '+bdr+';border-radius:4px;overflow:hidden;background:'+bg+'">'
             + '<input type="text" inputmode="numeric" value="'+curVal+'"'
-            +   ' data-code="'+code+'" data-mi="'+ti+'"'
+            +   ' data-code="'+code+'" data-mi="'+ti+'" data-rowtype="doitarget"'
             +   ' oninput="_fcDOITargetEdit(this)" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()"'
             +   ' style="width:54px;text-align:right;font-family:var(--mono);font-size:11px;font-weight:'+wgt+';color:'+clr+';background:transparent;border:none;padding:3px 4px;outline:none">'
             + '<button type="button" tabindex="-1" title="Hapus override — pakai default General/Impor lagi"'
@@ -13502,11 +13513,11 @@ function _mrpFallbackFromFirebase() {
   var mpsEl = document.getElementById('mps-status');
   var bomEl = document.getElementById('bom-status');
   if(mpsEl) {
-    if(mpsStatus) { mpsEl.textContent = mpsStatus + ' \u2605Firebase'; mpsEl.style.color='var(--teal)'; }
+    if(mpsStatus) { mpsEl.textContent = mpsStatus + ' — data mentah lokal di laptop lain, upload ulang di sini untuk pakai Where Used/Export'; mpsEl.style.color='var(--amber)'; }
     else { mpsEl.textContent = 'Data dari Firebase (file tidak di-upload lokal)'; mpsEl.style.color='var(--muted)'; }
   }
   if(bomEl) {
-    if(bomStatus) { bomEl.textContent = bomStatus + ' \u2605Firebase'; bomEl.style.color='var(--teal)'; }
+    if(bomStatus) { bomEl.textContent = bomStatus + ' — data mentah lokal di laptop lain, upload ulang di sini untuk pakai Where Used/Export'; bomEl.style.color='var(--amber)'; }
     else { bomEl.textContent = 'Data dari Firebase (file tidak di-upload lokal)'; bomEl.style.color='var(--muted)'; }
   }
 
@@ -13930,6 +13941,16 @@ function _fcResetPropose() {
   toast('Propose PR dikosongkan ✓', 'ok');
 }
 
+// Reset Propose PR untuk SATU item saja — dipakai untuk benerin item yang datanya
+// kena bug lama (Target DOI ke-ikut kebaca sebagai Propose PR sebelum fix data-rowtype)
+function _fcResetProposeItem(code) {
+  if(!code) return;
+  delete _fcPropose[code];
+  try { localStorage.setItem('fc_propose', JSON.stringify(_fcPropose)); cloudSave('fc_propose', JSON.stringify(_fcPropose)); } catch(e){}
+  _fcLiveRecalc(code);
+  toast('Propose PR item ini di-reset ke 0 ✓', 'ok');
+}
+
 // ─── Step button: ▼▲ adjust by multiple ─────────────────────────────────────
 // ─── OSPO override edit ──────────────────────────────────────────────────────
 function _fcOspoBlur(input) {
@@ -13985,7 +14006,7 @@ function _fcGenerateItem(btn) {
   // Update propose inputs in DOM
   var detEl = document.getElementById('fc-detail-' + code);
   if(detEl) {
-    detEl.querySelectorAll('input[data-code="'+code+'"][data-mi]:not([data-rowtype])').forEach(function(inp) {
+    detEl.querySelectorAll('input[data-code="'+code+'"][data-mi][data-rowtype="propose"]').forEach(function(inp) {
       var mi  = parseInt(inp.getAttribute('data-mi'));
       var val = _fcPropose[code][mi] || 0;
       inp.value = val > 0 ? n_id(val) : '0';
@@ -14148,7 +14169,7 @@ function _fcStepBtn(btn) {
 
 function _fcProposeStep(code, mi, delta) {
   // Find input anywhere in the document for this code+mi
-  var inp = document.querySelector('input[data-code="'+code+'"][data-mi="'+mi+'"]');
+  var inp = document.querySelector('input[data-code="'+code+'"][data-mi="'+mi+'"][data-rowtype="propose"]');
   if(!inp) return;
   var multiple = parseFloat(inp.getAttribute('data-moq')) || 1;
   var cur = parseFloat((inp.value||'0').replace(/\./g,'').replace(/,/g,'.')) || 0;
@@ -14178,7 +14199,7 @@ function _fcProposeEdit(input) {
     _fcPropose[code] = new Array(FC_MONTHS.length).fill(null);
     var detEl = document.getElementById('fc-detail-' + code);
     if(detEl) {
-      detEl.querySelectorAll('input[data-code="'+code+'"][data-mi]:not([data-rowtype])').forEach(function(inp2) {
+      detEl.querySelectorAll('input[data-code="'+code+'"][data-mi][data-rowtype="propose"]').forEach(function(inp2) {
         var mi2 = parseInt(inp2.getAttribute('data-mi'));
         var v2 = parseFloat((inp2.value||'0').replace(/\./g,'').replace(/,/g,'.')) || 0;
         if(v2 > 0) _fcPropose[code][mi2] = v2;
