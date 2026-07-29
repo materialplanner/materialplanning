@@ -12229,8 +12229,9 @@ function _fcRenderAnalisis(el, items, fcData) {
 
 
 function _fcRenderRekap(el, items, fcData, fStatus) {
-  var now  = new Date();
-  var yr   = now.getFullYear();
+  // Kalau sedang lihat snapshot lama, jangan timpa dengan data live —
+  // render ulang snapshot itu lagi (misal habis ganti filter status)
+  if(window._fcSnapshotActive) { _fcShowSnapshot(window._fcSnapshotActive); return; }
 
   // Build flat list of all propose rows
   var propRows = [];
@@ -12276,15 +12277,26 @@ function _fcRenderRekap(el, items, fcData, fStatus) {
   else if(fStatus === 'urgent') propRows = propRows.filter(function(r){ return r.isUrgent && !r.isOverdue; });
   else if(fStatus === 'ok')     propRows = propRows.filter(function(r){ return !r.isUrgent && !r.isOverdue; });
 
+  _fcRenderRekapTable(el, propRows, fcData, '');
+}
+
+// Table renderer generic — dipakai untuk data LIVE maupun data SNAPSHOT beku.
+// snapshotBanner: HTML string (kosong = mode live, ada isi = mode snapshot).
+function _fcRenderRekapTable(el, propRows, fcData, snapshotBanner) {
   var fmt = function(d) {
+    d = (d instanceof Date) ? d : new Date(d);
     return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();
   };
 
   var thStyle = 'padding:9px 10px;font-size:10px;font-weight:700;color:#fff;background:#1e4d6b;white-space:nowrap;border-right:1px solid rgba(255,255,255,.15)';
-  var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;flex-wrap:wrap">'
+  var html = (snapshotBanner || '')
+    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;flex-wrap:wrap">'
     + '<div style="font-size:11px;color:var(--muted)"><b>'+propRows.length+'</b> baris propose PR</div>'
     + '<div style="display:flex;gap:8px">'
     + '<button class="btn btn-sm" id="rekap-print-btn" onclick="_fcPrintLampiranPR()" disabled style="font-size:11px;opacity:.5">🖨 Cetak Lampiran</button>'
+    + '<button class="btn btn-sm" id="rekap-gsheet-btn" onclick="_fcExportLampiranGSheet()" disabled style="font-size:11px;opacity:.5">📄 Lampiran → GSheet</button>'
+    + (snapshotBanner ? '' : '<button class="btn btn-sm" onclick="_fcSaveRekapSnapshot()" title="Bekukan angka rekap hari ini — bisa dicetak lagi nanti walau data live sudah berubah" style="font-size:11px">📸 Simpan Snapshot</button>'
+      + '<button class="btn btn-sm" onclick="_fcShowSnapshotList()" title="Lihat/cetak snapshot yang pernah disimpan" style="font-size:11px">🕐 Riwayat Snapshot</button>')
     + '<button class="btn btn-sm btn-primary" onclick="_fcRekapExportMenu()" style="font-size:11px">↓ Export Rekap PR</button>'
     + '</div>'
     + '</div>'
@@ -12329,9 +12341,71 @@ function _fcRenderRekap(el, items, fcData, fStatus) {
   html += '</tbody></table></div>';
   el.innerHTML = html;
 
-  // Store for export & print lampiran
+  // Store for export & print lampiran — dipakai baik mode live maupun snapshot
   window._fcRekapRows = propRows;
   window._fcRekapFcData = fcData;
+}
+
+// ─── Export Lampiran ke GSheet (TSV) — sama datanya dengan Cetak Lampiran,   ─
+// tapi disalin ke clipboard untuk paste ke Google Sheets. Support mode live   ─
+// maupun snapshot (baca dari window._fcRekapFcData yang sudah di-set).       ─
+function _fcExportLampiranGSheet() {
+  var selByCode = {};
+  var codes = [];
+  document.querySelectorAll('.rekap-chk:checked').forEach(function(chk){
+    var c = chk.getAttribute('data-code');
+    var idx = parseInt(chk.getAttribute('data-idx'), 10);
+    if(!c || isNaN(idx)) return;
+    if(!selByCode[c]) { selByCode[c] = {}; codes.push(c); }
+    selByCode[c][idx] = true;
+  });
+  if(!codes.length) { toast('Pilih minimal 1 item dulu','err'); return; }
+
+  var ospoIdx = _buildOSPOIndex();
+  var fcCache = window._fcRekapFcData || {};
+  var monthsHdr = (FC_MONTHS||[]).map(function(m){ return m.slice(0,3); });
+  var nMon = monthsHdr.length;
+  var fmt2 = function(v){ return v==null ? '' : Math.round(v*100)/100; };
+
+  var data = [];
+  codes.forEach(function(code) {
+    var fc = fcCache[code];
+    if(!fc) { try { fc = _calcForecast(code, ospoIdx); } catch(e) { return; } }
+    var master = STATE.masterData[code] || {};
+    var realN  = _isAdmin && _rmDisplayMode === 'realname' && (STATE.realNameData||{})[code];
+    var name   = realN ? STATE.realNameData[code] : (master.desc || (STATE.mrpData[code]||{}).desc || '');
+    var _isGramUom = /^(g|gr|gram)$/i.test((master.uom||'').trim());
+    var _displayUom = _isGramUom ? 'KG' : (master.uom||'');
+    var hiSet = selByCode[code] || {};
+    var bulanDipilih = Object.keys(hiSet).map(Number).sort(function(a,b){return a-b;}).map(function(i){ return monthsHdr[i]; }).join(', ');
+
+    data.push([code, name, _displayUom, 'Bulan dipilih: ' + bulanDipilih, 'SOH'].concat(monthsHdr));
+    var pushRow = function(label, arr, sohVal) {
+      var cells = (arr||[]).map(function(v,i){ return fmt2(v) + (hiSet[i] ? ' *' : ''); });
+      data.push(['', '', '', label, sohVal != null ? fmt2(sohVal) : ''].concat(cells));
+    };
+    pushRow('Requirement', fc.forecast);
+    pushRow('Adj. OSPO', fc.forecastOspo);
+    pushRow('OSPR', fc.ospr);
+    pushRow('Stock ending', fc.stockFc, fc.soh);
+    pushRow('DOI (hari)', fc.doiFc);
+    pushRow('Propose PR', fc.propose);
+    data.push([]); // baris kosong pemisah antar item
+  });
+
+  var tsv = data.map(function(row){
+    return row.map(function(v){
+      var s = String(v==null?'':v);
+      return s.indexOf('\t')>=0 ? '"'+s+'"' : s;
+    }).join('\t');
+  }).join('\n');
+
+  if(navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(tsv).then(function() {
+      window.open('https://sheets.new','_blank');
+      toast('Lampiran disalin! Buka Sheets → klik A1 → Ctrl+V ('+codes.length+' item, bulan terpilih ditandai *)','ok');
+    }).catch(function(){ _fcFallbackCopy(tsv); });
+  } else { _fcFallbackCopy(tsv); }
 }
 
 // ─── Rekap PR: select-all & checkbox tracking ──────────────────────────────
@@ -12340,15 +12414,169 @@ function _fcRekapToggleAll(master) {
   _fcRekapUpdatePrintBtn();
 }
 
+// ─── Snapshot Rekap PR — bekukan angka supaya Cetak Lampiran nanti (setelah   ─
+// approval, bisa beda hari) tetap match dengan yang di-export/di-approve.      ─
+// Disimpan di IndexedDB (mrp_db, store 'pr_snapshots') — lokal per laptop,     ─
+// sama seperti BOM/MPS/MRP, supaya tidak numpuk beban Firestore.               ─
+var PR_SNAPSHOT_MAX = 15; // simpan maksimal 15 snapshot terakhir, yang lama otomatis kehapus
+
+function _prSnapIdbOpen(cb) {
+  var req = indexedDB.open('mrp_db', 3);
+  req.onupgradeneeded = function(e) {
+    var db2 = e.target.result;
+    if(!db2.objectStoreNames.contains('bom')) db2.createObjectStore('bom', {keyPath:'id'});
+    if(!db2.objectStoreNames.contains('mrp')) db2.createObjectStore('mrp', {keyPath:'id'});
+    if(!db2.objectStoreNames.contains('mps')) db2.createObjectStore('mps', {keyPath:'id'});
+    if(!db2.objectStoreNames.contains('pr_snapshots')) db2.createObjectStore('pr_snapshots', {keyPath:'id'});
+  };
+  req.onsuccess = function(e) { cb(e.target.result); };
+  req.onerror   = function()  { cb(null); };
+}
+
+function _fcSaveRekapSnapshot() {
+  var rows = window._fcRekapRows || [];
+  var fcData = window._fcRekapFcData || {};
+  if(!rows.length) { toast('Tidak ada data rekap untuk disimpan','err'); return; }
+  // Serialize: Date -> ISO string biar aman disimpan & di-JSON-kan
+  var rowsSer = rows.map(function(r){
+    var c = Object.assign({}, r);
+    c.delivDate  = r.delivDate  instanceof Date ? r.delivDate.toISOString()  : r.delivDate;
+    c.createPRBy = r.createPRBy instanceof Date ? r.createPRBy.toISOString() : r.createPRBy;
+    return c;
+  });
+  var codesUsed = {};
+  rows.forEach(function(r){ codesUsed[r.code] = true; });
+  var fcDataSer = {};
+  Object.keys(codesUsed).forEach(function(c){ if(fcData[c]) fcDataSer[c] = fcData[c]; });
+
+  var id = 'snap_' + Date.now();
+  var entry = { id: id, ts: new Date().toISOString(), itemCount: Object.keys(codesUsed).length, rowCount: rows.length, rows: rowsSer, fcData: fcDataSer };
+
+  _prSnapIdbOpen(function(db){
+    if(!db) { toast('Gagal buka penyimpanan lokal','err'); return; }
+    var tx = db.transaction('pr_snapshots','readwrite');
+    tx.objectStore('pr_snapshots').put(entry);
+    tx.oncomplete = function(){
+      toast('📸 Snapshot disimpan — ' + entry.rowCount + ' baris, ' + entry.itemCount + ' item ✓','ok');
+      _prSnapPruneOld(db);
+    };
+  });
+}
+
+function _prSnapPruneOld(db) {
+  var tx = db.transaction('pr_snapshots','readonly');
+  tx.objectStore('pr_snapshots').getAll().onsuccess = function(e){
+    var all = e.target.result || [];
+    if(all.length <= PR_SNAPSHOT_MAX) return;
+    all.sort(function(a,b){ return a.ts < b.ts ? -1 : 1; }); // lama dulu
+    var toDelete = all.slice(0, all.length - PR_SNAPSHOT_MAX);
+    var tx2 = db.transaction('pr_snapshots','readwrite');
+    var st2 = tx2.objectStore('pr_snapshots');
+    toDelete.forEach(function(s){ st2.delete(s.id); });
+  };
+}
+
+function _fcShowSnapshotList() {
+  _prSnapIdbOpen(function(db){
+    if(!db) { toast('Gagal buka penyimpanan lokal','err'); return; }
+    var tx = db.transaction('pr_snapshots','readonly');
+    tx.objectStore('pr_snapshots').getAll().onsuccess = function(e){
+      var all = (e.target.result || []).sort(function(a,b){ return a.ts > b.ts ? -1 : 1; }); // baru dulu
+      _fcRenderSnapshotModal(all);
+    };
+  });
+}
+
+function _fcRenderSnapshotModal(snaps) {
+  var old = document.getElementById('pr-snap-modal-overlay');
+  if(old) old.remove();
+  var overlay = document.createElement('div');
+  overlay.id = 'pr-snap-modal-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:900;display:flex;align-items:center;justify-content:center';
+  overlay.onclick = function(e){ if(e.target === overlay) overlay.remove(); };
+
+  var listHtml = !snaps.length
+    ? '<div style="padding:20px;text-align:center;color:var(--muted);font-size:12px">Belum ada snapshot tersimpan.<br>Klik "📸 Simpan Snapshot" di halaman Rekap PR dulu.</div>'
+    : snaps.map(function(s){
+        var d = new Date(s.ts);
+        var dTxt = String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();
+        var tTxt = String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+        return '<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--border);font-size:12px">'
+          + '<div style="flex:1"><b>'+dTxt+'</b> · '+tTxt+'<div style="color:var(--muted);font-size:11px">'+s.rowCount+' baris · '+s.itemCount+' item</div></div>'
+          + '<button class="btn btn-sm" onclick="_fcShowSnapshot(\''+s.id+'\');document.getElementById(\'pr-snap-modal-overlay\').remove()" style="font-size:11px">👁 Lihat</button>'
+          + '<button class="btn btn-sm btn-red" onclick="_fcDeleteSnapshot(\''+s.id+'\')" style="font-size:11px">🗑</button>'
+          + '</div>';
+      }).join('');
+
+  overlay.innerHTML = '<div style="background:var(--bg2);border-radius:var(--r);max-width:420px;width:92%;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.2)">'
+    + '<div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">'
+    +   '<div style="font-weight:700;font-size:14px">🕐 Riwayat Snapshot Rekap PR</div>'
+    +   '<button onclick="document.getElementById(\'pr-snap-modal-overlay\').remove()" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--muted)">✕</button>'
+    + '</div>'
+    + '<div style="overflow-y:auto;flex:1">' + listHtml + '</div>'
+    + '<div style="padding:10px 16px;font-size:10.5px;color:var(--muted);border-top:1px solid var(--border)">Snapshot disimpan lokal di laptop ini (maks '+PR_SNAPSHOT_MAX+' terbaru). Simpan snapshot tiap kali export Rekap PR untuk approval, supaya Cetak Lampiran nanti tetap match walau data live sudah berubah.</div>'
+    + '</div>';
+  document.body.appendChild(overlay);
+}
+
+function _fcDeleteSnapshot(id) {
+  _prSnapIdbOpen(function(db){
+    if(!db) return;
+    var tx = db.transaction('pr_snapshots','readwrite');
+    tx.objectStore('pr_snapshots').delete(id);
+    tx.oncomplete = function(){ _fcShowSnapshotList(); };
+  });
+}
+
+function _fcShowSnapshot(id) {
+  _prSnapIdbOpen(function(db){
+    if(!db) { toast('Gagal buka penyimpanan lokal','err'); return; }
+    var tx = db.transaction('pr_snapshots','readonly');
+    tx.objectStore('pr_snapshots').get(id).onsuccess = function(e){
+      var s = e.target.result;
+      if(!s) { toast('Snapshot tidak ditemukan (mungkin sudah dihapus)','err'); return; }
+      window._fcSnapshotActive = id;
+      var rows = s.rows.map(function(r){
+        var c = Object.assign({}, r);
+        c.delivDate  = new Date(r.delivDate);
+        c.createPRBy = new Date(r.createPRBy);
+        return c;
+      });
+      var d = new Date(s.ts);
+      var dTxt = String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();
+      var tTxt = String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+      var banner = '<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--amber-bg);border:1px solid rgba(245,158,11,.35);border-radius:var(--r);margin-bottom:10px;font-size:11.5px">'
+        + '📸 Menampilkan <b>snapshot ' + dTxt + ' · ' + tTxt + '</b> (' + rows.length + ' baris) — angka dibekukan, tidak ikut berubah dengan data live.'
+        + '<button class="btn btn-sm" onclick="_fcExitSnapshot()" style="margin-left:auto;font-size:11px">← Kembali ke Data Live</button>'
+        + '</div>';
+      var el = document.getElementById('fc-table');
+      if(!el) { toast('Container tabel forecast tidak ditemukan','err'); return; }
+      _fcRenderRekapTable(el, rows, s.fcData, banner);
+    };
+  });
+}
+
+function _fcExitSnapshot() {
+  window._fcSnapshotActive = null;
+  renderForecast();
+}
+
 function _fcRekapUpdatePrintBtn() {
   var codes = {};
   document.querySelectorAll('.rekap-chk:checked').forEach(function(chk){ codes[chk.getAttribute('data-code')] = true; });
   var n = Object.keys(codes).length;
   var btn = document.getElementById('rekap-print-btn');
-  if(!btn) return;
-  btn.disabled = n === 0;
-  btn.style.opacity = n === 0 ? '.5' : '1';
-  btn.textContent = n === 0 ? '🖨 Cetak Lampiran' : '🖨 Cetak Lampiran ('+n+' item)';
+  if(btn) {
+    btn.disabled = n === 0;
+    btn.style.opacity = n === 0 ? '.5' : '1';
+    btn.textContent = n === 0 ? '🖨 Cetak Lampiran' : '🖨 Cetak Lampiran ('+n+' item)';
+  }
+  var gbtn = document.getElementById('rekap-gsheet-btn');
+  if(gbtn) {
+    gbtn.disabled = n === 0;
+    gbtn.style.opacity = n === 0 ? '.5' : '1';
+    gbtn.textContent = n === 0 ? '📄 Lampiran → GSheet' : '📄 Lampiran → GSheet ('+n+' item)';
+  }
 }
 
 // fc.stockFc & fc.doiFc SUDAH menambahkan propose PR ke rolling balance-nya
@@ -13376,12 +13604,13 @@ function _mrpFallbackCopy(text, count) {
 
 // ── IndexedDB helpers for BOM (large data, local only) ────────────────────────
 function _mrpIdbOpen(cb) {
-  var req = indexedDB.open('mrp_db', 2);
+  var req = indexedDB.open('mrp_db', 3);
   req.onupgradeneeded = function(e) {
     var db2 = e.target.result;
     if(!db2.objectStoreNames.contains('bom')) db2.createObjectStore('bom', {keyPath:'id'});
     if(!db2.objectStoreNames.contains('mrp')) db2.createObjectStore('mrp', {keyPath:'id'});
     if(!db2.objectStoreNames.contains('mps')) db2.createObjectStore('mps', {keyPath:'id'});
+    if(!db2.objectStoreNames.contains('pr_snapshots')) db2.createObjectStore('pr_snapshots', {keyPath:'id'});
   };
   req.onsuccess = function(e) { cb(e.target.result); };
   req.onerror   = function()  { cb(null); };
