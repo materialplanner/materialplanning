@@ -12511,6 +12511,10 @@ function _fcLampiranExportMenu() {
   var box = document.createElement('div');
   box.style.cssText = 'background:var(--bg2);border-radius:12px;padding:28px 32px;min-width:320px;box-shadow:0 8px 40px rgba(0,0,0,.3)';
   box.innerHTML = '<div style="font-size:15px;font-weight:700;margin-bottom:6px;color:var(--text)">Export Lampiran PR</div><div style="font-size:11.5px;color:var(--muted);margin-bottom:20px">'+built.codes.length+' item terpilih</div>';
+  var b0 = document.createElement('button');
+  b0.textContent = '🖨 Cetak (Print)';
+  b0.style.cssText = 'width:100%;padding:11px;margin-bottom:10px;background:var(--teal);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;display:block';
+  b0.onclick = function(){ _fcPrintLampiranPR(); closeMenu(); };
   var b1 = document.createElement('button');
   b1.textContent = 'Download Excel (.xlsx)';
   b1.style.cssText = 'width:100%;padding:11px;margin-bottom:10px;background:#1e4d6b;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;display:block';
@@ -12523,7 +12527,7 @@ function _fcLampiranExportMenu() {
   b3.textContent = 'Batal';
   b3.style.cssText = 'width:100%;padding:8px;background:transparent;color:var(--muted);border:none;font-size:12px;cursor:pointer;display:block';
   b3.onclick = closeMenu;
-  box.appendChild(b1); box.appendChild(b2); box.appendChild(b3);
+  box.appendChild(b0); box.appendChild(b1); box.appendChild(b2); box.appendChild(b3);
   overlay.appendChild(box);
   overlay.addEventListener('click', function(e){ if(e.target===overlay) closeMenu(); });
   document.body.appendChild(overlay);
