@@ -4322,7 +4322,13 @@ async function loadGRPO() {
 function _cleanupStalePoOverridesOnLoad() {
   if(!STATE.poData || !STATE.poOverrides) return;
   var activePO = {};
-  STATE.poData.forEach(function(po){ activePO[String(po.docNum)+'_'+po.itemCode] = true; });
+  // Masukkan KEDUA format key (lama docNum_itemCode & baru _poKey() dgn lineNum) sebagai
+  // "aktif" — kalau cuma format lama, key baru (lineNum-aware) akan salah ke-tandai stale
+  // padahal PO-nya masih ada di SAP, bikin data konfirmasi ke-hapus otomatis 14 hari kemudian.
+  STATE.poData.forEach(function(po){
+    activePO[String(po.docNum)+'_'+po.itemCode] = true;
+    activePO[_poKey(po)] = true;
+  });
   var now = Date.now();
   var STALE_DAYS = 14; // hapus data PO yang sudah tidak ada di SAP selama 14 hari
   var cleaned = 0;
@@ -5023,12 +5029,12 @@ function renderPO() {
     var isAuto   = ovr.isAuto;
     var reqStyle = isManual ? 'color:var(--amber)' : (isAuto ? 'color:var(--teal)' : '');
     var reqTitle = isManual ? 'Edit manual' : (isAuto ? 'Auto-generate' : '');
-    var _pconf  = (STATE.poConfirmations && STATE.poConfirmations[key]) || (STATE.poConfirmations && STATE.poConfirmations[keyL2]) || {};
-    var confQty    = _pconf.confQty  || ovr.confQty  || '';
-    var confDate   = _pconf.confDate || ovr.confDate || '';
-    var confUpd    = _pconf.confUpd  ? _pconf.confUpd.substring(0,10) : (ovr.confUpd||'');
+    var _pconf     = _poResolveConf(p);
+    var confQty    = _pconf.confQty  || '';
+    var confDate   = _pconf.confDate || '';
+    var confUpd    = _pconf.confUpd  ? _pconf.confUpd.substring(0,10) : '';
     var notes      = (ovr.notes  || '').replace(/"/g, '&quot;');
-    var confSrc    = ovr.confSource || 'manual';
+    var confSrc    = _pconf.confSource || 'manual';
     // teal = from jadwal, amber = manual edit
     var confColor  = confSrc === 'schedule' ? 'var(--teal)' : 'var(--amber)';
     var confTitle  = confSrc === 'schedule' ? 'Dari Jadwal Pengiriman' : 'Edit manual';
@@ -5141,26 +5147,20 @@ function _initColResize(tableId) {
 function _refreshProjectionIncoming(itemCode) {
   var proj = STATE.projectionData && STATE.projectionData.find(function(p){ return p.productCode === itemCode; });
   if(!proj) return;
-  var _aPK = {};
-  (STATE.poData||[]).forEach(function(p){ _aPK[p.docNum+'_'+p.itemCode]=true; _aPK[_poKey(p)]=true; });
-  var _aK = {}, cdList = [], cqTotal = 0, opqTotal = 0;
-  Object.keys(STATE.poOverrides||{}).forEach(function(k){ _aK[k]=1; });
-  Object.keys(STATE.poConfirmations||{}).forEach(function(k){ _aK[k]=1; });
-  Object.keys(_aK).forEach(function(k){
-    var kp = k.split('_');
-    if(kp.length < 2 || kp[kp.length-1] !== itemCode) return; // support both key formats
-    if(!_aPK[k]) return;
-    var ovr = STATE.poOverrides[k] || {};
-    var pcc = (STATE.poConfirmations||{})[k] || {};
-    var cd  = pcc.confDate || ovr.confDate || null;
-    var cq  = pcc.confQty  || ovr.confQty  || null;
-    var ud  = cd || null; // hanya confDate
-    var po  = (STATE.poData||[]).find(function(p){ return p.docNum+'_'+p.itemCode===k; });
-    var uq  = cd ? (parseFloat(cq)||0) : 0;
-    if(ud && cdList.indexOf(ud) < 0) cdList.push(ud);
-    if(ud && uq > 0) cqTotal += uq;
+  var cdList = [], cqTotal = 0, opqTotal = 0;
+  // Iterasi per PO AKTIF (bukan per key mentah di poOverrides/poConfirmations) — supaya
+  // tiap PO cuma dihitung SEKALI, resolve ke 1 confirmation kanonik lewat _poResolveConf
+  // (timestamp confUpd paling baru menang, key lama atau baru). Konsisten dengan yang
+  // dipakai renderPO — mencegah data yang sama kelihatan beda antara List Pengiriman PO
+  // dan Projection Stock.
+  (STATE.poData||[]).filter(function(p){ return p.itemCode === itemCode; }).forEach(function(po){
+    var cc = _poResolveConf(po);
+    var cd = cc.confDate || null;
+    var cq = cc.confQty  || null;
+    if(cd && cdList.indexOf(cd) < 0) cdList.push(cd);
+    if(cd && (parseFloat(cq)||0) > 0) cqTotal += (parseFloat(cq)||0);
     // DOI+INCOMING hanya dari konfirmasi supplier
-    if(cd) { opqTotal += (parseFloat(cq) || (po ? po.openQty||0 : 0)); }
+    if(cd) { opqTotal += (parseFloat(cq) || po.openQty || 0); }
   });
   proj.tglIncoming   = cdList.length
     ? cdList.map(function(d){ var p=d.split('-'); return p.length===3&&p[0].length===4?p[2]+'-'+p[1]+'-'+p[0]:d; }).join(', ')
@@ -5411,13 +5411,11 @@ function _poOvr(p) {
   return (STATE.poOverrides||{})[k] || (STATE.poOverrides||{})[k2] || {};
 }
 function _poConf(p) {
-  var k = _poKey(p), k2 = p.docNum + '_' + p.itemCode;
-  var pc = (STATE.poConfirmations||{})[k] || (STATE.poConfirmations||{})[k2] || {};
-  var ov = (STATE.poOverrides||{})[k] || (STATE.poOverrides||{})[k2] || {};
+  var cc = _poResolveConf(p);
   return {
-    confQty: pc.confQty || ov.confQty || null,
-    confDate: pc.confDate || ov.confDate || null,
-    confUpd: pc.confUpd ? String(pc.confUpd).substring(0,10) : (ov.confUpd || null)
+    confQty: cc.confQty || null,
+    confDate: cc.confDate || null,
+    confUpd: cc.confUpd ? String(cc.confUpd).substring(0,10) : null
   };
 }
 
@@ -6218,6 +6216,14 @@ function _doBuildProjection() {
   var osprByItem = STATE.osprByItem || {};
   var stockData = STATE.stockData || {};
 
+  // Index PO aktif per item code — dipakai untuk resolve confirmation kanonik
+  // per PO (bukan iterasi mentah semua key poOverrides/poConfirmations).
+  var poDataByItem = {};
+  (STATE.poData||[]).forEach(function(p){
+    if(!poDataByItem[p.itemCode]) poDataByItem[p.itemCode] = [];
+    poDataByItem[p.itemCode].push(p);
+  });
+
   // Yesterday stock for actual usage: stock_prev + incoming - stock_today
   var histDates = Object.keys(STATE.stockHistory).sort();
   var yd = new Date(now); yd.setDate(yd.getDate() - 1);
@@ -6338,29 +6344,16 @@ function _doBuildProjection() {
     var comment = '';
     var confQtyTotal = 0;
     var confDateList = [];
-    var _activePOKeys = {};
-    (STATE.poData || []).forEach(function(p){ _activePOKeys[p.docNum + '_' + p.itemCode] = true; });
-    // Pakai union key po_overrides + po_confirmations agar konfirmasi yg hanya ada di po_confirmations ikut terbaca
-    var _allConfKeys = {};
-    Object.keys(STATE.poOverrides||{}).forEach(function(k){ _allConfKeys[k]=1; });
-    Object.keys(STATE.poConfirmations||{}).forEach(function(k){ _allConfKeys[k]=1; });
-    Object.keys(_allConfKeys).forEach(function(k){
-      var kp = k.split('_');
-      if(kp.length >= 2 && kp[kp.length-1] === code) { // support both docNum_itemCode dan docNum_lineNum_itemCode
-        if(!_activePOKeys[k]) return; // PO sudah datang/hilang — skip
-        var ovr = STATE.poOverrides[k] || {};
-        var po  = (STATE.poData||[]).find(function(p){ return _poKey(p) === k || p.docNum+'_'+p.itemCode === k; });
-        // Read from po_confirmations first, fallback to po_overrides (legacy)
-        var _pcc = (STATE.poConfirmations && STATE.poConfirmations[k]) || {};
-        var _confDate = _pcc.confDate || ovr.confDate || null;
-        var _confQty  = _pcc.confQty  || ovr.confQty  || null;
-        // TGL/QTY INCOMING hanya dari confDate (konfirmasi supplier)
-        // ovr.date (TGL REQUEST KIRIM) bukan konfirmasi — tidak masuk incoming
-        var useDate = _confDate || null;
-        var useQty  = _confDate ? (parseFloat(_confQty) || 0) : 0;
-        if(useDate && confDateList.indexOf(useDate) < 0) confDateList.push(useDate);
-        if(useDate && useQty > 0) confQtyTotal += useQty;
-      }
+    // Iterasi per PO AKTIF milik item ini (bukan per key mentah poOverrides/poConfirmations)
+    // — tiap PO di-resolve ke 1 confirmation kanonik via _poResolveConf (timestamp confUpd
+    // paling baru menang). Konsisten dengan renderPO — mencegah data yang sama kelihatan
+    // beda antara List Pengiriman PO dan Projection Stock (bug Suncat MTA 3000070015 Jul 2026).
+    (poDataByItem[code] || []).forEach(function(po){
+      var cc = _poResolveConf(po);
+      var useDate = cc.confDate || null;
+      var useQty  = useDate ? (parseFloat(cc.confQty) || 0) : 0;
+      if(useDate && confDateList.indexOf(useDate) < 0) confDateList.push(useDate);
+      if(useDate && useQty > 0) confQtyTotal += useQty;
     });
     // Auto-generated date+qty → separate fields, NOT comment
     var tglIncoming = confDateList.length
@@ -7313,12 +7306,40 @@ function _migratePoOverridesLineNum() {
     var oldKey = String(po.docNum)+'_'+po.itemCode;
     var newKey = _poKey(po);
     if(oldKey === newKey) return; // single-line PO, key sama
-    if(STATE.poOverrides[oldKey] && !STATE.poOverrides[newKey]) {
-      STATE.poOverrides[newKey] = Object.assign({}, STATE.poOverrides[oldKey]);
+    if(STATE.poOverrides[oldKey]) {
+      if(!STATE.poOverrides[newKey]) {
+        STATE.poOverrides[newKey] = Object.assign({}, STATE.poOverrides[oldKey]);
+        changed = true;
+      } else {
+        // Key baru sudah ada — MERGE field yang kosong di key baru dari key lama,
+        // supaya confDate/confQty/reqQtyOverride dll yang "nyangkut" di key lama
+        // (misal dari sebelum migrasi lineNum berjalan) tidak ke-orphan selamanya.
+        // Field yang di key baru SUDAH terisi tetap menang (tidak ditimpa).
+        var nw = STATE.poOverrides[newKey], ol = STATE.poOverrides[oldKey];
+        ['confDate','confQty','confUpd','confSource','date','isAuto','isManual','reqQtyOverride','notes'].forEach(function(f){
+          if((nw[f] === undefined || nw[f] === '' || nw[f] === null) && ol[f] !== undefined && ol[f] !== '' && ol[f] !== null) {
+            nw[f] = ol[f];
+            changed = true;
+          }
+        });
+      }
+      // Key lama sudah tidak dipakai lagi setelah PO ini punya lineNum — bersihkan
+      // supaya tidak ikut kehitung dobel di kalkulasi lain (mis. incoming Projection Stock)
+      delete STATE.poOverrides[oldKey];
       changed = true;
     }
-    if(STATE.poConfirmations[oldKey] && !STATE.poConfirmations[newKey]) {
-      STATE.poConfirmations[newKey] = Object.assign({}, STATE.poConfirmations[oldKey]);
+    if(STATE.poConfirmations[oldKey]) {
+      if(!STATE.poConfirmations[newKey]) {
+        STATE.poConfirmations[newKey] = Object.assign({}, STATE.poConfirmations[oldKey]);
+      } else {
+        var nwc = STATE.poConfirmations[newKey], olc = STATE.poConfirmations[oldKey];
+        ['confDate','confQty','confUpd','confSource'].forEach(function(f){
+          if((nwc[f] === undefined || nwc[f] === '' || nwc[f] === null) && olc[f] !== undefined && olc[f] !== '' && olc[f] !== null) {
+            nwc[f] = olc[f];
+          }
+        });
+      }
+      delete STATE.poConfirmations[oldKey];
       changed = true;
     }
   });
@@ -7337,6 +7358,29 @@ function _poConfData(key) {
   var ov = (STATE.poOverrides||{})[key] || {};
   return { confDate: pc.confDate || ov.confDate || null, confQty: pc.confQty || ov.confQty || null };
 }
+
+// Resolver kanonik konfirmasi PO — bandingkan key BARU (docNum_lineNum_itemCode) vs key
+// LAMA (docNum_itemCode) kalau keduanya ada, yang confUpd (timestamp) PALING BARU yang
+// menang. Fix untuk bug: beberapa fitur pernah nulis konfirmasi ke key lama sementara List
+// Pengiriman PO & fitur lain baca dari key baru, sehingga konfirmasi yang valid jadi
+// "hilang" di satu sisi tapi masih kehitung di sisi lain (mis. Projection Stock incoming).
+// Dipakai di SEMUA tempat yang baca status konfirmasi PO supaya hasilnya selalu konsisten.
+function _poResolveConf(po) {
+  var kNew = _poKey(po);
+  var kOld = po.docNum + '_' + po.itemCode;
+  var keys = kNew === kOld ? [kNew] : [kNew, kOld];
+  var best = null;
+  keys.forEach(function(k){
+    [(STATE.poConfirmations||{})[k], (STATE.poOverrides||{})[k]].forEach(function(src){
+      if(!src || src.confUpd === undefined || src.confUpd === null || src.confUpd === '') return; // belum pernah disentuh soal konfirmasi
+      if(!best || (src.confUpd||'') > (best.confUpd||'')) {
+        best = { confDate: src.confDate||'', confQty: src.confQty||'', confUpd: src.confUpd||'', confSource: src.confSource||'' };
+      }
+    });
+  });
+  return best || { confDate:'', confQty:'', confUpd:'', confSource:'' };
+}
+
 function _allPOConfKeys() {
   // Union key dari po_overrides + po_confirmations
   var s = {};
@@ -8722,8 +8766,14 @@ function openFbModal(idx) {
     }];
     pos.forEach(function(po){
       var itemCode = po.itemCode || '';
-      var poKey = po.docNum && po.docNum !== '—' ? (po.docNum + '_' + itemCode) : null;
-      var ovr = poKey && STATE.poOverrides[poKey] ? STATE.poOverrides[poKey] : {};
+      // Pakai _poKey(po) (canonical, lineNum-aware) — BUKAN hardcode docNum_itemCode.
+      // Bug lama: key di sini selalu format lama, beda dengan List Pengiriman PO yang
+      // pakai _poKey() (format baru kalau PO punya lineNum) → konfirmasi dari sini jadi
+      // "nyasar" ke key lama yang tidak pernah dibaca render lain, dan ikut kehitung
+      // dobel di Projection Stock (incoming ghost) karena union-key loop tidak dedup.
+      var poKey = po.docNum && po.docNum !== '—' ? _poKey(po) : null;
+      var poKeyL2 = po.docNum && po.docNum !== '—' ? (po.docNum + '_' + itemCode) : null;
+      var ovr = poKey && (STATE.poOverrides[poKey] || (poKeyL2 && STATE.poOverrides[poKeyL2])) || {};
       var origQty = po.openQty || 0;
       // reqQtyOverride = 0 artinya PO ini di-nol/dihapus dari card ini secara eksplisit → skip baris
       // Menampilkannya dengan qty SAP asli (origQty) menyesatkan — PO ini bukan bagian dari pengiriman ini
