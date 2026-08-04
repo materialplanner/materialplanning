@@ -3937,8 +3937,8 @@ function _whereUsedSetMode(mode) {
   _whereUsedRender();
 }
 
-// Hitung, secara GLOBAL dari seluruh BOM, di berapa FG WIP (kode awalan "12") sebuah RM dipakai.
-// Cache di window supaya tidak dihitung ulang tiap baris.
+// Hitung, secara GLOBAL dari seluruh BOM, di berapa FG WIP (kode awalan '2' + nama 'WIP...')
+// sebuah RM dipakai. Cache di window supaya tidak dihitung ulang tiap baris.
 function _wuGlobalRmUsage() {
   if(window._wuRmUsageCache && window._wuRmUsageStamp === (_bomData||[]).length) return window._wuRmUsageCache;
   var usage = {}; // rmCode -> {fgSet:{}, count}
@@ -3977,18 +3977,31 @@ function _whereUsedRender() {
   var masterData = STATE.masterData || {};
   var realNames  = STATE.realNameData || {};
   var fgDescs2   = (typeof _fgDescFromMps !== 'undefined' ? _fgDescFromMps : null) || {};
-  var fgNameOf = function(code){ return fgDescs2[code] || (masterData[code] && masterData[code].desc) || ''; };
+
+  // Index nama dari BOM langsung — WIP (2xxx) & banyak kode tidak ada di MPS/master,
+  // tapi namanya ADA di kolom deskripsi file BOM (fgDesc untuk parent, rmDesc untuk komponen).
+  var bomNameByCode = {};
+  (_bomData||[]).forEach(function(b){
+    if(b.fg && b.fgDesc && !bomNameByCode[b.fg]) bomNameByCode[b.fg] = b.fgDesc;
+    if(b.rm && b.rmDesc && !bomNameByCode[b.rm]) bomNameByCode[b.rm] = b.rmDesc;
+  });
+
+  var fgNameOf = function(code){
+    return fgDescs2[code] || (masterData[code] && masterData[code].desc) || bomNameByCode[code] || code;
+  };
   var rmNameOf = function(code){
     var m = masterData[code] || {};
-    return (_isAdmin && _rmDisplayMode==='realname' && realNames[code]) ? realNames[code] : (m.desc || '');
+    if(_isAdmin && _rmDisplayMode==='realname' && realNames[code]) return realNames[code];
+    return m.desc || bomNameByCode[code] || code;
   };
 
   if(mode === 'fg') {
-    // ── Mode FG → RM/PM: cari FG (WIP), tampilkan RM/PM penyusunnya ──────────
+    // ── Mode FG → RM/PM: cari FG apapun (jadi 12xxx / WIP 2xxx), tampilkan
+    //    RM/PM (3xxx/4xxx) yang LANGSUNG ada di baris FG itu (tidak telusur ke WIP) ──
     var matchedFG = {};
     queries.forEach(function(q){
       (_bomData||[]).forEach(function(b){
-        if(!b.fg || !_wuIsWIP(b.fg, b.fgDesc)) return; // hanya WIP
+        if(!b.fg) return;
         if(b.fg.toLowerCase().includes(q) || (fgNameOf(b.fg)||'').toLowerCase().includes(q) || (b.fgDesc||'').toLowerCase().includes(q)) {
           matchedFG[b.fg] = true;
         }
@@ -3996,7 +4009,7 @@ function _whereUsedRender() {
     });
     var fgCodes = Object.keys(matchedFG);
     if(!fgCodes.length) {
-      el.innerHTML = '<div style="color:var(--muted);padding:8px">Tidak ada FG (WIP) yang cocok dengan "<b>'+raw.replace(/</g,'&lt;')+'</b>".</div>';
+      el.innerHTML = '<div style="color:var(--muted);padding:8px">Tidak ada FG yang cocok dengan "<b>'+raw.replace(/</g,'&lt;')+'</b>".</div>';
       window._whereUsedData = [];
       return;
     }
@@ -4007,13 +4020,18 @@ function _whereUsedRender() {
       var rmSeen = {}, rmList = [];
       (_bomData||[]).forEach(function(b){
         if(b.fg !== fgCode || !b.rm || rmSeen[b.rm]) return;
-        if(!/^[34]/.test(b.rm)) return; // hanya RM (3xxx) / PM (4xxx)
+        if(!/^[34]/.test(b.rm)) return; // hanya RM (3xxx) / PM (4xxx) — WIP/komponen lain di-skip
         rmSeen[b.rm] = true;
         rmList.push({ rmCode: b.rm, rmName: rmNameOf(b.rm) || b.rm, fgCountGlobal: usage[b.rm] || 0 });
       });
       rmList.sort(function(a,b){ return a.rmCode.localeCompare(b.rmCode); });
       if(rmList.length) rows.push({ fgCode: fgCode, fgName: fgNameOf(fgCode) || fgCode, rmList: rmList });
     });
+    if(!rows.length) {
+      el.innerHTML = '<div style="color:var(--muted);padding:8px">FG ditemukan tapi tidak punya RM/PM langsung di baris itu (mungkin komponennya berupa WIP).</div>';
+      window._whereUsedData = [];
+      return;
+    }
     window._whereUsedData = { mode:'fg', rows: rows };
     _whereUsedPaintFG(el, rows);
     return;
