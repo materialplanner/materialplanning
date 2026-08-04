@@ -651,7 +651,7 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
       <input type="checkbox" id="f-proj-urgent" onchange="renderProjection()"> Urgent only
     </label>
     <label style="display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px;cursor:pointer;margin:0">
-      <input type="checkbox" id="f-proj-col-filter" onchange="renderProjection()"> Filter kolom
+      <input type="checkbox" id="f-proj-col-filter" onchange="_projColFilterToggle(this)"> Filter kolom
       &nbsp;<button id="btn-proj-freeze" onclick="_toggleProjFreeze()" class="btn btn-sm" style="font-size:10.5px;padding:2px 8px" title="Freeze kolom kiri">&nbsp;❄ Freeze Kolom</button>
     </label>
   </div>
@@ -2185,8 +2185,8 @@ function getPOItem(code) {
   var pos = (STATE.poData||[]).filter(function(po){return po.itemCode===code;});
   if(!pos.length) return [];
   return pos.map(function(po){
-    var ovr = (STATE.poOverrides||{})[String(po.docNum)+'_'+po.itemCode] || {};
-    var _aiCC = _poConfData(String(po.docNum)+'_'+po.itemCode);
+    var ovr = _poOvr(po);
+    var _aiCC = _poResolveConf(po);
     return {
       docNum: po.docNum, qty: po.openQty, uom: po.uom,
       prReqDate: po.prReqDate,
@@ -5407,8 +5407,13 @@ function cleanupProjHistory() {
 window._poColFilter = window._poColFilter || {}; // colId -> array nilai terpilih (kosong = tidak difilter)
 
 function _poOvr(p) {
-  var k = _poKey(p), k2 = p.docNum + '_' + p.itemCode;
-  return (STATE.poOverrides||{})[k] || (STATE.poOverrides||{})[k2] || {};
+  // Cari override di semua kandidat key (baru → lama → hasil scan kalau lineNum tak diketahui)
+  var keys = _poCandidateKeys(p);
+  for(var i = 0; i < keys.length; i++) {
+    var o = (STATE.poOverrides||{})[keys[i]];
+    if(o) return o;
+  }
+  return {};
 }
 function _poConf(p) {
   var cc = _poResolveConf(p);
@@ -6535,7 +6540,169 @@ function populateSKUFilter() {
 }
 
 // ─── RENDER PROJECTION ───────────────────────────────────────────────────────
-var projColFilters = {};
+// Filter kolom Excel-style untuk SEMUA kolom Projection Stock (menggantikan
+// text-filter parsial lama). Pola sama dengan _PO_COL_DEFS di List Pengiriman:
+// dropdown checkbox nilai unik + search + Pilih Semua + OK/Reset per kolom.
+window._projColFilter = window._projColFilter || {}; // colId -> array nilai terpilih
+
+var _PROJ_COL_DEFS = [
+  {id:'kode',        label:'Kode',            get:function(p){ return p.productCode||''; }},
+  {id:'abc',         label:'ABC',             get:function(p){ return p.abc||''; }},
+  {id:'desc',        label:'Deskripsi',       get:function(p){ return p.description||''; }},
+  {id:'realname',    label:'Real Name',       get:function(p){ return _isAdmin ? (p.realName||'') : ''; }},
+  {id:'uom',         label:'UOM',             get:function(p){ return p.uom||''; }},
+  {id:'supplier',    label:'Supplier',        get:function(p){ return p.supplier||''; }},
+  {id:'site',        label:'Site',            get:function(p){ return p.site||''; }},
+  {id:'stockbtg',    label:'Stock BTG',       get:function(p){ return String(Math.round(p.stockBTG||0)); }, numeric:true},
+  {id:'stocksng',    label:'Stock SNG',       get:function(p){ return String(Math.round(p.stockSNG||0)); }, numeric:true},
+  {id:'stockjtk',    label:'Stock JTK',       get:function(p){ return String(Math.round(p.stockJTK||0)); }, numeric:true},
+  {id:'doifc',       label:'DOI',             get:function(p){ return String(p.doiFC!=null?p.doiFC:''); }, numeric:true},
+  {id:'estusg',      label:'Est Usg/day',     get:function(p){ return String(Math.round(p.estUsageMRP||0)); }, numeric:true},
+  {id:'actualmrp',   label:'Actual MRP',      get:function(p){ return String(Math.round(p.actualMRP||0)); }, numeric:true},
+  {id:'grpo',        label:'GRPO Bln Ini',    get:function(p){ return String(Math.round(p.totalIncoming||0)); }, numeric:true},
+  {id:'actualusg',   label:'Actual Usg',      get:function(p){ return String(Math.round(p.actualUsageDaily||0)); }, numeric:true},
+  {id:'pctusage',    label:'% Usg vs FC',     get:function(p){ return String(Math.round((p.pctUsageVsForecast||0)*1000)/10); }, numeric:true},
+  {id:'coverage',    label:'Est. Coverage',   get:function(p){ return p.coverageDateStr||''; }, isDate:true},
+  {id:'endstock',    label:'End Stock vs MRP',get:function(p){ return String(Math.round(p.endStock||0)); }, numeric:true},
+  {id:'mrpnext',     label:'MRP Next Month',  get:function(p){ return String(Math.round(p.mrpNextMonth||0)); }, numeric:true},
+  {id:'endstocknext',label:'End Stock Next',  get:function(p){ return String(Math.round(p.endStockNext||0)); }, numeric:true},
+  {id:'kategori',    label:'Kategori',        get:function(p){ return p.category||''; }},
+  {id:'ospo',        label:'OSPO',            get:function(p){ return String(Math.round((p.ospoSdApr||0)+(p.ospoMei||0)+(p.ospoJuni||0)+(p.ospoJulDst||0))); }, numeric:true},
+  {id:'ospr',        label:'OSPR',            get:function(p){ return String(Math.round(p.totalOSPR||0)); }, numeric:true},
+  {id:'tgl_incoming',label:'Tgl Incoming',    get:function(p){ return p.tglIncoming||''; }, isDate:true},
+  {id:'qty_incoming',label:'Qty Incoming',    get:function(p){ return (p.qtyIncoming>0)?String(p.qtyIncoming):''; }, numeric:true},
+  {id:'doi_incoming',label:'DOI+Incoming',    get:function(p){ return (p.doiAfterIncoming>0)?String(p.doiAfterIncoming):''; }, numeric:true},
+  {id:'cov_incoming',label:'Coverage+Incoming',get:function(p){ return p.coverageAfterIncoming||''; }, isDate:true},
+  {id:'comment',     label:'Comment',         get:function(p){ return p.comment||''; }}
+];
+var _PROJ_COL_DEFS_MAP = {};
+_PROJ_COL_DEFS.forEach(function(d){ _PROJ_COL_DEFS_MAP[d.id] = d; });
+
+// Sort ISO yang tahan dua format tanggal (dd-mm-yyyy dan dd/mm/yyyy)
+function _projSortISO(s) {
+  if(!s) return '9999';
+  var sep = s.indexOf('/')>=0 ? '/' : (s.indexOf('-')>=0 ? '-' : null);
+  if(!sep) return String(s);
+  var p = String(s).split(',')[0].trim().split(sep); // multi-tanggal: pakai tanggal pertama
+  if(p.length===3) return p[0].length===4 ? p[0]+'-'+p[1]+'-'+p[2] : p[2]+'-'+p[1]+'-'+p[0];
+  return String(s);
+}
+
+function _projColPassAll(p, excludeColId) {
+  for(var i=0;i<_PROJ_COL_DEFS.length;i++){
+    var def=_PROJ_COL_DEFS[i];
+    if(excludeColId && def.id===excludeColId) continue;
+    var sel=window._projColFilter[def.id];
+    if(sel && sel.length && sel.indexOf(def.get(p))<0) return false;
+  }
+  return true;
+}
+function _projColOptions(colId) {
+  var def=_PROJ_COL_DEFS_MAP[colId]; if(!def) return [];
+  var base=(window._projLastGlobalItems||[]).filter(function(p){ return _projColPassAll(p,colId); });
+  var vals=[];
+  base.forEach(function(p){ var v=def.get(p); if(v===''||v==null) return; if(vals.indexOf(v)<0) vals.push(v); });
+  if(def.numeric) vals.sort(function(a,b){ return parseFloat(a)-parseFloat(b); });
+  else if(def.isDate) vals.sort(function(a,b){ return _projSortISO(a).localeCompare(_projSortISO(b)); });
+  else vals.sort(function(a,b){ return String(a).localeCompare(String(b)); });
+  return vals;
+}
+function _projColDisp(def,v){ return v; }
+
+// Panel dropdown global: position FIXED di body — tidak terpotong overflow tabel
+function _projcfPanelEl() {
+  var el = document.getElementById('projcf-panel');
+  if(!el) {
+    el = document.createElement('div');
+    el.id = 'projcf-panel';
+    el.style.cssText = 'display:none;position:fixed;z-index:950;background:var(--bg2);border:1.5px solid var(--border2);border-radius:6px;padding:8px;min-width:200px;max-width:260px;box-shadow:0 4px 16px rgba(0,0,0,.2)';
+    document.body.appendChild(el);
+  }
+  return el;
+}
+function _projColDropdown(colId, btn) {
+  var panel = _projcfPanelEl();
+  if(panel.style.display!=='none' && window._projcfOpenCol===colId) { _projcfClose(); return; }
+  window._projcfOpenCol = colId;
+  window._projColPending = { col: colId, values: (window._projColFilter[colId]||[]).slice() };
+  window._projcfSearchTxt = '';
+  var r = btn.getBoundingClientRect();
+  panel.style.left = Math.max(6, Math.min(r.left, window.innerWidth-270)) + 'px';
+  panel.style.top  = Math.min(r.bottom+4, window.innerHeight-120) + 'px';
+  panel.style.display = 'block';
+  _projColRenderPanel(colId);
+}
+function _projcfClose() {
+  var panel = document.getElementById('projcf-panel');
+  if(panel) panel.style.display='none';
+  window._projcfOpenCol = null;
+  window._projColPending = null;
+}
+function _projColRenderPanel(colId) {
+  var panel=_projcfPanelEl();
+  var def=_PROJ_COL_DEFS_MAP[colId]; if(!def) return;
+  var allVals=_projColOptions(colId);
+  var pend=(window._projColPending&&window._projColPending.col===colId)?window._projColPending.values:[];
+  var st=(window._projcfSearchTxt||'').toLowerCase();
+  var shown=st?allVals.filter(function(v){ return String(v).toLowerCase().includes(st); }):allVals;
+  var allChecked=shown.length>0&&shown.every(function(v){ return pend.indexOf(v)>=0; });
+  var html='<div style="font-size:10px;font-weight:600;color:var(--muted);letter-spacing:.07em;text-transform:uppercase;margin-bottom:6px">Filter '+def.label+'</div>'
+    +'<input type="text" placeholder="Cari nilai..." value="'+(window._projcfSearchTxt||'').replace(/"/g,'&quot;')+'" oninput="_projcfSearch(this.value)" style="width:100%;font-size:11px;padding:4px 6px;margin-bottom:6px;border:1px solid var(--border2);border-radius:4px;background:var(--bg3);color:var(--text);box-sizing:border-box">';
+  if(!allVals.length) html+='<div style="font-size:11px;color:var(--muted)">Tidak ada nilai</div>';
+  else if(!shown.length) html+='<div style="font-size:11px;color:var(--muted)">Tidak ditemukan</div>';
+  else {
+    html+='<label style="display:flex;align-items:center;gap:6px;font-size:11.5px;cursor:pointer;padding:4px;border-bottom:0.5px solid var(--border);margin-bottom:4px;font-weight:500;color:var(--text)">'
+      +'<input type="checkbox" '+(allChecked?'checked':'')+' onchange="_projcfSelectAll(this.checked)" style="accent-color:var(--teal)">Pilih Semua ('+shown.length+')</label>';
+    html+='<div style="max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:2px">';
+    shown.forEach(function(v){
+      var chk=pend.indexOf(v)>=0;
+      html+='<label style="display:flex;align-items:center;gap:6px;font-size:11.5px;cursor:pointer;padding:3px 4px;border-radius:4px;'+(chk?'background:rgba(20,184,166,.1);color:var(--teal)':'color:var(--text)')+'">'
+        +'<input type="checkbox" '+(chk?'checked':'')+' onchange="_projcfToggle(&quot;'+String(v).replace(/"/g,'&quot;')+'&quot;,this.checked)" style="accent-color:var(--teal)">'
+        +_projColDisp(def,v)+'</label>';
+    });
+    html+='</div>';
+  }
+  html+='<div style="display:flex;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">'
+    +'<button onclick="_projcfClear()" style="flex:1;font-size:10px;padding:4px 0;background:var(--bg3);border:1px solid var(--border2);border-radius:4px;cursor:pointer;color:var(--muted)">Reset</button>'
+    +'<button onclick="_projcfApply()" style="flex:1;font-size:10px;padding:4px 0;background:var(--teal);border:1px solid var(--teal);border-radius:4px;cursor:pointer;color:#fff;font-weight:600">OK</button>'
+    +'</div>';
+  panel.innerHTML=html;
+}
+function _projcfSearch(t){ window._projcfSearchTxt=t; if(window._projcfOpenCol) _projColRenderPanel(window._projcfOpenCol); }
+function _projcfToggle(v,checked){
+  if(!window._projColPending) return;
+  var pend=window._projColPending.values;
+  if(checked){ if(pend.indexOf(v)<0) pend.push(v); }
+  else window._projColPending.values=pend.filter(function(x){return x!==v;});
+  _projColRenderPanel(window._projColPending.col);
+}
+function _projcfSelectAll(checked){
+  if(!window._projColPending) return;
+  var colId=window._projColPending.col, def=_PROJ_COL_DEFS_MAP[colId];
+  var allVals=_projColOptions(colId);
+  var st=(window._projcfSearchTxt||'').toLowerCase();
+  var shown=st?allVals.filter(function(v){ return String(v).toLowerCase().includes(st); }):allVals;
+  var pend=window._projColPending.values;
+  if(checked) shown.forEach(function(v){ if(pend.indexOf(v)<0) pend.push(v); });
+  else window._projColPending.values=pend.filter(function(v){ return shown.indexOf(v)<0; });
+  _projColRenderPanel(colId);
+}
+function _projcfApply(){
+  if(window._projColPending) window._projColFilter[window._projColPending.col]=window._projColPending.values.slice();
+  _projcfClose(); renderProjection();
+}
+function _projcfClear(){
+  if(window._projColPending) window._projColFilter[window._projColPending.col]=[];
+  _projcfClose(); renderProjection();
+}
+function _projColClearAll(){ window._projColFilter={}; renderProjection(); }
+// Checkbox "Filter kolom": OFF = sembunyikan tombol filter + bersihkan semua filter kolom
+function _projColFilterToggle(cb){ if(!cb.checked) window._projColFilter={}; _projcfClose(); renderProjection(); }
+// Tutup panel saat klik di luar / scroll di mana pun
+document.addEventListener('click', function(e){
+  if(!e.target.closest('#projcf-panel') && !e.target.closest('.projcf-btn')) _projcfClose();
+});
+document.addEventListener('scroll', function(){ _projcfClose(); }, true);
 
 function clearHistoryView() {
   document.getElementById('f-proj-history-date').value = '';
@@ -6628,17 +6795,14 @@ function renderProjection() {
       }
       if(!covISO2 || covISO2 > displayCutoffISO) return false;
     }
-    if(projColFilters.kode && !(p.productCode||'').toLowerCase().includes(projColFilters.kode)) return false;
-    if(projColFilters.desc && !(p.description||'').toLowerCase().includes(projColFilters.desc)) return false;
-    if(projColFilters.realname && !(p.realName||'').toLowerCase().includes(projColFilters.realname)) return false;
-    if(projColFilters.supplier && !(p.supplier||'').toLowerCase().includes(projColFilters.supplier)) return false;
-    if(projColFilters.cat && !(p.category||'').toLowerCase().includes(projColFilters.cat)) return false;
-    if(projColFilters.pct !== undefined && projColFilters.pct !== '') {
-      var pct = (p.pctUsageVsForecast||0)*100;
-      if(pct < parseFloat(projColFilters.pct)) return false;
-    }
     return true;
   });
+
+  // Tahap 2: filter kolom Excel-style. _projLastGlobalItems = hasil filter global saja,
+  // dipakai _projColOptions() supaya dropdown kolom X menampilkan nilai dari data yang
+  // sudah lolos filter global + filter kolom LAIN (perilaku sama seperti Excel).
+  window._projLastGlobalItems = items;
+  items = items.filter(function(p){ return _projColPassAll(p, null); });
 
   if(!items.length) {
     document.getElementById('proj-table').innerHTML = !sourceData.length ?
@@ -6713,37 +6877,33 @@ function renderProjection() {
     '</tr>';
   }).join('');
 
-  var ospoHeaders = colHidden('ospo') ? '' :
-    '<th>OSPO<div class="col-resizer"></div></th>';
-
-  var filterRow = colFilter ? '<tr style="background:var(--bg4)">' +
-    '<th><input class="th-filter" oninput="projColFilters.kode=this.value.toLowerCase();renderProjectionRAF()" placeholder="filter..." value="' + (projColFilters.kode||'') + '"></th>' +
-    (colHidden('abc') ? '' : '<th></th>') +
-    '<th><input class="th-filter" oninput="projColFilters.desc=this.value.toLowerCase();renderProjectionRAF()" placeholder="filter..." value="' + (projColFilters.desc||'') + '"></th>' +
-    '<th>' + (_isAdmin ? '<input class="th-filter" oninput="projColFilters.realname=this.value.toLowerCase();renderProjectionRAF()" placeholder="filter..." value="' + (projColFilters.realname||'') + '">' : '') + '</th>' +
-    '<th></th>' +
-    '<th><input class="th-filter" oninput="projColFilters.supplier=this.value.toLowerCase();renderProjectionRAF()" placeholder="filter..." value="' + (projColFilters.supplier||'') + '"></th>' +
-    '<th></th><th></th><th></th><th></th><th></th><th></th><th></th><th></th><th></th><th></th><th></th><th></th><th></th>' +
-    '<th><input class="th-filter" oninput="projColFilters.cat=this.value.toLowerCase();renderProjectionRAF()" placeholder="filter..." value="' + (projColFilters.cat||'') + '"></th>' +
-    '<th></th>' +
-    (colHidden('ospo') ? '' : '<th></th>') +
-    '<th></th>' +
-    (colHidden('pctusage') ? '' : '<th><input class="th-filter" oninput="projColFilters.pct=this.value;renderProjectionRAF()" placeholder="min%..." value="' + (projColFilters.pct||'') + '" title="Filter min % usage"></th>') +
-    '<th></th>' +
-    '<th></th>' +
-  '</tr>' : '';
+  // (ospoHeaders & filterRow lama dihapus — header OSPO kini inline sticky di thead,
+  //  filter kolom kini pakai dropdown Excel-style via _PROJ_COL_DEFS)
 
   var histBanner = isHistory ? '<div style="background:var(--amber-bg);border:1px solid rgba(245,158,11,.3);border-radius:6px;padding:8px 14px;margin-bottom:10px;font-size:12px;color:var(--amber)">📅 Menampilkan history: <strong>' + histDate + '</strong> — <a onclick="clearHistoryView()" style="cursor:pointer;text-decoration:underline">Kembali ke hari ini</a></div>' : '';
 
   var _freezeClass = _projFreezeCol ? ' proj-freeze' : '';
-  // Sticky left positions untuk 6 kolom pertama (kode,abc,desc,realname,uom,supplier)
+  // Tombol filter dropdown per kolom (Excel-style) — tampil hanya saat checkbox "Filter kolom" aktif
+  function fbtn(col) {
+    if(!colFilter) return '';
+    var def = _PROJ_COL_DEFS_MAP[col]; if(!def) return '';
+    var n = (window._projColFilter[col]||[]).length;
+    return ' <span class="projcf-btn" onclick="_projColDropdown(\''+col+'\',this);event.stopPropagation()" style="cursor:pointer;font-size:9px;user-select:none;'+(n?'color:var(--teal);font-weight:700':'color:var(--muted)')+'" title="Filter '+def.label+'">'+(n?'▼'+n:'▽')+'</span>';
+  }
+  // Header non-freeze: SELALU sticky top:0 supaya heading tidak hilang saat scroll vertikal
+  function thP(label, col) {
+    if(colHidden(col)) return '';
+    return '<th style="position:sticky;top:0;z-index:4;background:var(--bg3)">' + label + fbtn(col) + '<div class="col-resizer"></div></th>';
+  }
+  // 6 kolom kiri: sticky top + (kalau Freeze ON) sticky left dengan z-index lebih tinggi
   var _sPos = [0, 110, 155, 315, 460, 505];
   function thS(label, col, idx) {
-    if(!_projFreezeCol || idx === undefined) return th(label, col);
+    if(colHidden(col)) return '';
+    if(!_projFreezeCol || idx === undefined) return thP(label, col);
     var shadow = idx === 5 ? ';box-shadow:2px 0 4px rgba(0,0,0,.1)' : '';
     var widths=[110,45,160,145,45,140];
     var mw = idx<widths.length ? ';min-width:'+widths[idx]+'px' : '';
-    if(colHidden(col)) return ''; var widths=[110,45,160,145,45,140]; var mw = idx<widths.length ? ';min-width:'+widths[idx]+'px' : ''; return '<th style="position:sticky;top:0;left:'+_sPos[idx]+'px;z-index:5;background:var(--bg3)'+mw+shadow+'">'+label+'<div class="col-resizer"></div></th>';
+    return '<th style="position:sticky;top:0;left:'+_sPos[idx]+'px;z-index:6;background:var(--bg3)'+mw+shadow+'">'+label+fbtn(col)+'<div class="col-resizer"></div></th>';
   }
   document.getElementById('proj-table').innerHTML = histBanner + '<div class="card"><div class="tbl-wrap"><table class="resizable-table'+_freezeClass+'" id="proj-tbl">' +
     '<thead>' +
@@ -6754,31 +6914,31 @@ function renderProjection() {
     thS('Real Name','realname',3) +
     thS('UOM','uom',4) +
     thS('Supplier','supplier',5) +
-    th('Site','site') +
-    th('Stock BTG','stockbtg') +
-    th('Stock SNG','stocksng') +
-    th('Stock JTK','stockjtk') +
-    th('DOI','doifc') +
-    th('Est Usg/day','estusg') +
-    th('Actual MRP','actualmrp') +
+    thP('Site','site') +
+    thP('Stock BTG','stockbtg') +
+    thP('Stock SNG','stocksng') +
+    thP('Stock JTK','stockjtk') +
+    thP('DOI','doifc') +
+    thP('Est Usg/day','estusg') +
+    thP('Actual MRP','actualmrp') +
 
-    th('GRPO Bln Ini','grpo') +
-    th('Actual Usg','actualusg') +
-    th('% Usg vs FC','pctusage') +
-    th('Est. Coverage','coverage') +
-    th('End Stock vs MRP','endstock') +
-    th('MRP Next Month','mrpnext') +
-    th('End Stock Next','endstocknext') +
-    th('Kategori','kategori') +
-    ospoHeaders +
-    th('OSPR','ospr') +
-    th('Tgl Incoming','tgl_incoming') +
-    th('Qty Incoming','qty_incoming') +
-    th('DOI+Incoming','doi_incoming') +
-    th('Coverage+Incoming','cov_incoming') +
-    th('Comment','comment') +
-    '<th style="min-width:36px;text-align:center" title="Highlight">📌</th>' +
-    '</tr>' + filterRow +
+    thP('GRPO Bln Ini','grpo') +
+    thP('Actual Usg','actualusg') +
+    thP('% Usg vs FC','pctusage') +
+    thP('Est. Coverage','coverage') +
+    thP('End Stock vs MRP','endstock') +
+    thP('MRP Next Month','mrpnext') +
+    thP('End Stock Next','endstocknext') +
+    thP('Kategori','kategori') +
+    (colHidden('ospo') ? '' : '<th style="position:sticky;top:0;z-index:4;background:var(--bg3)">OSPO' + fbtn('ospo') + '<div class="col-resizer"></div></th>') +
+    thP('OSPR','ospr') +
+    thP('Tgl Incoming','tgl_incoming') +
+    thP('Qty Incoming','qty_incoming') +
+    thP('DOI+Incoming','doi_incoming') +
+    thP('Coverage+Incoming','cov_incoming') +
+    thP('Comment','comment') +
+    '<th style="position:sticky;top:0;z-index:4;background:var(--bg3);min-width:36px;text-align:center" title="Highlight">📌</th>' +
+    '</tr>' +
     '</thead>' +
     '<tbody>' + rows + '</tbody></table></div></div>' +
     '<div style="padding:8px 0;font-size:11px;color:var(--muted)">' + items.length + ' item ditampilkan' + (isHistory ? ' (history ' + histDate + ')' : ' | Stock SAP: ' + (STATE.stockData && Object.keys(STATE.stockData).length ? Object.keys(STATE.stockData).length + ' item' : '— belum sync')) + ' | History tersedia: ' + Object.keys(STATE.projectionHistory).length + ' hari</div>';
@@ -7359,16 +7519,45 @@ function _poConfData(key) {
   return { confDate: pc.confDate || ov.confDate || null, confQty: pc.confQty || ov.confQty || null };
 }
 
-// Resolver kanonik konfirmasi PO — bandingkan key BARU (docNum_lineNum_itemCode) vs key
-// LAMA (docNum_itemCode) kalau keduanya ada, yang confUpd (timestamp) PALING BARU yang
-// menang. Fix untuk bug: beberapa fitur pernah nulis konfirmasi ke key lama sementara List
-// Pengiriman PO & fitur lain baca dari key baru, sehingga konfirmasi yang valid jadi
-// "hilang" di satu sisi tapi masih kehitung di sisi lain (mis. Projection Stock incoming).
+// Index lazy: key 2-bagian (docNum_itemCode) → daftar key 3-bagian (docNum_lineNum_itemCode)
+// yang ada di poOverrides/poConfirmations. Dipakai sebagai fallback saat STATE.poData
+// tidak punya info lineNum (mis. boot dari cache versi lama) supaya data yang tersimpan
+// di key baru tetap ketemu. Di-rebuild otomatis kalau jumlah key berubah.
+var _poKeyScanIdx = null, _poKeyScanStamp = '';
+function _poKeyScanIndex() {
+  var ovK = Object.keys(STATE.poOverrides||{}), cfK = Object.keys(STATE.poConfirmations||{});
+  var stamp = ovK.length + ':' + cfK.length;
+  if(_poKeyScanIdx && _poKeyScanStamp === stamp) return _poKeyScanIdx;
+  var idx = {};
+  ovK.concat(cfK).forEach(function(k){
+    var parts = k.split('_');
+    if(parts.length === 3) {
+      var two = parts[0] + '_' + parts[2];
+      if(!idx[two]) idx[two] = [];
+      if(idx[two].indexOf(k) < 0) idx[two].push(k);
+    }
+  });
+  _poKeyScanIdx = idx; _poKeyScanStamp = stamp;
+  return idx;
+}
+
+// Daftar kandidat key untuk 1 PO: key baru (_poKey), key lama (docNum_itemCode), plus —
+// khusus kalau PO tidak punya lineNum — key 3-bagian hasil scan index di atas.
+function _poCandidateKeys(po) {
+  var kNew = _poKey(po), kOld = po.docNum + '_' + po.itemCode;
+  var keys = kNew === kOld ? [kNew] : [kNew, kOld];
+  if(po.lineNum == null) {
+    var extra = _poKeyScanIndex()[kOld];
+    if(extra) extra.forEach(function(k){ if(keys.indexOf(k) < 0) keys.push(k); });
+  }
+  return keys;
+}
+
+// Resolver kanonik konfirmasi PO — bandingkan semua kandidat key (baru, lama, dan hasil
+// scan kalau lineNum tidak diketahui), yang confUpd (timestamp) PALING BARU menang.
 // Dipakai di SEMUA tempat yang baca status konfirmasi PO supaya hasilnya selalu konsisten.
 function _poResolveConf(po) {
-  var kNew = _poKey(po);
-  var kOld = po.docNum + '_' + po.itemCode;
-  var keys = kNew === kOld ? [kNew] : [kNew, kOld];
+  var keys = _poCandidateKeys(po);
   var best = null;
   keys.forEach(function(k){
     [(STATE.poConfirmations||{})[k], (STATE.poOverrides||{})[k]].forEach(function(src){
@@ -7394,11 +7583,13 @@ function _getNearestDelivery(code) {
   if(!pos.length) return null;
   var best = null;
   pos.forEach(function(po){
-    var key = String(po.docNum)+'_'+po.itemCode;
-    var ovr  = (STATE.poOverrides||{})[key] || {};
-    var pcon = (STATE.poConfirmations||{})[key] || {};
-    var confDate = pcon.confDate || ovr.confDate || null;
-    var confQty  = pcon.confQty  || ovr.confQty  || null;
+    // Pakai resolver kanonik — BUKAN hardcode key lama docNum_itemCode.
+    // Bug lama: widget ITEM KRITIS di dashboard cuma baca key lama, jadi jadwal/konfirmasi
+    // yang tersimpan di key baru (lineNum-aware) tidak kebaca → "belum dijadwal" palsu.
+    var ovr  = _poOvr(po);
+    var cc   = _poResolveConf(po);
+    var confDate = cc.confDate || null;
+    var confQty  = cc.confQty  || null;
     if(!ovr.date && !confDate) return;
     var dateStr = confDate || ovr.date;
     if(!best || dateStr < best.dateISO) {
@@ -7661,8 +7852,7 @@ function generateSchedule(typeFilter) {
       var code = en.item && en.item.productCode;
       if(!code) return;
       (en.pos||[]).forEach(function(po){
-        var pk = po.docNum + '_' + po.itemCode;
-        var ovr = (STATE.poOverrides||{})[pk] || {};
+        var ovr = _poOvr(po);
         // Pakai reqQtyOverride (qty aktual di kartu) jika ada, fallback ke openQty
         var qty = (ovr.reqQtyOverride != null && ovr.reqQtyOverride > 0)
           ? ovr.reqQtyOverride
@@ -7738,8 +7928,7 @@ function generateSchedule(typeFilter) {
     if(item._manualForced) {
       var manISO = null;
       STATE.poData.filter(function(p){ return p.itemCode === item.productCode; }).forEach(function(po){
-        var key = po.docNum + '_' + po.itemCode;
-        var ovr = STATE.poOverrides[key];
+        var ovr = _poOvr(po);
         if(ovr && ovr.isManual && ovr.date) {
           if(!manISO || ovr.date < manISO) manISO = ovr.date;
         }
@@ -7802,8 +7991,7 @@ function generateSchedule(typeFilter) {
     var manualDate = null;
     sup.entries.forEach(function(e){
       e.pos.forEach(function(po){
-        var key = po.docNum + '_' + po.itemCode;
-        var ovr = STATE.poOverrides[key];
+        var ovr = _poOvr(po);
         if(ovr && ovr.isManual && ovr.date) {
           // Hanya gunakan kalau tanggalnya dalam range delivery week
           if(ovr.date >= delivMonISO && ovr.date <= delivFriISO) {
@@ -7974,10 +8162,8 @@ function generateSchedule(typeFilter) {
       // Exclude PO yang sudah ada di kartu jadwal ATAU sudah punya confDate (confirmed manual)
       var sortedPOs2 = sortedPOs.filter(function(po){
         var _pk = po.docNum + '_' + po.itemCode;
-        if(scheduledPOKeys[_pk]) return false; // sudah di kartu jadwal
-        var _pcc = (STATE.poConfirmations||{})[_pk] || {};
-        var _ovr = (STATE.poOverrides||{})[_pk] || {};
-        if(_pcc.confDate || _ovr.confDate) return false; // sudah dikonfirmasi langsung
+        if(scheduledPOKeys[_pk] || scheduledPOKeys[_poKey(po)]) return false; // sudah di kartu jadwal
+        if(_poResolveConf(po).confDate) return false; // sudah dikonfirmasi langsung
         return true;
       });
       if(!sortedPOs2.length) sortedPOs2 = sortedPOs; // fallback kalau semua sudah terjadwal/konfirmasi
@@ -7998,8 +8184,7 @@ function generateSchedule(typeFilter) {
 
       // Cek apakah ada PO yang di-set manual date
       var manualPOs = eligiblePOs.filter(function(po){
-        var key = po.docNum + '_' + po.itemCode;
-        var ovr = STATE.poOverrides[key];
+        var ovr = _poOvr(po);
         return ovr && ovr.isManual && ovr.date;
       });
 
@@ -8117,8 +8302,6 @@ function renderSchedule() {
     entries.forEach(function(e){
       (e.entries||[]).forEach(function(en){
         (en.pos||[]).forEach(function(po){
-          var _pk = po.docNum + '_' + po.itemCode;
-          var _ov = STATE.poOverrides[_pk] || {};
           dailyQty += (po.openQty||0);
         });
       });
@@ -8142,7 +8325,7 @@ function renderSchedule() {
         if(!en.item) return '';
         var po = en.pos && en.pos[0];
         var poKey = po ? (po.docNum + '_' + po.itemCode) : '';
-        var ovr = poKey ? (STATE.poOverrides[poKey] || {}) : {};
+        var ovr = po ? _poOvr(po) : {};
         var reqQty = en.pos ? en.pos.reduce(function(s,p){return s+(p.openQty||0);},0) : 0;
         var dispQty = _getEntryReqQty(en);
         // DOI calculation: DOI max + (incoming / daily usage)
@@ -8238,12 +8421,13 @@ function saveSchedDate(input) {
   // Sync ke poOverrides.date untuk semua PO di jadwal ini
   (e.entries||[]).forEach(function(en){
     (en.pos||[]).forEach(function(po){
-      var key = po.docNum + '_' + po.itemCode;
+      var key = _poKey(po); // key kanonik (lineNum-aware)
       if(!STATE.poOverrides[key]) STATE.poOverrides[key] = {};
       STATE.poOverrides[key].date          = iso;
       STATE.poOverrides[key].isSchedManual = true;
       STATE.poOverrides[key].isManual      = false;
       STATE.poOverrides[key].isAuto        = false;
+      STATE.poOverrides[key].dateUpd       = new Date().toISOString();
     });
   });
 
@@ -8284,7 +8468,7 @@ function _getMaxSchedQty(schedIdx, el) {
   var e = STATE.scheduleData[schedIdx]; if(!e) return 0;
   var poKey = el.getAttribute('data-po-key');
   if(!poKey) return 0;
-  var itemCode = poKey.split('_')[1];
+  var itemCode = poKey.split('_').pop(); // segmen terakhir = itemCode (valid utk key lama & baru)
   if(!itemCode) return 0;
   // Find all POs for this item + supplier
   var allPOs = STATE.poData.filter(function(p){
@@ -8316,7 +8500,7 @@ function saveSchedQty(input) {
   var e = STATE.scheduleData[idx];
   if(!e || !poKey) return;
 
-  var itemCode = poKey.split('_')[1];
+  var itemCode = poKey.split('_').pop(); // segmen terakhir = itemCode (valid utk key lama & baru)
   var entry = (e.entries||[]).find(function(en){
     return en.pos && en.pos.some(function(p){ return (p.docNum+'_'+p.itemCode) === poKey; });
   });
@@ -8352,7 +8536,7 @@ function saveSchedQty(input) {
     var remaining = newQty;
     var dateISO = e.date ? (e.date.includes('/') ? e.date.split('/').reverse().join('-') : e.date) : '';
     entry.pos.forEach(function(po){
-      var pk = po.docNum + '_' + po.itemCode;
+      var pk = _poKey(po); // key kanonik (lineNum-aware) — jangan hardcode format lama
       if(!STATE.poOverrides[pk]) STATE.poOverrides[pk] = {};
       var poQty = Math.min(remaining, po.openQty || 0);
       STATE.poOverrides[pk].reqQtyOverride = poQty;
@@ -8374,17 +8558,18 @@ function saveSchedQty(input) {
     if(entry.pos.length > 1) {
       var firstPO = entry.pos[0];
       entry.pos = entry.pos.filter(function(po){
-        var pk = po.docNum + '_' + po.itemCode;
-        var ov = STATE.poOverrides[pk] || {};
+        var ov = _poOvr(po);
         return ov.reqQtyOverride === undefined || ov.reqQtyOverride > 0;
       });
       if(!entry.pos.length) entry.pos = [firstPO];
     }
   } else {
-    // Fallback: single PO
-    if(!STATE.poOverrides[poKey]) STATE.poOverrides[poKey] = {};
-    STATE.poOverrides[poKey].reqQtyOverride = newQty;
-    STATE.poOverrides[poKey].qtyUpd = new Date().toISOString();
+    // Fallback: single PO — resolve poKey (format lama dari attribute) ke key kanonik dulu
+    var _fbPO = (STATE.poData||[]).find(function(p){ return (p.docNum + '_' + p.itemCode) === poKey || _poKey(p) === poKey; });
+    var _fbKey = _fbPO ? _poKey(_fbPO) : poKey;
+    if(!STATE.poOverrides[_fbKey]) STATE.poOverrides[_fbKey] = {};
+    STATE.poOverrides[_fbKey].reqQtyOverride = newQty;
+    STATE.poOverrides[_fbKey].qtyUpd = new Date().toISOString();
   }
 
   // Update items summary
@@ -8408,8 +8593,7 @@ function _getEntryReqQty(en) {
   // Pakai reqQtyOverride kalau user sudah set manual, fallback ke openQty dari SAP
   if(!en.pos || !en.pos.length) return 0;
   return en.pos.reduce(function(s,po){
-    var pk  = po.docNum + '_' + po.itemCode;
-    var ovr = (STATE.poOverrides||{})[pk] || {};
+    var ovr = _poOvr(po);
     var qty = (ovr.reqQtyOverride != null) ? ovr.reqQtyOverride : (po.openQty||0);
     return s + qty;
   }, 0);
@@ -8426,7 +8610,7 @@ function toggleApprove(idx) {
     var _approveNow = new Date().toISOString(); // timestamp untuk dateUpd
     (e.entries||[]).forEach(function(en){
       (en.pos||[]).forEach(function(po){
-        var key = po.docNum + '_' + po.itemCode;
+        var key = _poKey(po); // key kanonik (lineNum-aware)
         if(!STATE.poOverrides[key]) STATE.poOverrides[key] = {};
         if(nowApproved) {
           STATE.poOverrides[key].date    = iso;
@@ -8434,12 +8618,16 @@ function toggleApprove(idx) {
           STATE.poOverrides[key].isAuto   = true;
           STATE.poOverrides[key].dateUpd  = _approveNow; // ← fix: set dateUpd supaya merge bisa track
         } else {
-          // Un-approve → hapus tanggal kalau bukan manual user
-          if(!STATE.poOverrides[key].isManual) {
-            delete STATE.poOverrides[key].date;
-            delete STATE.poOverrides[key].isAuto;
-            STATE.poOverrides[key].dateUpd = _approveNow; // ← fix: update dateUpd saat clear juga
-          }
+          // Un-approve → hapus tanggal (kalau bukan manual user) di SEMUA kandidat key,
+          // termasuk key lama yang mungkin masih menyimpan tanggal dari versi sebelumnya
+          _poCandidateKeys(po).forEach(function(k){
+            var o = STATE.poOverrides[k];
+            if(o && !o.isManual && o.date) {
+              delete o.date;
+              delete o.isAuto;
+              o.dateUpd = _approveNow; // ← fix: update dateUpd saat clear juga
+            }
+          });
         }
       });
     });
@@ -8471,12 +8659,13 @@ function removeSchedItem(schedIdx, entryIdx) {
     // Fix: bersihkan isManual dari poOverrides agar tidak mempengaruhi generate berikutnya
     (e.entries||[]).forEach(function(en){
       (en.pos||[]).forEach(function(po){
-        var pk = po.docNum + '_' + po.itemCode;
-        var ovr = STATE.poOverrides[pk];
-        if(ovr && ovr.isManual) {
-          delete ovr.date; ovr.isManual = false; delete ovr.isAuto;
-          if(!Object.keys(ovr).length) delete STATE.poOverrides[pk];
-        }
+        _poCandidateKeys(po).forEach(function(pk){
+          var ovr = STATE.poOverrides[pk];
+          if(ovr && ovr.isManual) {
+            delete ovr.date; ovr.isManual = false; delete ovr.isAuto;
+            if(!Object.keys(ovr).length) delete STATE.poOverrides[pk];
+          }
+        });
       });
     });
     localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
@@ -8486,13 +8675,14 @@ function removeSchedItem(schedIdx, entryIdx) {
     if(!confirm('Hapus ' + itemName + ' dari jadwal ' + e.supName + '?')) return;
     // Bersihkan reqQtyOverride PO milik entry ini agar generate berikutnya tidak baca stale 0
     (removed.pos||[]).forEach(function(po){
-      var pk = po.docNum + '_' + po.itemCode;
-      var ovr = STATE.poOverrides[pk];
-      if(!ovr || ovr.isManual) return;
-      delete ovr.reqQtyOverride;
-      delete ovr.date;
-      delete ovr.isAuto;
-      if(!Object.keys(ovr).length) delete STATE.poOverrides[pk];
+      _poCandidateKeys(po).forEach(function(pk){
+        var ovr = STATE.poOverrides[pk];
+        if(!ovr || ovr.isManual) return;
+        delete ovr.reqQtyOverride;
+        delete ovr.date;
+        delete ovr.isAuto;
+        if(!Object.keys(ovr).length) delete STATE.poOverrides[pk];
+      });
     });
     e.entries.splice(entryIdx, 1);
     // Update summary
@@ -8555,11 +8745,12 @@ function approveAll() {
       var iso = e.date.split('/').reverse().join('-');
       (e.entries||[]).forEach(function(en){
         (en.pos||[]).forEach(function(po){
-          var key = po.docNum + '_' + po.itemCode;
+          var key = _poKey(po); // key kanonik (lineNum-aware)
           if(!STATE.poOverrides[key]) STATE.poOverrides[key] = {};
           STATE.poOverrides[key].date    = iso;
           STATE.poOverrides[key].isManual = false;
           STATE.poOverrides[key].isAuto   = true;
+          STATE.poOverrides[key].dateUpd  = new Date().toISOString();
         });
       });
     }
@@ -8583,19 +8774,20 @@ function removeSchedule(idx) {
   if(e && e.entries) {
     (e.entries||[]).forEach(function(en){
       (en.pos||[]).forEach(function(po){
-        var key = po.docNum + '_' + po.itemCode;
-        var ovr = STATE.poOverrides[key];
-        if(!ovr) return;
-        // Jangan hapus kalau isManual (input manual user langsung di list PO)
-        if(ovr.isManual) return;
-        delete ovr.date;
-        delete ovr.isAuto;
-        delete ovr.confQty;
-        delete ovr.confDate;
-        delete ovr.confUpdByGRPO;
-        delete ovr.reqQtyOverride; // bersihkan agar generate berikutnya tidak baca stale 0
-        // Kalau sudah kosong semua, hapus key-nya
-        if(!Object.keys(ovr).length) delete STATE.poOverrides[key];
+        _poCandidateKeys(po).forEach(function(key){
+          var ovr = STATE.poOverrides[key];
+          if(!ovr) return;
+          // Jangan hapus kalau isManual (input manual user langsung di list PO)
+          if(ovr.isManual) return;
+          delete ovr.date;
+          delete ovr.isAuto;
+          delete ovr.confQty;
+          delete ovr.confDate;
+          delete ovr.confUpdByGRPO;
+          delete ovr.reqQtyOverride; // bersihkan agar generate berikutnya tidak baca stale 0
+          // Kalau sudah kosong semua, hapus key-nya
+          if(!Object.keys(ovr).length) delete STATE.poOverrides[key];
+        });
       });
     });
     localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
@@ -8615,12 +8807,13 @@ function resetSchedule() {
   STATE.scheduleData.forEach(function(e){
     (e.entries||[]).forEach(function(en){
       (en.pos||[]).forEach(function(po){
-        var pk = po.docNum + '_' + po.itemCode;
-        var ovr = STATE.poOverrides[pk];
-        if(ovr && ovr.isManual) {
-          delete ovr.date; ovr.isManual = false; delete ovr.isAuto;
-          if(!Object.keys(ovr).length) delete STATE.poOverrides[pk];
-        }
+        _poCandidateKeys(po).forEach(function(pk){
+          var ovr = STATE.poOverrides[pk];
+          if(ovr && ovr.isManual) {
+            delete ovr.date; ovr.isManual = false; delete ovr.isAuto;
+            if(!Object.keys(ovr).length) delete STATE.poOverrides[pk];
+          }
+        });
       });
     });
   });
@@ -8863,8 +9056,7 @@ function saveFeedback() {
       STATE.poConfirmations[poKey].confUpd = nowISO; // full ISO timestamp
       STATE.poConfirmations[poKey].confSource = 'schedule';
       anyConfirmed = true;
-      var us = poKey.indexOf('_');
-      if(us >= 0) confirmedItems.push(poKey.slice(us+1));
+      confirmedItems.push(poKey.split('_').pop()); // itemCode = segmen terakhir (valid utk key lama & baru)
     } else {
       STATE.poOverrides[poKey].confQty = '';
       STATE.poOverrides[poKey].confDate = '';
@@ -9597,12 +9789,10 @@ function renderDailyList() {
   var sDailyText = (document.getElementById('srch-daily')||{value:''}).value.toLowerCase();
   var entries = [];
   STATE.poData.forEach(function(p){
-    var key = _poKey(p);
-    var keyL2 = p.docNum + '_' + p.itemCode;
-    var ovr = STATE.poOverrides[key] || STATE.poOverrides[keyL2] || {};
+    var ovr = _poOvr(p);
     // List Kiriman Daily dikelompokkan berdasarkan TANGGAL KONFIRMASI (confDate),
     // bukan tanggal request kirim — karena ini adalah realisasi kiriman dari supplier.
-    var _cc = _poConfData(key) || _poConfData(keyL2);
+    var _cc = _poResolveConf(p);
     var confDateRaw = _cc.confDate || '';
     if(!confDateRaw) return; // belum ada konfirmasi supplier → tidak masuk list kiriman
     var _dtype = /^3/.test(p.itemCode||'') ? 'RM' : (/^4/.test(p.itemCode||'') ? 'PM' : (/^1/.test(p.itemCode||'') ? 'FG' : 'OTHER'));
@@ -9771,10 +9961,8 @@ function exportDailyListCSV() {
   function esc(v){var s=String(v===null||v===undefined?'':v);return s.includes(',')||s.includes('"')||s.includes('\n')?'"'+s.replace(/"/g,'""')+'"':s;}
   var entries = [];
   STATE.poData.forEach(function(p){
-    var key = _poKey(p);
-    var keyL2 = p.docNum + '_' + p.itemCode;
-    var ovr = STATE.poOverrides[key] || STATE.poOverrides[keyL2] || {};
-    var _cc = _poConfData(key) || _poConfData(keyL2);
+    var ovr = _poOvr(p);
+    var _cc = _poResolveConf(p);
     var confDateRaw = _cc.confDate || '';
     if(!confDateRaw) return;
     var isoDate = confDateRaw.includes('/') ? confDateRaw.split('/').reverse().join('-') : confDateRaw;
@@ -9865,30 +10053,62 @@ function _reduceConfQtyByGRPO() {
   });
 
   var changed = false;
+  var nowISO = new Date().toISOString();
   Object.keys(grpoQtyMap).forEach(function(key){
-    var ovr = STATE.poOverrides[key];
-    if(!ovr || !ovr.confQty) return;
-    var conf = parseFloat(ovr.confQty) || 0;
     var received = grpoQtyMap[key] || 0;
     if(received <= 0) return;
-
-    var newConf = Math.max(0, conf - received);
-    if(Math.abs(newConf - conf) < 0.01) return; // tidak ada perubahan signifikan
-
-    if(newConf <= 0) {
-      // Semua konfirmasi sudah terealisasi — clear confQty & confDate
-      delete ovr.confQty;
-      delete ovr.confDate;
-    } else {
-      ovr.confQty = newConf;
-    }
-    ovr.confUpdByGRPO = new Date().toISOString().split('T')[0];
-    changed = true;
+    // Resolve ke PO aktif (GRPO tidak bawa lineNum, jadi match docNum+itemCode).
+    // Bisa >1 line untuk docNum+item sama → kurangi berurutan (FIFO by lineNum).
+    var parts = key.split('_');
+    var gDoc = parts[0], gItem = parts.slice(1).join('_');
+    var linePOs = (STATE.poData||[]).filter(function(p){ return String(p.docNum)===gDoc && p.itemCode===gItem; })
+      .sort(function(a,b){ return (a.lineNum||0)-(b.lineNum||0); });
+    // Fallback: PO sudah hilang dari SAP (fully received) tapi konfirmasi masih nyangkut →
+    // pakai pseudo-PO dengan key lama supaya tetap bisa dibersihkan
+    if(!linePOs.length) linePOs = [{ docNum: gDoc, itemCode: gItem, lineNum: null }];
+    var remaining = received;
+    linePOs.forEach(function(po){
+      if(remaining <= 0.009) return;
+      var cc = _poResolveConf(po);
+      var conf = parseFloat(cc.confQty) || 0;
+      if(conf <= 0) return;
+      var reduce = Math.min(conf, remaining);
+      var newConf = Math.max(0, conf - reduce);
+      remaining -= reduce;
+      if(Math.abs(newConf - conf) < 0.01) return;
+      // Tulis hasil ke KEDUA store pada key kanonik + confUpd BARU — supaya
+      // _poResolveConf (timestamp terbaru menang) membaca hasil pengurangan ini,
+      // bukan nilai konfirmasi lama di store/key lain.
+      var wk = _poKey(po);
+      if(!STATE.poOverrides[wk]) STATE.poOverrides[wk] = {};
+      if(!STATE.poConfirmations) STATE.poConfirmations = {};
+      if(!STATE.poConfirmations[wk]) STATE.poConfirmations[wk] = {};
+      if(newConf <= 0) {
+        // Semua konfirmasi sudah terealisasi — clear confQty & confDate di kedua store
+        STATE.poOverrides[wk].confQty = '';
+        STATE.poOverrides[wk].confDate = '';
+        STATE.poOverrides[wk].confSource = '';
+        delete STATE.poConfirmations[wk].confQty;
+        delete STATE.poConfirmations[wk].confDate;
+        delete STATE.poConfirmations[wk].confSource;
+      } else {
+        STATE.poOverrides[wk].confQty = newConf;
+        STATE.poOverrides[wk].confDate = cc.confDate || '';
+        STATE.poConfirmations[wk].confQty = newConf;
+        STATE.poConfirmations[wk].confDate = cc.confDate || '';
+      }
+      STATE.poOverrides[wk].confUpd = nowISO;
+      STATE.poOverrides[wk].confUpdByGRPO = nowISO.split('T')[0];
+      STATE.poConfirmations[wk].confUpd = nowISO;
+      changed = true;
+    });
   });
 
   if(changed) {
     localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
     cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
+    localStorage.setItem('po_confirmations', JSON.stringify(STATE.poConfirmations));
+    cloudSave('po_confirmations', JSON.stringify(STATE.poConfirmations));
     console.log('[GRPO] confQty updated from GRPO data');
   }
 }
@@ -10234,7 +10454,10 @@ function _appInit() {
       var raw = JSON.parse(cachedPO);
       STATE.poData = _filterPOBlacklist(raw.map(function(p){
         // Support both compressed {d,i,n,...} and full {docNum,itemCode,...}
-        if(p.d !== undefined) return {docNum:p.d,itemCode:p.i,itemName:p.n,supplierName:p.s,openQty:p.q,uom:p.u,prReqDate:fmtSAPDate(p.r),site:p.t};
+        // PENTING: lineNum (l) HARUS ikut di-restore — kalau tidak, _poKey() jatuh ke
+        // format lama (docNum_itemCode) dan semua tgl request/konfirmasi yang tersimpan
+        // di key baru (docNum_lineNum_itemCode) tidak ketemu sampai user klik Refresh SAP.
+        if(p.d !== undefined) return {docNum:p.d,itemCode:p.i,itemName:p.n,supplierName:p.s,openQty:p.q,uom:p.u,prReqDate:fmtSAPDate(p.r),site:p.t,lineNum:(p.l!=null?parseInt(p.l):null)};
         return p;
       }));
     }
