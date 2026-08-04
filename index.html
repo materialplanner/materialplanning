@@ -3912,6 +3912,14 @@ function showPage(name, el) {
 // ─── Where Used ──────────────────────────────────────────────────────────────
 // Mode Where Used: 'rm' = cari RM/PM → tampilkan FG-nya; 'fg' = cari FG → tampilkan RM/PM-nya
 window._whereUsedMode = window._whereUsedMode || 'rm';
+
+// Aturan WIP: kode diawali '2' DAN nama item diawali 'WIP'.
+// bomRow opsional — dipakai supaya bisa baca fgDesc langsung dari baris BOM.
+function _wuIsWIP(code, name) {
+  if(!code || String(code).charAt(0) !== '2') return false;
+  var nm = (name || '').trim().toUpperCase();
+  return nm.indexOf('WIP') === 0;
+}
 function _whereUsedSetMode(mode) {
   window._whereUsedMode = mode;
   var bRm = document.getElementById('wu-mode-rm'), bFg = document.getElementById('wu-mode-fg');
@@ -3936,7 +3944,7 @@ function _wuGlobalRmUsage() {
   var usage = {}; // rmCode -> {fgSet:{}, count}
   (_bomData||[]).forEach(function(b){
     if(!b.rm || !b.fg) return;
-    if(b.fg.substring(0,2) !== '12') return; // hanya FG WIP
+    if(!_wuIsWIP(b.fg, b.fgDesc)) return; // hanya FG WIP (kode awalan '2' + nama 'WIP...')
     if(!usage[b.rm]) usage[b.rm] = {};
     usage[b.rm][b.fg] = true;
   });
@@ -3980,7 +3988,7 @@ function _whereUsedRender() {
     var matchedFG = {};
     queries.forEach(function(q){
       (_bomData||[]).forEach(function(b){
-        if(!b.fg || b.fg.substring(0,2) !== '12') return; // hanya WIP
+        if(!b.fg || !_wuIsWIP(b.fg, b.fgDesc)) return; // hanya WIP
         if(b.fg.toLowerCase().includes(q) || (fgNameOf(b.fg)||'').toLowerCase().includes(q) || (b.fgDesc||'').toLowerCase().includes(q)) {
           matchedFG[b.fg] = true;
         }
@@ -4033,7 +4041,7 @@ function _whereUsedRender() {
     var fgSeen = {}, fgList = [];
     bom.forEach(function(b) {
       if(b.rm !== rmCode || !b.fg || fgSeen[b.fg]) return;
-      if(b.fg.substring(0,2) !== '12') return; // HANYA FG WIP
+      if(!_wuIsWIP(b.fg, b.fgDesc)) return; // HANYA FG WIP
       fgSeen[b.fg] = true;
       fgList.push({ fgCode: b.fg, fgName: fgNameOf(b.fg) || b.fg });
     });
