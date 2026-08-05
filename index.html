@@ -3656,86 +3656,78 @@ function _parseCSV(text, headerRowHint) {
   return {headers:headers, rows:data, headerRowIdx:headerRowIdx};
 }
 
-// Parser BOM dari Google Sheets → struktur identik dengan hasil upload xlsx.
-// PENTING: kalkulasi MRP memakai b.qty (dari kolom "Qty per pcs", nilai kecil seperti
-// 0.000186392) dan b.type (harus persis "N"). JANGAN ambil qty dari kolom "Quantity"
-// (nilai besar) — itu bukan yang dipakai kalkulasi dan akan bikin hasil MRP salah total.
-function processBOMSheet(rows, headers) {
-  if(!rows || !rows.length) return [];
-  var keys = Object.keys(rows[0] || {});
-  function findKey(cands, opts) {
-    opts = opts || {};
-    for(var i=0;i<cands.length;i++){
-      var want = cands[i].toLowerCase().replace(/[^a-z0-9]/g,'');
-      for(var j=0;j<keys.length;j++){
-        if(keys[j].toLowerCase().replace(/[^a-z0-9]/g,'') === want) return keys[j];
-      }
-    }
-    if(opts.partial) {
-      for(var i2=0;i2<cands.length;i2++){
-        var w2 = cands[i2].toLowerCase().replace(/[^a-z0-9]/g,'');
-        for(var j2=0;j2<keys.length;j2++){
-          if(keys[j2].toLowerCase().replace(/[^a-z0-9]/g,'').indexOf(w2) >= 0) return keys[j2];
-        }
-      }
-    }
-    return null;
+// Parse BOM dari CSV MENTAH (string) → array baris by-index, IDENTIK dengan _bomUpload.
+// Ini menjamin perhitungan MRP dari GSheet sama persis dengan upload xlsx: pakai posisi
+// kolom (FG=0, Component=2) + cari 'Qty per pcs'/'BOM Type' by-name di header row.
+// Tidak dipengaruhi header duplikat karena baca array baris, bukan object.
+function _parseBomCSVByIndex(csvText) {
+  // Parse CSV → array of arrays (RFC 4180), pertahankan semua kolom termasuk duplikat
+  var allRows = []; var row = []; var cell = ''; var inQ = false;
+  for(var i=0;i<csvText.length;i++){
+    var c=csvText[i];
+    if(inQ){ if(c==='"'&&csvText[i+1]==='"'){ cell+='"'; i++; } else if(c==='"'){ inQ=false; } else { cell+=c; } }
+    else if(c==='"'){ inQ=true; }
+    else if(c===','){ row.push(cell); cell=''; }
+    else if(c==='\n'||c==='\r'){ row.push(cell); cell=''; allRows.push(row); row=[]; if(c==='\r'&&csvText[i+1]==='\n') i++; }
+    else { cell+=c; }
   }
-  var kFG      = findKey(['FG_Item','FGItem'], {partial:false}) || findKey(['FG','Item'], {partial:false});
-  var kFGDesc  = findKey(['FG_Item_Description','FGItemDescription','FGDescription'], {partial:true});
-  var kComp    = findKey(['Component_Item','ComponentItem','Component'], {partial:false}) || findKey(['RM','RMPM'], {partial:false});
-  var kCompDesc= findKey(['Component_Description','ComponentDescription','ComponentDesc'], {partial:true});
-  // Qty HARUS "Qty per pcs" — TIDAK boleh fallback ke "Quantity"/"Qty" (nilai besar, salah).
-  var kQtyPcs  = findKey(['Qty per pcs','QtyPerPcs','QtyPerPiece'], {partial:false});
-  var kType    = findKey(['BOM Type','BOMType'], {partial:false}) || findKey(['Type'], {partial:false});
-  var kDepth   = findKey(['Depth','Level'], {partial:false});
-  var kUom     = findKey(['UOM','UoM','Satuan','Unit'], {partial:false});
-  var kWhse    = findKey(['Whse','Warehouse','Gudang'], {partial:false});
+  if(cell||row.length){ row.push(cell); allRows.push(row); }
+  if(allRows.length < 2) return [];
 
-  // Validasi kolom wajib untuk kalkulasi MRP
-  var missing = [];
-  if(!kFG)     missing.push('FG_Item');
-  if(!kComp)   missing.push('Component_Item');
-  if(!kQtyPcs) missing.push('Qty per pcs');
-  if(!kType)   missing.push('BOM Type');
-  if(missing.length) {
-    toast('BOM GSheet kurang kolom wajib: ' + missing.join(', ') + '. Kalkulasi MRP butuh keempatnya.', 'err');
-    if(!kFG || !kComp) return []; // tanpa FG/Component sama sekali tidak bisa lanjut
+  // Cari header row: baris yang mengandung 'Qty per pcs' (sama seperti _bomUpload cari 'Item'+'Qty per pcs')
+  var norm = function(x){ return String(x||'').trim().toLowerCase(); };
+  var hdrIdx = -1;
+  for(var r0=0; r0<Math.min(allRows.length,10); r0++){
+    var rr = allRows[r0].map(norm);
+    if(rr.indexOf('qty per pcs') >= 0) { hdrIdx = r0; break; }
   }
+  if(hdrIdx < 0) return [];
+
+  var headers = allRows[hdrIdx].map(function(h){ return String(h).trim(); });
+  var headersL = headers.map(norm);
+  // Kolom BY-INDEX identik dengan _bomUpload:
+  var fgCol   = 0;                          // FG (kolom pertama)
+  var rmCol   = 2;                          // Component (kolom ketiga)
+  var qtyCol  = headersL.indexOf('qty per pcs');
+  var typeCol = headersL.indexOf('bom type');
+  var fgDescCol = 1;                        // FG Description (kolom kedua)
+  // rmDesc: kolom pertama mengandung 'desc' SETELAH rmCol
+  var rmDescCol = -1;
+  for(var d=rmCol+1; d<headers.length; d++){ if(/desc/i.test(headers[d])) { rmDescCol = d; break; } }
+  var uomCol   = headersL.findIndex(function(h){ return /^uom$/.test(h); });
+  var whseCol  = headersL.findIndex(function(h){ return /^whse$/.test(h); });
+  var depthCol = headersL.findIndex(function(h){ return /^depth$/.test(h); });
 
   var out = [];
-  rows.forEach(function(row){
-    var fg = String(row[kFG]||'').trim();
-    var rm = String(row[kComp]||'').trim();
-    if(!fg || !rm) return;
-    var fgDesc = kFGDesc ? String(row[kFGDesc]||'').trim() : '';
-    // qty dari "Qty per pcs" — bersihkan ribuan/desimal gaya ID (1.005 / 0,000186)
-    var qtyStr = kQtyPcs ? String(row[kQtyPcs]).trim() : '';
-    var qtyRaw = _parseNumID(qtyStr);
-    var depth  = kDepth ? (parseInt(row[kDepth]||0)||0) : 0;
+  for(var r=hdrIdx+1; r<allRows.length; r++){
+    var rrow = allRows[r];
+    var fg = String(rrow[fgCol]||'').trim();
+    var rm = String(rrow[rmCol]||'').trim();
+    if(!fg || !rm) continue;
+    var type = typeCol >= 0 ? String(rrow[typeCol]||'').trim() : '';
+    var qty  = qtyCol  >= 0 ? _parseNumID(rrow[qtyCol]) : NaN;   // parse angka (US atau ID)
+    var fgDesc = fgDescCol >= 0 ? String(rrow[fgDescCol]||'').trim() : '';
+    var depth  = depthCol  >= 0 ? (parseInt(rrow[depthCol]||0)||0) : 0;
+    // Package rule identik: FG desc mengandung 'Package' & depth 3-5 → qty 0
     var effQty = (fgDesc && /package/i.test(fgDesc) && (depth===3||depth===4||depth===5))
-                 ? 0 : (isNaN(qtyRaw) ? 0 : qtyRaw);
+                 ? 0 : (isNaN(qty) ? 0 : qty);
     out.push({
       fg:     fg,
       fgDesc: fgDesc,
       rm:     rm,
       qty:    effQty,
-      rawQty: isNaN(qtyRaw) ? 0 : qtyRaw,
-      type:   kType ? String(row[kType]||'').trim() : '',
+      rawQty: isNaN(qty) ? 0 : qty,
+      type:   type,
       depth:  depth,
-      rmDesc: kCompDesc ? String(row[kCompDesc]||'').trim() : '',
-      uom:    kUom ? String(row[kUom]||'').trim() : '',
-      whse:   kWhse ? String(row[kWhse]||'').trim() : ''
+      rmDesc: rmDescCol >= 0 ? String(rrow[rmDescCol]||'').trim() : '',
+      uom:    uomCol  >= 0 ? String(rrow[uomCol]||'').trim()  : '',
+      whse:   whseCol >= 0 ? String(rrow[whseCol]||'').trim()  : ''
     });
-  });
+  }
   return out;
 }
 
-// Parse angka format Indonesia/campuran: "1.005" → 1005? atau 1.005?
-// BOM "Qty per pcs" pakai koma desimal (0,000186392) & titik ribuan (1.005 = seribu lima).
-// Tapi nilai <1 seperti "0,000186392" → titik/koma harus dibaca sbagai desimal.
-// Aturan: kalau ada koma → koma = desimal, titik = ribuan. Kalau hanya titik & >1 digit
-// setelah titik terakhir tampak seperti desimal, biarkan JS parse. Ambil pendekatan aman:
+// Parse angka: format US (0.000186392) atau ID (0,000186392 / 1.005 ribuan+koma desimal)
 function _parseNumID(s) {
   if(s == null) return NaN;
   s = String(s).trim();
@@ -3864,13 +3856,14 @@ function loadSheetData(type) {
       toast('Pallet RM: '+cnt+' item ✓','ok');
 
     } else if(type==='bom_sheet'){
-      var bomRows = processBOMSheet(rows, headers);
-      if(!bomRows.length) throw new Error('Tidak ada baris BOM valid — cek kolom FG_Item & Component_Item');
+      // Parse dari CSV MENTAH (by-index), IDENTIK dengan _bomUpload — supaya perhitungan
+      // MRP persis sama. TIDAK pakai object `rows` (yang bisa rusak kalau ada header duplikat).
+      var bomRows = _parseBomCSVByIndex(text);
+      if(!bomRows.length) throw new Error('Tidak ada baris BOM valid — cek header (butuh baris berisi "Item" & "Qty per pcs") dan kolom FG/Component');
       _bomData = bomRows;
       _mrpIdbSaveBom(_bomData);              // simpan ke IndexedDB (sama seperti upload xlsx)
       localStorage.setItem('bom_sheet_upload_ts', ts);
       try { localStorage.setItem('bom_source', 'gsheet'); localStorage.setItem('bom_source_ts', ts); } catch(e){}
-      // Update status di halaman MPS→MRP + simpan status utk sync
       var bomStatusText = '✓ BOM tersimpan: ' + _bomData.length + ' baris (' + ts + ')';
       try { localStorage.setItem('bom_ui_status', bomStatusText); cloudSave('bom_ui_status', bomStatusText); } catch(e){}
       var bomStEl = document.getElementById('bom-status');
