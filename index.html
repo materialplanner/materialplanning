@@ -998,7 +998,7 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
         <button class="btn btn-sm btn-primary" onclick="loadSheetData('bom_sheet')" style="width:100%;margin-top:6px">Muat BOM</button>
         <div id="bom_sheet-info" style="margin-top:8px;font-size:11px;color:var(--muted)"></div>
         <div id="bom_sheet-ts" style="font-size:10px;color:var(--muted);margin-top:2px"></div>
-        <div style="margin-top:8px;font-size:10px;color:var(--muted);line-height:1.5"><b>Kolom wajib:</b> FG_Item, Component_Item, <b>Qty per pcs</b>, <b>BOM Type</b>. Opsional: FG_Item_Description, Component_Description, Depth, UoM, Whse.<br>⚠ Qty pakai kolom "Qty per pcs" (nilai kecil, mis. 0,000186), <u>bukan</u> "Quantity". Setelah dimuat, tersimpan lokal & langsung dipakai Where Used + kalkulasi/Export MPS/MRP.</div>
+        <div style="margin-top:8px;font-size:10px;color:var(--muted);line-height:1.5"><b>Samakan dengan file BOM xlsx</b> (baca per-posisi kolom). Urutan: <b>kolom 1</b>=FG, <b>kolom 2</b>=FG Desc, <b>kolom 3</b>=Component, kolom 4=Comp Desc. Header baris <u>wajib</u> memuat kolom bernama persis <b>"Qty per pcs"</b> dan <b>"BOM Type"</b> (dicari by-nama). Cara termudah: copy-paste isi file BOM xlsx apa adanya ke tab ini.</div>
       </div>
     </div>
 
@@ -3859,7 +3859,7 @@ function loadSheetData(type) {
       // Parse dari CSV MENTAH (by-index), IDENTIK dengan _bomUpload — supaya perhitungan
       // MRP persis sama. TIDAK pakai object `rows` (yang bisa rusak kalau ada header duplikat).
       var bomRows = _parseBomCSVByIndex(text);
-      if(!bomRows.length) throw new Error('Tidak ada baris BOM valid — cek header (butuh baris berisi "Item" & "Qty per pcs") dan kolom FG/Component');
+      if(!bomRows.length) throw new Error('Header BOM tidak ditemukan — pastikan ada baris header yang memuat kolom bernama persis "Qty per pcs" (dan sebaiknya "BOM Type"). Samakan dengan file BOM xlsx.');
       _bomData = bomRows;
       _mrpIdbSaveBom(_bomData);              // simpan ke IndexedDB (sama seperti upload xlsx)
       localStorage.setItem('bom_sheet_upload_ts', ts);
