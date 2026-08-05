@@ -1135,6 +1135,7 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
     </div>
     <div class="ph-r" style="flex-wrap:wrap;gap:6px;max-width:500px;justify-content:flex-end">
       <button class="btn btn-primary btn-sm" onclick="_mpsMrpCalculate()" id="btn-calc-mrp" style="font-size:11px" disabled>&#x26A1; Hitung MRP</button>
+      <button class="btn btn-sm" onclick="_mpsCompareShow()" id="btn-compare-mps" style="font-size:11px" title="Bandingkan MPS baru dengan MPS sebelumnya">&#x1F504; Bandingkan MPS</button>
       <span id="mrp-last-calc-label" style="font-size:11px;color:var(--muted);padding:0 4px"></span>
       <button class="btn btn-primary btn-sm" onclick="_mrpTerapkan()" id="btn-terapkan-mrp" style="font-size:11px" disabled>&#x2713; Terapkan MRP</button>
       <button class="btn btn-sm" onclick="_mpsMrpSaveToFirebase()" id="btn-save-mrp" style="font-size:11px" disabled>&#x2601; Simpan ke Firebase</button>
@@ -1202,6 +1203,20 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
   </div>
   <!-- Result summary -->
   <div id="mrp-result"></div>
+
+  <!-- Modal hasil Bandingkan MPS -->
+  <div id="mps-compare-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:900;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto">
+    <div style="background:var(--bg2);border-radius:12px;max-width:1100px;width:100%;box-shadow:0 8px 40px rgba(0,0,0,.3);margin:auto">
+      <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:var(--bg2);border-radius:12px 12px 0 0">
+        <div style="font-weight:700;font-size:15px">🔄 Perbandingan MPS</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="btn btn-sm" onclick="_mpsCompareExport()" id="btn-compare-export" style="font-size:11px">↓ Export Excel</button>
+          <button onclick="document.getElementById('mps-compare-overlay').style.display='none'" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">✕</button>
+        </div>
+      </div>
+      <div id="mps-compare-body" style="padding:16px 18px"></div>
+    </div>
+  </div>
 
 </div>
 </div>
@@ -13801,6 +13816,20 @@ function _mpsUpload(input) {
       // Also find description column
       var descCol = headers.findIndex(function(h){ return /^(item\s*desc|description|deskripsi)/i.test(h); });
 
+      // Snapshot MPS LAMA sebelum ditimpa — untuk fitur "Bandingkan dengan MPS sebelumnya".
+      // Simpan salinan data + bulan aktif + tanggal, di localStorage biar bertahan antar sesi.
+      if(_mpsData && Object.keys(_mpsData).length) {
+        try {
+          var _prevSnap = {
+            data: _mpsData,
+            months: (_mpsActiveMonths||[]).slice(),
+            fgDesc: _fgDescFromMps || {},
+            ts: new Date().toISOString()
+          };
+          localStorage.setItem('mps_prev_snapshot', JSON.stringify(_prevSnap));
+        } catch(e) { console.warn('Gagal simpan snapshot MPS lama:', e); }
+      }
+
       _mpsData = {};
       _fgDescFromMps = {};
       var count = 0;
@@ -13917,6 +13946,155 @@ function _mrpCheckReady() {
 }
 
 // ── Calculate MRP ─────────────────────────────────────────────────────────────
+// ─── BANDINGKAN MPS: analisis perubahan MPS baru vs snapshot MPS sebelumnya ──
+// Menampilkan per bulan: FG yang MPS-nya naik/turun, dan RM/PM yang kebutuhannya
+// (MPS × BOM) ikut berubah. Snapshot lama disimpan otomatis tiap upload MPS baru.
+function _mpsComputeDiff() {
+  var snapRaw = localStorage.getItem('mps_prev_snapshot');
+  if(!snapRaw) return { error: 'Belum ada MPS sebelumnya untuk dibandingkan. Snapshot dibuat otomatis mulai upload MPS berikutnya.' };
+  if(!_mpsData || !Object.keys(_mpsData).length) return { error: 'MPS baru belum dimuat.' };
+  var snap;
+  try { snap = JSON.parse(snapRaw); } catch(e){ return { error: 'Snapshot MPS lama rusak.' }; }
+  var oldMps = snap.data || {};
+  var oldDesc = snap.fgDesc || {};
+  var newMps = _mpsData;
+  var newDesc = _fgDescFromMps || {};
+
+  // Bulan yang dibandingkan = union bulan aktif lama & baru
+  var months = {};
+  (snap.months||[]).forEach(function(m){ months[m]=1; });
+  (_mpsActiveMonths||[]).forEach(function(m){ months[m]=1; });
+  var monthList = MRP_MONTHS.filter(function(m){ return months[m]; });
+
+  var descOf = function(code){ return newDesc[code] || oldDesc[code] || (STATE.masterData[code]&&STATE.masterData[code].desc) || ''; };
+
+  // ── FG diff ──
+  var fgCodes = {};
+  Object.keys(oldMps).forEach(function(c){ fgCodes[c]=1; });
+  Object.keys(newMps).forEach(function(c){ fgCodes[c]=1; });
+  var fgRows = [];
+  Object.keys(fgCodes).forEach(function(code){
+    var byMonth = {}, anyChange = false;
+    monthList.forEach(function(m){
+      var o = (oldMps[code]&&oldMps[code][m]) || 0;
+      var n = (newMps[code]&&newMps[code][m]) || 0;
+      var d = n - o;
+      byMonth[m] = { old:o, new:n, diff:d };
+      if(Math.abs(d) > 0.0001) anyChange = true;
+    });
+    if(anyChange) fgRows.push({ code:code, name:descOf(code), byMonth:byMonth });
+  });
+
+  // ── RM/PM diff (MPS × BOM, hanya baris type N & rm 3xxx/4xxx) ──
+  function rmNeed(mpsSrc){
+    var res = {}; // rm -> { month: qty }
+    (_bomData||[]).forEach(function(b){
+      if(!b || b.type !== 'N' || !/^[34]/.test(b.rm||'')) return;
+      var mps = mpsSrc[b.fg]; if(!mps) return;
+      if(!res[b.rm]) res[b.rm] = {};
+      monthList.forEach(function(m){ res[b.rm][m] = (res[b.rm][m]||0) + (mps[m]||0) * b.qty; });
+    });
+    return res;
+  }
+  var rmRows = [];
+  if(_bomData && _bomData.length) {
+    var oldNeed = rmNeed(oldMps), newNeed = rmNeed(newMps);
+    var rmCodes = {};
+    Object.keys(oldNeed).forEach(function(c){ rmCodes[c]=1; });
+    Object.keys(newNeed).forEach(function(c){ rmCodes[c]=1; });
+    Object.keys(rmCodes).forEach(function(code){
+      var byMonth = {}, anyChange = false;
+      monthList.forEach(function(m){
+        var o = (oldNeed[code]&&oldNeed[code][m]) || 0;
+        var n = (newNeed[code]&&newNeed[code][m]) || 0;
+        var d = n - o;
+        byMonth[m] = { old:o, new:n, diff:d };
+        if(Math.abs(d) > 0.0001) anyChange = true;
+      });
+      if(anyChange) rmRows.push({ code:code, name:descOf(code), byMonth:byMonth });
+    });
+  }
+
+  // Sort by magnitude of total change (terbesar dulu)
+  var totalAbs = function(r){ return monthList.reduce(function(s,m){ return s+Math.abs(r.byMonth[m].diff); },0); };
+  fgRows.sort(function(a,b){ return totalAbs(b)-totalAbs(a); });
+  rmRows.sort(function(a,b){ return totalAbs(b)-totalAbs(a); });
+
+  return { months: monthList, fgRows: fgRows, rmRows: rmRows, oldTs: snap.ts, bomAvailable: !!(_bomData&&_bomData.length) };
+}
+
+function _mpsCompareShow() {
+  var d = _mpsComputeDiff();
+  var body = document.getElementById('mps-compare-body');
+  var overlay = document.getElementById('mps-compare-overlay');
+  if(!body || !overlay) return;
+  if(d.error) {
+    body.innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted)">'+d.error+'</div>';
+    overlay.style.display = 'flex';
+    return;
+  }
+  window._mpsCompareData = d; // untuk export
+  var oldDate = d.oldTs ? new Date(d.oldTs).toLocaleString('id-ID') : '-';
+  var fmt = function(v){ return v==null?'':(Math.round(v*100)/100).toLocaleString('id-ID'); };
+  var arrow = function(diff){
+    if(diff > 0.0001) return '<span style="color:#c00;font-weight:600">▲ '+fmt(diff)+'</span>';
+    if(diff < -0.0001) return '<span style="color:#1d9e75;font-weight:600">▼ '+fmt(Math.abs(diff))+'</span>';
+    return '<span style="color:var(--muted)">–</span>';
+  };
+  var mHdr = d.months.map(function(m){ return '<th style="padding:6px 8px;text-align:right;font-size:10px;background:var(--bg3)">'+m+'</th>'; }).join('');
+
+  function tbl(rows, label){
+    if(!rows.length) return '<div style="color:var(--muted);font-size:12px;padding:8px">Tidak ada perubahan '+label+'.</div>';
+    var h = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11.5px">'
+      + '<thead><tr><th style="padding:6px 8px;text-align:left;background:var(--bg3)">Kode</th><th style="padding:6px 8px;text-align:left;background:var(--bg3)">Nama</th>'+mHdr+'</tr></thead><tbody>';
+    rows.forEach(function(r, i){
+      h += '<tr style="border-bottom:.5px solid var(--border);'+(i%2?'background:var(--bg3)':'')+'">'
+        + '<td style="padding:6px 8px;font-family:var(--mono);white-space:nowrap;color:var(--teal)">'+r.code+'</td>'
+        + '<td style="padding:6px 8px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+r.name+'</td>';
+      d.months.forEach(function(m){
+        var c = r.byMonth[m];
+        h += '<td style="padding:6px 8px;text-align:right;white-space:nowrap" title="'+fmt(c.old)+' → '+fmt(c.new)+'">'+arrow(c.diff)+'</td>';
+      });
+      h += '</tr>';
+    });
+    return h + '</tbody></table></div>';
+  }
+
+  body.innerHTML =
+      '<div style="font-size:11px;color:var(--muted);margin-bottom:14px">Membandingkan MPS baru dengan MPS sebelumnya (disimpan: '+oldDate+'). ▲ merah = naik, ▼ hijau = turun. Hover angka untuk lihat nilai lama → baru.</div>'
+    + '<div style="font-weight:700;font-size:13px;margin:6px 0 8px">📦 Perubahan FG (MPS) — '+d.fgRows.length+' item</div>'
+    + tbl(d.fgRows, 'FG')
+    + '<div style="font-weight:700;font-size:13px;margin:20px 0 8px">🧪 Dampak ke RM/PM (MPS × BOM) — '+(d.bomAvailable ? d.rmRows.length+' item' : 'BOM belum dimuat')+'</div>'
+    + (d.bomAvailable ? tbl(d.rmRows, 'RM/PM') : '<div style="color:var(--amber);font-size:12px;padding:8px">⚠ Muat BOM dulu untuk melihat dampak ke kebutuhan RM/PM.</div>');
+  overlay.style.display = 'flex';
+}
+
+function _mpsCompareExport() {
+  var d = window._mpsCompareData;
+  if(!d) { toast('Belum ada data perbandingan','err'); return; }
+  if(typeof XLSX === 'undefined') { toast('SheetJS belum siap','err'); return; }
+  var wb = XLSX.utils.book_new();
+  var round2 = function(v){ return Math.round(v*100)/100; };
+  function sheetFrom(rows, title){
+    var head = ['Kode','Nama'];
+    d.months.forEach(function(m){ head.push(m+' Lama', m+' Baru', m+' Selisih'); });
+    var aoa = [head];
+    rows.forEach(function(r){
+      var line = [r.code, r.name];
+      d.months.forEach(function(m){ var c=r.byMonth[m]; line.push(round2(c.old), round2(c.new), round2(c.diff)); });
+      aoa.push(line);
+    });
+    var ws = XLSX.utils.aoa_to_sheet(aoa);
+    XLSX.utils.book_append_sheet(wb, ws, title);
+  }
+  sheetFrom(d.fgRows, 'Perubahan FG');
+  if(d.bomAvailable) sheetFrom(d.rmRows, 'Dampak RM-PM');
+  var _oldD = d.oldTs ? new Date(d.oldTs).toISOString().slice(0,10) : 'lama';
+  var _newD = new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb, 'perbandingan_mps_'+_oldD+'_ke_'+_newD+'.xlsx');
+  toast('Perbandingan MPS di-export ✓','ok');
+}
+
 function _mpsMrpCalculate() {
   if(!_mpsData || !_bomData) { toast('Upload MPS dan BOM terlebih dahulu','err'); return; }
 
