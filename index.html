@@ -14001,11 +14001,11 @@ function _mpsComputeDiff() {
   var newMps = _mpsData;
   var newDesc = _fgDescFromMps || {};
 
-  // Bulan yang dibandingkan = HANYA bulan aktif di MPS BARU (mulai bulan berjalan sesuai
-  // plan awal MPS terakhir). Bulan yang cuma ada di MPS lama tidak ditampilkan.
+  // Bulan yang dibandingkan = bulan aktif MPS BARU, urutan KRONOLOGIS (sudah di-sort saat
+  // upload). Pakai langsung — jangan MRP_MONTHS.filter yang balik ke urutan kalender.
   var monthList = (_mpsActiveMonths && _mpsActiveMonths.length)
-    ? MRP_MONTHS.filter(function(m){ return _mpsActiveMonths.indexOf(m) >= 0; })
-    : MRP_MONTHS.slice();
+    ? _mpsActiveMonths.slice()
+    : ['Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
   var descOf = function(code){ return newDesc[code] || oldDesc[code] || (STATE.masterData[code]&&STATE.masterData[code].desc) || ''; };
 
@@ -14239,29 +14239,31 @@ function _mrpShowResult() {
     + _mrpKpi('Packaging', pmCount, 'item PM (4xxx)')
     + '</div>';
 
-  // Table preview: top 20 by Apr requirement
-  var sorted = rmCodes.slice().sort(function(a,b){ return (_mrpResult[b]['Apr']||0) - (_mrpResult[a]['Apr']||0); });
+  // Table preview: top 20 by requirement bulan pertama aktif (kronologis)
+  var _sortMon = (_mpsActiveMonths && _mpsActiveMonths.length) ? _mpsActiveMonths[0] : 'Apr';
+  var sorted = rmCodes.slice().sort(function(a,b){ return (_mrpResult[b][_sortMon]||0) - (_mrpResult[a][_sortMon]||0); });
   var master    = STATE.masterData || {};
   var mrpMaster  = STATE.mrpData    || {};
   var matcom     = STATE.matcomData  || {};
-  // Detect active months from actual result data — most reliable source
-  var showMonths = MRP_MONTHS.filter(function(m) {
-    return rmCodes.some(function(c){ return ((_mrpResult[c]||{})[m]||0) > 0; });
-  });
-  if(!showMonths.length) showMonths = _mpsActiveMonths.length ? _mpsActiveMonths : MRP_MONTHS;
   var mrpMaster  = STATE.mrpData    || {};
   var matcom     = STATE.matcomData  || {};
+  // Urutan kolom = _mpsActiveMonths (KRONOLOGIS, mulai bulan sekarang maju ke depan,
+  // bisa lintas tahun). JANGAN pakai MRP_MONTHS (urutan kalender Jan-Des) — itu bikin
+  // Jan/Feb tahun depan nongol di depan. Saring hanya bulan yang benar-benar ada nilainya,
+  // TAPI pertahankan urutan kronologisnya.
+  var baseMonths = (_mpsActiveMonths && _mpsActiveMonths.length) ? _mpsActiveMonths : MRP_MONTHS;
+  var showMonths = baseMonths.filter(function(m) {
+    return rmCodes.some(function(c){ return ((_mrpResult[c]||{})[m]||0) > 0; });
+  });
+  if(!showMonths.length) showMonths = baseMonths;
 
-  var activeMonths = showMonths.length ? showMonths : (_mpsActiveMonths || MRP_MONTHS);
+  var activeMonths = showMonths;
   html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
     + '<thead><tr style="border-bottom:2px solid var(--border2)">'
     + '<th style="text-align:left;padding:8px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)">Item Code</th>'
     + '<th style="text-align:left;padding:8px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)">Deskripsi</th>'
     + activeMonths.map(function(m){ return '<th style="text-align:right;padding:8px;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)">'+m+'</th>'; }).join('')
     + '</tr></thead><tbody>';
-
-  // Sync _mpsActiveMonths with what's actually in the result
-  if(showMonths.length) _mpsActiveMonths = showMonths;
 
   sorted.forEach(function(code, i) {
     var m = master[code] || mrpMaster[code] || {};
