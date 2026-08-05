@@ -998,7 +998,7 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
         <button class="btn btn-sm btn-primary" onclick="loadSheetData('bom_sheet')" style="width:100%;margin-top:6px">Muat BOM</button>
         <div id="bom_sheet-info" style="margin-top:8px;font-size:11px;color:var(--muted)"></div>
         <div id="bom_sheet-ts" style="font-size:10px;color:var(--muted);margin-top:2px"></div>
-        <div style="margin-top:8px;font-size:10px;color:var(--muted);line-height:1.5">Kolom: <b>FG_Item</b>, <b>FG_Item_Description</b>, <b>Component_Item</b>, <b>Component_Description</b> (opsional: Qty per pcs, BOM Type, Depth, UOM). Setelah dimuat, tersimpan lokal (IndexedDB) & langsung dipakai Where Used + Export MPS/MRP di laptop ini.</div>
+        <div style="margin-top:8px;font-size:10px;color:var(--muted);line-height:1.5"><b>Kolom wajib:</b> FG_Item, Component_Item, <b>Qty per pcs</b>, <b>BOM Type</b>. Opsional: FG_Item_Description, Component_Description, Depth, UoM, Whse.<br>⚠ Qty pakai kolom "Qty per pcs" (nilai kecil, mis. 0,000186), <u>bukan</u> "Quantity". Setelah dimuat, tersimpan lokal & langsung dipakai Where Used + kalkulasi/Export MPS/MRP.</div>
       </div>
     </div>
 
@@ -3657,37 +3657,51 @@ function _parseCSV(text, headerRowHint) {
 }
 
 // Parser BOM dari Google Sheets → struktur identik dengan hasil upload xlsx.
-// Toleran terhadap variasi nama header (FG_Item / Item / FG, dst).
+// PENTING: kalkulasi MRP memakai b.qty (dari kolom "Qty per pcs", nilai kecil seperti
+// 0.000186392) dan b.type (harus persis "N"). JANGAN ambil qty dari kolom "Quantity"
+// (nilai besar) — itu bukan yang dipakai kalkulasi dan akan bikin hasil MRP salah total.
 function processBOMSheet(rows, headers) {
   if(!rows || !rows.length) return [];
-  // Cari nama kolom dengan pencocokan longgar
   var keys = Object.keys(rows[0] || {});
-  function findKey(cands) {
+  function findKey(cands, opts) {
+    opts = opts || {};
     for(var i=0;i<cands.length;i++){
       var want = cands[i].toLowerCase().replace(/[^a-z0-9]/g,'');
       for(var j=0;j<keys.length;j++){
         if(keys[j].toLowerCase().replace(/[^a-z0-9]/g,'') === want) return keys[j];
       }
     }
-    // partial contains
-    for(var i2=0;i2<cands.length;i2++){
-      var w2 = cands[i2].toLowerCase().replace(/[^a-z0-9]/g,'');
-      for(var j2=0;j2<keys.length;j2++){
-        if(keys[j2].toLowerCase().replace(/[^a-z0-9]/g,'').indexOf(w2) >= 0) return keys[j2];
+    if(opts.partial) {
+      for(var i2=0;i2<cands.length;i2++){
+        var w2 = cands[i2].toLowerCase().replace(/[^a-z0-9]/g,'');
+        for(var j2=0;j2<keys.length;j2++){
+          if(keys[j2].toLowerCase().replace(/[^a-z0-9]/g,'').indexOf(w2) >= 0) return keys[j2];
+        }
       }
     }
     return null;
   }
-  var kFG      = findKey(['FG_Item','FGItem','FG','Item']);
-  var kFGDesc  = findKey(['FG_Item_Description','FGItemDescription','FGDescription','Item Description']);
-  var kComp    = findKey(['Component_Item','ComponentItem','Component','Item.1','RM','RMPM']);
-  var kCompDesc= findKey(['Component_Description','ComponentDescription','Component Desc']);
-  var kQty     = findKey(['Qty per pcs','QtyPerPcs','Qty','Quantity']);
-  var kType    = findKey(['BOM Type','BOMType','Type']);
-  var kDepth   = findKey(['Depth','Level']);
-  var kUom     = findKey(['UOM','Satuan','Unit']);
-  var kWhse    = findKey(['Whse','Warehouse','Gudang']);
-  if(!kFG || !kComp) return []; // minimal wajib
+  var kFG      = findKey(['FG_Item','FGItem'], {partial:false}) || findKey(['FG','Item'], {partial:false});
+  var kFGDesc  = findKey(['FG_Item_Description','FGItemDescription','FGDescription'], {partial:true});
+  var kComp    = findKey(['Component_Item','ComponentItem','Component'], {partial:false}) || findKey(['RM','RMPM'], {partial:false});
+  var kCompDesc= findKey(['Component_Description','ComponentDescription','ComponentDesc'], {partial:true});
+  // Qty HARUS "Qty per pcs" — TIDAK boleh fallback ke "Quantity"/"Qty" (nilai besar, salah).
+  var kQtyPcs  = findKey(['Qty per pcs','QtyPerPcs','QtyPerPiece'], {partial:false});
+  var kType    = findKey(['BOM Type','BOMType'], {partial:false}) || findKey(['Type'], {partial:false});
+  var kDepth   = findKey(['Depth','Level'], {partial:false});
+  var kUom     = findKey(['UOM','UoM','Satuan','Unit'], {partial:false});
+  var kWhse    = findKey(['Whse','Warehouse','Gudang'], {partial:false});
+
+  // Validasi kolom wajib untuk kalkulasi MRP
+  var missing = [];
+  if(!kFG)     missing.push('FG_Item');
+  if(!kComp)   missing.push('Component_Item');
+  if(!kQtyPcs) missing.push('Qty per pcs');
+  if(!kType)   missing.push('BOM Type');
+  if(missing.length) {
+    toast('BOM GSheet kurang kolom wajib: ' + missing.join(', ') + '. Kalkulasi MRP butuh keempatnya.', 'err');
+    if(!kFG || !kComp) return []; // tanpa FG/Component sama sekali tidak bisa lanjut
+  }
 
   var out = [];
   rows.forEach(function(row){
@@ -3695,9 +3709,10 @@ function processBOMSheet(rows, headers) {
     var rm = String(row[kComp]||'').trim();
     if(!fg || !rm) return;
     var fgDesc = kFGDesc ? String(row[kFGDesc]||'').trim() : '';
-    var qtyRaw = kQty ? parseFloat(String(row[kQty]).replace(/,/g,'')) : NaN;
+    // qty dari "Qty per pcs" — bersihkan ribuan/desimal gaya ID (1.005 / 0,000186)
+    var qtyStr = kQtyPcs ? String(row[kQtyPcs]).trim() : '';
+    var qtyRaw = _parseNumID(qtyStr);
     var depth  = kDepth ? (parseInt(row[kDepth]||0)||0) : 0;
-    // Package rule: FG desc mengandung "Package" & depth 3-5 → qty 0 (sama seperti upload xlsx)
     var effQty = (fgDesc && /package/i.test(fgDesc) && (depth===3||depth===4||depth===5))
                  ? 0 : (isNaN(qtyRaw) ? 0 : qtyRaw);
     out.push({
@@ -3714,6 +3729,24 @@ function processBOMSheet(rows, headers) {
     });
   });
   return out;
+}
+
+// Parse angka format Indonesia/campuran: "1.005" → 1005? atau 1.005?
+// BOM "Qty per pcs" pakai koma desimal (0,000186392) & titik ribuan (1.005 = seribu lima).
+// Tapi nilai <1 seperti "0,000186392" → titik/koma harus dibaca sbagai desimal.
+// Aturan: kalau ada koma → koma = desimal, titik = ribuan. Kalau hanya titik & >1 digit
+// setelah titik terakhir tampak seperti desimal, biarkan JS parse. Ambil pendekatan aman:
+function _parseNumID(s) {
+  if(s == null) return NaN;
+  s = String(s).trim();
+  if(s === '') return NaN;
+  if(s.indexOf(',') >= 0) {
+    // Format ID: titik = ribuan, koma = desimal
+    s = s.replace(/\./g,'').replace(',', '.');
+  }
+  // else: sudah format desimal titik (0.000186392) atau bilangan bulat
+  var n = parseFloat(s);
+  return isNaN(n) ? NaN : n;
 }
 
 function saveSheetUrl(type) {
