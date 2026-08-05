@@ -13960,11 +13960,11 @@ function _mpsComputeDiff() {
   var newMps = _mpsData;
   var newDesc = _fgDescFromMps || {};
 
-  // Bulan yang dibandingkan = union bulan aktif lama & baru
-  var months = {};
-  (snap.months||[]).forEach(function(m){ months[m]=1; });
-  (_mpsActiveMonths||[]).forEach(function(m){ months[m]=1; });
-  var monthList = MRP_MONTHS.filter(function(m){ return months[m]; });
+  // Bulan yang dibandingkan = HANYA bulan aktif di MPS BARU (mulai bulan berjalan sesuai
+  // plan awal MPS terakhir). Bulan yang cuma ada di MPS lama tidak ditampilkan.
+  var monthList = (_mpsActiveMonths && _mpsActiveMonths.length)
+    ? MRP_MONTHS.filter(function(m){ return _mpsActiveMonths.indexOf(m) >= 0; })
+    : MRP_MONTHS.slice();
 
   var descOf = function(code){ return newDesc[code] || oldDesc[code] || (STATE.masterData[code]&&STATE.masterData[code].desc) || ''; };
 
