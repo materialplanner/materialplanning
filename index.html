@@ -371,7 +371,7 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
   <div class="ni" data-label="Performance" onclick="showPage('performance',this)"><span class="ni-ico">📊</span><span class="nav-label">Performance </span><span style="font-size:9px;background:#f59e0b;color:#fff;padding:1px 5px;border-radius:3px;margin-left:4px;font-weight:600">On Develop</span></div>
   <div class="nav-divider"></div>
   <div class="nav-section">Data</div>
-  <div class="ni" data-label="Where Used" onclick="showPage('where-used',this)"><span class="ni-ico">🔍</span><span class="nav-label">Where Used</span></div>
+  <div class="ni" data-label="Where Used" onclick="showPage('where-used',this)"><span class="ni-ico">🔍</span><span class="nav-label">Where Used</span><span id="lock-where-used" style="font-size:10px">🔒</span></div>
   <div class="ni" data-label="GRPO" onclick="showPage('grpo',this)"><span class="ni-ico">✅</span><span class="nav-label">GRPO</span></div>
     <div class="ni" data-label="OSPR" onclick="showPage('ospr',this)"><span class="ni-ico">📝</span><span class="nav-label">OSPR</span></div>
   <div class="ni" data-label="Stock Daily" onclick="showPage('stock-daily',this)"><span class="ni-ico">📅</span><span class="nav-label">Stock Daily</span></div>
@@ -725,6 +725,7 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
     <div>
       <h2>Where Used</h2>
       <p>Cari RM/PM digunakan di FG mana saja (dari data BOM)</p>
+      <div id="wu-bom-source" style="font-size:11px;color:var(--muted);margin-top:2px"></div>
     </div>
     <button class="btn btn-sm" onclick="_whereUsedExport()" style="font-size:11px">↓ Export Excel</button>
   </div>
@@ -990,13 +991,14 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
     </div>
 
     <div class="card">
-      <div class="card-hdr"><span class="card-title">🛢 Pallet RM</span><span id="pallet_rm-status" class="dot off"></span></div>
+      <div class="card-hdr"><span class="card-title">🔧 BOM</span><span id="bom_sheet-status" class="dot off"></span></div>
       <div style="padding:14px">
-        <div class="fg"><label style="font-size:11px">Google Sheets URL</label><input id="pallet_rm-url" placeholder="https://docs.google.com/spreadsheets/d/..." style="width:100%;font-size:11px"></div>
-        <div class="fg"><label style="font-size:11px">Nama Tab</label><input id="pallet_rm-sheet" placeholder="Pallet RM" style="width:100%;font-size:11px"></div>
-        <button class="btn btn-sm btn-primary" onclick="loadSheetData('pallet_rm')" style="width:100%;margin-top:6px">Muat Pallet RM</button>
-        <div id="pallet_rm-info" style="margin-top:8px;font-size:11px;color:var(--muted)"></div>
-        <div id="pallet_rm-ts" style="font-size:10px;color:var(--muted);margin-top:2px"></div>
+        <div class="fg"><label style="font-size:11px">Google Sheets URL</label><input id="bom_sheet-url" placeholder="https://docs.google.com/spreadsheets/d/..." style="width:100%;font-size:11px"></div>
+        <div class="fg"><label style="font-size:11px">Nama Tab</label><input id="bom_sheet-sheet" placeholder="BOM" style="width:100%;font-size:11px"></div>
+        <button class="btn btn-sm btn-primary" onclick="loadSheetData('bom_sheet')" style="width:100%;margin-top:6px">Muat BOM</button>
+        <div id="bom_sheet-info" style="margin-top:8px;font-size:11px;color:var(--muted)"></div>
+        <div id="bom_sheet-ts" style="font-size:10px;color:var(--muted);margin-top:2px"></div>
+        <div style="margin-top:8px;font-size:10px;color:var(--muted);line-height:1.5">Kolom: <b>FG_Item</b>, <b>FG_Item_Description</b>, <b>Component_Item</b>, <b>Component_Description</b> (opsional: Qty per pcs, BOM Type, Depth, UOM). Setelah dimuat, tersimpan lokal (IndexedDB) & langsung dipakai Where Used + Export MPS/MRP di laptop ini.</div>
       </div>
     </div>
 
@@ -2958,16 +2960,19 @@ function _updateLoginUI() {
   var lbl = document.getElementById('login-label');
   var lockS = document.getElementById('lock-settings');
   var lockU = document.getElementById('lock-upload');
+  var lockW = document.getElementById('lock-where-used');
   if(_isAdmin) {
     if(ico) ico.textContent = '🔓';
     if(lbl) lbl.textContent = 'Logout';
     if(lockS) lockS.textContent = '';
     if(lockU) lockU.textContent = '';
+    if(lockW) lockW.textContent = '';
   } else {
     if(ico) ico.textContent = '🔒';
     if(lbl) lbl.textContent = 'Login';
     if(lockS) lockS.textContent = '🔒';
     if(lockU) lockU.textContent = '🔒';
+    if(lockW) lockW.textContent = '🔒';
   }
   // Sembunyikan kolom Real Name dari col menu kalau tidak login
   var colMenuRealname = document.getElementById('col-menu-realname');
@@ -3014,8 +3019,8 @@ var CLOUD_KEYS = [
   'schedule','po_overrides','proj_comments','stock_history',
   // proj_history: disimpan lokal saja (14 snapshot terlalu besar untuk Firebase 1MB limit)
   'suppliers','proj_hidden_cols','proj_snapshots',
-  'sheet_url_master','sheet_url_mrp','sheet_url_realname','sheet_url_pallet_pm','sheet_url_pallet_rm',
-  'sheet_tab_master','sheet_tab_mrp','sheet_tab_realname','sheet_tab_pallet_pm','sheet_tab_pallet_rm',
+  'sheet_url_master','sheet_url_mrp','sheet_url_realname','sheet_url_pallet_pm','sheet_url_pallet_rm','sheet_url_bom_sheet',
+  'sheet_tab_master','sheet_tab_mrp','sheet_tab_realname','sheet_tab_pallet_pm','sheet_tab_pallet_rm','sheet_tab_bom_sheet',
   'sap_url','sap_user','sap_pass','fonnte','wn','workdays','last_sync','proj_highlighted',
   'sap_cache_stock','sap_cache_po','sap_cache_grpo','sap_cache_ospr',
   'admin_user','admin_pass',
@@ -3584,6 +3589,9 @@ function appStart() {
     console.log('[boot] cloudLoad done. Keys:', Object.keys(data||{}).length, '| last_sync:', (data||{}).last_sync||'(none)');
     afterLoad(data);
     setTimeout(cloudStartRealtime, 500);
+    // URL BOM Sheet mungkin baru ke-restore dari Firebase di sini — coba auto-load BOM
+    // (guard _bomAutoLoadDone + cek _bomData kosong ada di dalam fungsinya)
+    setTimeout(function(){ if(typeof _autoLoadBomFromSheet === 'function') _autoLoadBomFromSheet(); }, 1200);
   }); }
   else { setTimeout(function(){ afterLoad({}); setTimeout(cloudStartRealtime, 500); }, 50); }
 }
@@ -3646,6 +3654,66 @@ function _parseCSV(text, headerRowHint) {
       return obj;
     });
   return {headers:headers, rows:data, headerRowIdx:headerRowIdx};
+}
+
+// Parser BOM dari Google Sheets → struktur identik dengan hasil upload xlsx.
+// Toleran terhadap variasi nama header (FG_Item / Item / FG, dst).
+function processBOMSheet(rows, headers) {
+  if(!rows || !rows.length) return [];
+  // Cari nama kolom dengan pencocokan longgar
+  var keys = Object.keys(rows[0] || {});
+  function findKey(cands) {
+    for(var i=0;i<cands.length;i++){
+      var want = cands[i].toLowerCase().replace(/[^a-z0-9]/g,'');
+      for(var j=0;j<keys.length;j++){
+        if(keys[j].toLowerCase().replace(/[^a-z0-9]/g,'') === want) return keys[j];
+      }
+    }
+    // partial contains
+    for(var i2=0;i2<cands.length;i2++){
+      var w2 = cands[i2].toLowerCase().replace(/[^a-z0-9]/g,'');
+      for(var j2=0;j2<keys.length;j2++){
+        if(keys[j2].toLowerCase().replace(/[^a-z0-9]/g,'').indexOf(w2) >= 0) return keys[j2];
+      }
+    }
+    return null;
+  }
+  var kFG      = findKey(['FG_Item','FGItem','FG','Item']);
+  var kFGDesc  = findKey(['FG_Item_Description','FGItemDescription','FGDescription','Item Description']);
+  var kComp    = findKey(['Component_Item','ComponentItem','Component','Item.1','RM','RMPM']);
+  var kCompDesc= findKey(['Component_Description','ComponentDescription','Component Desc']);
+  var kQty     = findKey(['Qty per pcs','QtyPerPcs','Qty','Quantity']);
+  var kType    = findKey(['BOM Type','BOMType','Type']);
+  var kDepth   = findKey(['Depth','Level']);
+  var kUom     = findKey(['UOM','Satuan','Unit']);
+  var kWhse    = findKey(['Whse','Warehouse','Gudang']);
+  if(!kFG || !kComp) return []; // minimal wajib
+
+  var out = [];
+  rows.forEach(function(row){
+    var fg = String(row[kFG]||'').trim();
+    var rm = String(row[kComp]||'').trim();
+    if(!fg || !rm) return;
+    var fgDesc = kFGDesc ? String(row[kFGDesc]||'').trim() : '';
+    var qtyRaw = kQty ? parseFloat(String(row[kQty]).replace(/,/g,'')) : NaN;
+    var depth  = kDepth ? (parseInt(row[kDepth]||0)||0) : 0;
+    // Package rule: FG desc mengandung "Package" & depth 3-5 → qty 0 (sama seperti upload xlsx)
+    var effQty = (fgDesc && /package/i.test(fgDesc) && (depth===3||depth===4||depth===5))
+                 ? 0 : (isNaN(qtyRaw) ? 0 : qtyRaw);
+    out.push({
+      fg:     fg,
+      fgDesc: fgDesc,
+      rm:     rm,
+      qty:    effQty,
+      rawQty: isNaN(qtyRaw) ? 0 : qtyRaw,
+      type:   kType ? String(row[kType]||'').trim() : '',
+      depth:  depth,
+      rmDesc: kCompDesc ? String(row[kCompDesc]||'').trim() : '',
+      uom:    kUom ? String(row[kUom]||'').trim() : '',
+      whse:   kWhse ? String(row[kWhse]||'').trim() : ''
+    });
+  });
+  return out;
 }
 
 function saveSheetUrl(type) {
@@ -3761,6 +3829,24 @@ function loadSheetData(type) {
       if(dotEl) dotEl.className='dot';
       _ppCache = null;
       toast('Pallet RM: '+cnt+' item ✓','ok');
+
+    } else if(type==='bom_sheet'){
+      var bomRows = processBOMSheet(rows, headers);
+      if(!bomRows.length) throw new Error('Tidak ada baris BOM valid — cek kolom FG_Item & Component_Item');
+      _bomData = bomRows;
+      _mrpIdbSaveBom(_bomData);              // simpan ke IndexedDB (sama seperti upload xlsx)
+      localStorage.setItem('bom_sheet_upload_ts', ts);
+      try { localStorage.setItem('bom_source', 'gsheet'); localStorage.setItem('bom_source_ts', ts); } catch(e){}
+      // Update status di halaman MPS→MRP + simpan status utk sync
+      var bomStatusText = '✓ BOM tersimpan: ' + _bomData.length + ' baris (' + ts + ')';
+      try { localStorage.setItem('bom_ui_status', bomStatusText); cloudSave('bom_ui_status', bomStatusText); } catch(e){}
+      var bomStEl = document.getElementById('bom-status');
+      if(bomStEl) { bomStEl.textContent = bomStatusText + ' · Sumber: GSheet'; bomStEl.style.color = 'var(--green)'; }
+      if(typeof _mrpCheckReady === 'function') _mrpCheckReady();
+      if(typeof _whereUsedRender === 'function' && document.getElementById('wu-result')) _whereUsedRender();
+      if(infoEl) infoEl.textContent = _bomData.length+' baris dimuat ✓';
+      if(dotEl) dotEl.className='dot';
+      toast('BOM: '+_bomData.length+' baris ✓','ok');
     }
     if(tsEl) tsEl.textContent='Dimuat: '+ts+(sheet?' (tab: '+sheet+')':'');
   }).catch(function(e){
@@ -3771,7 +3857,7 @@ function loadSheetData(type) {
 
 function loadAllSheets(autoBuild) {
   var promises = [];
-  ['master','mrp','realname','pallet_pm','pallet_rm'].forEach(function(t){
+  ['master','mrp','realname','pallet_pm','pallet_rm','bom_sheet'].forEach(function(t){
     if(localStorage.getItem('sheet_url_'+t)) promises.push(loadSheetData(t));
   });
   if(!promises.length) { toast('Belum ada URL Sheets. Buka menu Data Source terlebih dahulu.','err'); return Promise.resolve(); }
@@ -3786,7 +3872,7 @@ function loadAllSheets(autoBuild) {
 }
 
 function _restoreSheetUrls() {
-  ['master','mrp','realname','pallet_pm','pallet_rm'].forEach(function(t){
+  ['master','mrp','realname','pallet_pm','pallet_rm','bom_sheet'].forEach(function(t){
     var u=localStorage.getItem('sheet_url_'+t), s=localStorage.getItem('sheet_tab_'+t);
     var ue=document.getElementById(t+'-url'), se=document.getElementById(t+'-sheet');
     if(ue&&u) ue.value=u; if(se&&s) se.value=s;
@@ -3872,7 +3958,7 @@ var renderProjectionDebounced = debounce(function(){ renderProjection(); }, 180)
 // ─── NAVIGATION ──────────────────────────────────────────────────────────────
 function showPage(name, el) {
   // Gate protected pages
-  if((name === 'settings' || name === 'upload') && !_isAdmin) {
+  if((name === 'settings' || name === 'upload' || name === 'where-used') && !_isAdmin) {
     toast('Login dulu untuk akses halaman ini', 'err');
     showLoginModal();
     return;
@@ -3958,6 +4044,24 @@ function _wuGlobalRmUsage() {
 function _whereUsedRender() {
   var el = document.getElementById('wu-result');
   if(!el) return;
+
+  // Label sumber BOM aktif (gsheet / xlsx) + tanggal
+  var srcEl = document.getElementById('wu-bom-source');
+  if(srcEl) {
+    var src = localStorage.getItem('bom_source') || '';
+    var srcTs = localStorage.getItem('bom_source_ts') || '';
+    var n = (_bomData||[]).length;
+    if(n && src) {
+      var srcLabel = src === 'gsheet' ? '☁ GSheet' : '📂 Upload xlsx';
+      srcEl.textContent = 'BOM aktif: ' + n + ' baris · Sumber: ' + srcLabel + (srcTs ? ' · ' + srcTs : '');
+      srcEl.style.color = 'var(--teal)';
+    } else if(n) {
+      srcEl.textContent = 'BOM aktif: ' + n + ' baris';
+      srcEl.style.color = 'var(--muted)';
+    } else {
+      srcEl.textContent = '';
+    }
+  }
 
   var bom = _bomData || [];
   if(!bom.length) {
@@ -13766,8 +13870,10 @@ function _bomUpload(input) {
 
       // Save to IndexedDB for next session
       _mrpIdbSaveBom(_bomData);
+      var _bomTs = (function(){ var d=new Date(); return d.getDate()+'/'+(d.getMonth()+1)+'/'+d.getFullYear()+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); })();
+      try { localStorage.setItem('bom_source', 'xlsx'); localStorage.setItem('bom_source_ts', _bomTs); } catch(e){}
 
-      statusEl.textContent = '✓ ' + count + ' baris RM/PM dari sheet "' + sheetName + '"';
+      statusEl.textContent = '✓ ' + count + ' baris RM/PM dari file "' + file.name + '" · Sumber: Upload xlsx';
       statusEl.style.color = 'var(--green)';
       _mrpCheckReady();
     } catch(err) {
@@ -14226,6 +14332,25 @@ function _mrpUpdateDetailStatus() {
   }
 }
 
+// Auto-load BOM dari Google Sheets saat boot — dipanggil hanya kalau IndexedDB BOM kosong.
+// URL BOM Sheet sync via Firebase (CLOUD_KEYS), jadi laptop baru yang belum pernah muat BOM
+// akan fetch sendiri di background tanpa perlu klik "Muat BOM" manual.
+function _autoLoadBomFromSheet() {
+  if(window._bomAutoLoadDone) return;          // cegah dobel
+  if(_bomData && _bomData.length) return;      // sudah ada data, tidak perlu
+  var url = localStorage.getItem('sheet_url_bom_sheet') || '';
+  if(!url) return;                             // belum ada URL tersimpan
+  window._bomAutoLoadDone = true;
+  var el = document.getElementById('bom-status');
+  if(el) { el.textContent = '⏳ Memuat BOM otomatis dari GSheet...'; el.style.color = 'var(--muted)'; }
+  // loadSheetData sudah handle: parse → simpan IndexedDB → set _bomData → update status/label
+  loadSheetData('bom_sheet').then(function(){
+    if(typeof _whereUsedRender === 'function' && document.getElementById('wu-result')) _whereUsedRender();
+  }).catch(function(){
+    if(el) { el.textContent = '⚠ BOM belum termuat — buka Data Source → Muat BOM'; el.style.color = 'var(--amber)'; }
+  });
+}
+
 function _mrpIdbLoad() {
   _mrpIdbOpen(function(db) {
     if(!db) return;
@@ -14236,12 +14361,18 @@ function _mrpIdbLoad() {
         _bomData = e.target.result.data;
         var ts   = e.target.result.ts ? new Date(e.target.result.ts).toLocaleDateString('id-ID') : '';
         var el   = document.getElementById('bom-status');
+        var _src = localStorage.getItem('bom_source');
+        var _srcLbl = _src === 'gsheet' ? ' · Sumber: GSheet' : (_src === 'xlsx' ? ' · Sumber: Upload xlsx' : '');
         var bomStatusText = '✓ BOM tersimpan: ' + _bomData.length + ' baris (' + ts + ')';
-        if(el) { el.textContent = bomStatusText; el.style.color='var(--green)'; }
+        if(el) { el.textContent = bomStatusText + _srcLbl; el.style.color='var(--green)'; }
         localStorage.setItem('bom_ui_status', bomStatusText);
         cloudSave('bom_ui_status', bomStatusText);
         _mrpCheckReady();
         _mrpUpdateDetailStatus();
+      } else {
+        // IndexedDB BOM kosong (mis. laptop baru). Kalau URL BOM Sheet sudah tersimpan
+        // (sync dari Firebase), fetch otomatis di background — user tidak perlu klik "Muat BOM".
+        _autoLoadBomFromSheet();
       }
     };
     // Load MPS
