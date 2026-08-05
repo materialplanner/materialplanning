@@ -11417,23 +11417,44 @@ function renderPalletPos() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // FC_MONTHS dynamic — start from current month (max Des)
-(function() {
-  var _now     = new Date();
-  var _startM  = _now.getMonth() + 1; // current month 1-12
-  var _allNames= ['','Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
-  var _allDays = [0,31,28,31,30,31,30,31,31,30,31,30,31];
-  var _allNums = [0,1,2,3,4,5,6,7,8,9,10,11,12];
-  // If past Dec, just use Dec as last
-  _startM = Math.min(_startM, 12);
-  window.FC_MONTHS    = [];
-  window.FC_DAYS      = [];
-  window.FC_MONTH_NUMS= [];
-  for(var _m = _startM; _m <= 12; _m++) {
-    window.FC_MONTHS.push(_allNames[_m]);
-    window.FC_DAYS.push(_allDays[_m]);
-    window.FC_MONTH_NUMS.push(_m);
+// FC_MONTHS dibangun dari bulan sekarang maju ke depan. Kini bisa LINTAS TAHUN:
+// _buildFcMonths(lastNum) memanjangkan sampai bulan `lastNum` walau melewati Desember
+// (mis. sekarang Agu, MPS sampai Feb → Agu..Des..Jan..Feb). Dipanggil ulang setelah MPS
+// termuat via _syncFcMonthsToMps(). Tanpa argumen → berhenti di Desember (perilaku lama).
+function _buildFcMonths(lastNum) {
+  var _now      = new Date();
+  var _startM   = Math.min(_now.getMonth() + 1, 12);
+  var _allNames = ['','Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+  var _allDays  = [0,31,28,31,30,31,30,31,31,30,31,30,31];
+  window.FC_MONTHS = []; window.FC_DAYS = []; window.FC_MONTH_NUMS = [];
+  // Jumlah bulan yang dibangun (1..12). Kalau lastNum diberikan, hitung jarak maju dari _startM.
+  var span = 12 - _startM + 1; // default: sampai Des
+  if(lastNum != null) {
+    var dist = ((lastNum - _startM) % 12 + 12) % 12; // 0..11 maju dari start
+    span = dist + 1;
   }
-})();
+  span = Math.max(1, Math.min(span, 12)); // aman 1..12, cegah bulan berulang
+  for(var k = 0; k < span; k++) {
+    var mn = ((_startM - 1 + k) % 12) + 1; // 1..12, wrap tahun depan
+    window.FC_MONTHS.push(_allNames[mn]);
+    window.FC_DAYS.push(_allDays[mn]);
+    window.FC_MONTH_NUMS.push(mn);
+  }
+}
+_buildFcMonths(); // default: bulan sekarang → Des
+
+// Selaraskan FC_MONTHS dengan bulan terakhir yang ada di MPS (_mpsActiveMonths).
+// Dipanggil setelah MPS di-upload / di-restore. Return true kalau ada perubahan.
+function _syncFcMonthsToMps() {
+  if(!_mpsActiveMonths || !_mpsActiveMonths.length) return false;
+  // _mpsActiveMonths sudah kronologis (maju ke depan). Ambil bulan terakhirnya.
+  var lastName = _mpsActiveMonths[_mpsActiveMonths.length - 1];
+  var lastNum  = _MRP_MONTH_NUM[lastName];
+  if(!lastNum) return false;
+  var before = window.FC_MONTHS.length;
+  _buildFcMonths(lastNum);
+  return window.FC_MONTHS.length !== before;
+}
 var _fcView      = 'detail';
 var _fcExpanded  = {};
 var _fcGridViewMode = 'aktual'; // 'aktual' | 'forecast' — global
@@ -13744,8 +13765,26 @@ var _fgDescFromMps = {};     // { itemNo: description } from MPS upload
 var _bomData = null;         // [ { fg, rm, qtyPerPcs } ]
 var _mrpResult = null;       // { rmCode: { Apr:x, May:x, ... } }
 
-var MRP_MONTHS = ['Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-var _mpsActiveMonths = MRP_MONTHS.slice(); // months detected from MPS file
+// MRP_MONTHS = semua nama bulan (Jan-Des) sebagai KAMUS nama, bukan rentang aktif.
+// Rentang aktif ditentukan _mpsActiveMonths (bulan yang punya kolom Plan di file MPS),
+// yang kini bisa melampaui Desember (lintas tahun) — lihat detektor kolom di _mpsUpload.
+var MRP_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+var _mpsActiveMonths = ['Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; // default; ditimpa saat upload
+var _MRP_MONTH_NUM = {Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12};
+
+// Urutkan daftar nama bulan secara KRONOLOGIS mulai bulan sekarang maju ke depan.
+// Bulan yang nomornya < bulan sekarang dianggap TAHUN DEPAN (ditaruh di belakang).
+// Contoh (sekarang Agu=8): ['Jan','Aug','Dec','Feb'] → ['Aug','Dec','Jan','Feb'].
+function _mpsSortChrono(names) {
+  var cur = new Date().getMonth() + 1; // 1-12
+  return names.slice().sort(function(a, b) {
+    var na = _MRP_MONTH_NUM[a], nb = _MRP_MONTH_NUM[b];
+    // offset: 0..11 dari bulan sekarang; bulan < cur → +12 (tahun depan)
+    var oa = (na - cur + 12) % 12;
+    var ob = (nb - cur + 12) % 12;
+    return oa - ob;
+  });
+}
 var MRP_MPS_COLS = ['AprPlan','MayPlan','JunPlan','JulPlan','AugPlan','SepPlan','OctPlan','NovPlan','DecPlan'];
 
 function renderMpsMrp() {
@@ -13780,49 +13819,51 @@ function _mpsUpload(input) {
       // Find item code column
       var itemCol = headers.findIndex(function(h){ return /^item\s*no/i.test(h); });
 
-      // Auto-detect plan columns — support both formats:
-      // Format lama: AprPlan, MayPlan, JunPlan, ... DecPlan
-      // Format baru: Plan Mei, Plan Jun, Plan Jul, ... Plan Des
-      var MONTH_MAP_LAMA = { 'Apr':'AprPlan','May':'MayPlan','Jun':'JunPlan','Jul':'JulPlan','Aug':'AugPlan','Sep':'SepPlan','Oct':'OctPlan','Nov':'NovPlan','Dec':'DecPlan' };
-      var MONTH_MAP_BARU = { 'Apr':'Plan Apr','May':'Plan Mei','Jun':'Plan Jun','Jul':'Plan Jul','Aug':'Plan Agu','Sep':'Plan Sep','Oct':'Plan Okt','Nov':'Plan Nov','Dec':'Plan Des' };
-      // Also try Indonesian with exact match
-      var MONTH_MAP_ALT  = { 'Apr':'Plan Apr','May':'Plan May','Jun':'Plan Jun','Jul':'Plan Jul','Aug':'Plan Aug','Sep':'Plan Sep','Oct':'Plan Oct','Nov':'Plan Nov','Dec':'Plan Dec' };
+      // Auto-detect plan columns — support both formats, kini mencakup Jan-Des penuh:
+      // Format lama: JanPlan, FebPlan, ... DecPlan
+      // Format baru (Indonesia): Plan Jan, Plan Feb, Plan Mar, Plan Apr, Plan Mei, ... Plan Des
+      var MONTH_MAP_LAMA = { 'Jan':'JanPlan','Feb':'FebPlan','Mar':'MarPlan','Apr':'AprPlan','May':'MayPlan','Jun':'JunPlan','Jul':'JulPlan','Aug':'AugPlan','Sep':'SepPlan','Oct':'OctPlan','Nov':'NovPlan','Dec':'DecPlan' };
+      var MONTH_MAP_BARU = { 'Jan':'Plan Jan','Feb':'Plan Feb','Mar':'Plan Mar','Apr':'Plan Apr','May':'Plan Mei','Jun':'Plan Jun','Jul':'Plan Jul','Aug':'Plan Agu','Sep':'Plan Sep','Oct':'Plan Okt','Nov':'Plan Nov','Dec':'Plan Des' };
+      var MONTH_MAP_ALT  = { 'Jan':'Plan Jan','Feb':'Plan Feb','Mar':'Plan Mar','Apr':'Plan Apr','May':'Plan May','Jun':'Plan Jun','Jul':'Plan Jul','Aug':'Plan Aug','Sep':'Plan Sep','Oct':'Plan Oct','Nov':'Plan Nov','Dec':'Plan Dec' };
 
       // Detect which format by checking headers
       var planIdxs = {};
       var monthMap = MONTH_MAP_LAMA;
-      if(headers.indexOf('MayPlan') < 0) {
-        // Detect new format: check any Indonesian plan column (including ones not starting from Mei)
+      if(headers.indexOf('MayPlan') < 0 && headers.indexOf('AugPlan') < 0) {
         var hasNewFmt = headers.some(function(h) {
-          return /^Plan\s+(Jan|Feb|Mar|Apr|Mei|Jun|Jul|Agu|Sep|Okt|Nov|Des)$/i.test(h.trim());
+          return /^Plan\s+(Jan|Feb|Mar|Apr|Mei|May|Jun|Jul|Agu|Aug|Sep|Okt|Oct|Nov|Des|Dec)$/i.test(h.trim());
         });
         monthMap = hasNewFmt ? MONTH_MAP_BARU : MONTH_MAP_ALT;
       }
       MRP_MONTHS.forEach(function(m) {
         var colName = monthMap[m];
         var idx = headers.indexOf(colName);
-        // Fallback: partial match
         if(idx < 0) {
           idx = headers.findIndex(function(h){ return h.toLowerCase().indexOf(m.toLowerCase()) >= 0 && /plan/i.test(h); });
         }
         planIdxs[m] = idx;
       });
 
-      // Include ALL months that have a valid column — don't filter by non-zero data
-      // Previously filtering by first-50-rows caused Aug/Oct/Dec to be missed
-      _mpsActiveMonths = MRP_MONTHS.filter(function(m) { return planIdxs[m] >= 0; });
-      if(!_mpsActiveMonths.length) _mpsActiveMonths = MRP_MONTHS.slice();
+      // Bulan yang punya kolom Plan valid
+      var _detected = MRP_MONTHS.filter(function(m) { return planIdxs[m] >= 0; });
+      if(!_detected.length) _detected = ['Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      // Simpan bulan aktif LAMA (untuk snapshot bandingkan) sebelum ditimpa
+      var _prevActiveMonths = (_mpsActiveMonths || []).slice();
+      // Urutkan KRONOLOGIS mulai dari bulan sekarang maju ke depan (lintas tahun).
+      // Contoh: sekarang Agu, MPS punya Agu..Des + Jan..Feb → urutan Agu,Sep,Okt,Nov,Des,Jan,Feb
+      _mpsActiveMonths = _mpsSortChrono(_detected);
+      // Perluas FC_MONTHS mengikuti bulan terakhir MPS (bisa lintas tahun ke Jan/Feb)
+      _syncFcMonthsToMps();
 
       // Also find description column
       var descCol = headers.findIndex(function(h){ return /^(item\s*desc|description|deskripsi)/i.test(h); });
 
       // Snapshot MPS LAMA sebelum ditimpa — untuk fitur "Bandingkan dengan MPS sebelumnya".
-      // Simpan salinan data + bulan aktif + tanggal, di localStorage biar bertahan antar sesi.
       if(_mpsData && Object.keys(_mpsData).length) {
         try {
           var _prevSnap = {
             data: _mpsData,
-            months: (_mpsActiveMonths||[]).slice(),
+            months: _prevActiveMonths,   // ← bulan LAMA, bukan yang baru
             fgDesc: _fgDescFromMps || {},
             ts: new Date().toISOString()
           };
@@ -14274,9 +14315,8 @@ function _mrpApplyToState(result) {
   Object.keys(result).forEach(function(code) {
     var m = (STATE.masterData||{})[code] || {};
     mrpData[code] = { desc: m.desc || code, months: {} };
-    var MRP_MONTH_NUMS = {Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12};
     MRP_MONTHS.forEach(function(mn) {
-      var moNum = MRP_MONTH_NUMS[mn];
+      var moNum = _MRP_MONTH_NUM[mn];
       var fcIdx = FC_MONTH_NUMS.indexOf(moNum);
       if(fcIdx < 0) return;
       var fcKey = FC_MONTHS[fcIdx];
@@ -14585,8 +14625,9 @@ function _mrpIdbLoad() {
       tx3.objectStore('mps').get('mps_data').onsuccess = function(e3) {
         if(e3.target.result) {
           _mpsData = e3.target.result.data;
-          if(e3.target.result.months)   _mpsActiveMonths = e3.target.result.months;
+          if(e3.target.result.months)   _mpsActiveMonths = _mpsSortChrono(e3.target.result.months);
           if(e3.target.result.fgDescs)  _fgDescFromMps   = e3.target.result.fgDescs;
+          _syncFcMonthsToMps(); // perluas FC_MONTHS lintas tahun sesuai MPS tersimpan
           var ts3  = e3.target.result.ts ? new Date(e3.target.result.ts).toLocaleDateString('id-ID') : '';
           var cnt  = Object.keys(_mpsData).length;
           var el3  = document.getElementById('mps-status');
@@ -14604,7 +14645,8 @@ function _mrpIdbLoad() {
       if(e.target.result) {
         _mrpResult = e.target.result.data;
         if(e.target.result.months && e.target.result.months.length) {
-          _mpsActiveMonths = e.target.result.months;
+          _mpsActiveMonths = _mpsSortChrono(e.target.result.months);
+          _syncFcMonthsToMps();
         }
         var _savedTs = localStorage.getItem('mrp_last_calc') || '';
         var _tsLbl = document.getElementById('mrp-last-calc-label');
