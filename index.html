@@ -5081,6 +5081,9 @@ function generateUpdateDelDate() {
         var pl = placements[pPtr];
         var m  = pl.idx;
         var mn = FC_MONTH_NUMS[m];
+        // Tahun kebutuhan: bulan yang nomornya < bulan mulai forecast = tahun berikutnya
+        var _schStartNum = (FC_MONTH_NUMS && FC_MONTH_NUMS.length) ? FC_MONTH_NUMS[0] : (new Date().getMonth()+1);
+        var _mnYear = mn < _schStartNum ? curYear + 1 : curYear;
         var days_m   = daysArr[m] || 30;
         var req_m    = fcReq2[m]  || 0;
         var dailyReq = req_m > 0 ? req_m / days_m : 0;
@@ -5092,7 +5095,7 @@ function generateUpdateDelDate() {
         var assignedISO;
         if(dailyReq <= 0){
           // Tidak ada kebutuhan di bulan ini → pakai tgl 1
-          assignedISO = curYear+'-'+String(mn).padStart(2,'0')+'-01';
+          assignedISO = _mnYear+'-'+String(mn).padStart(2,'0')+'-01';
         } else {
           // D = hari ke berapa stock turun ke bawah targetDOI (formula sama dgn _calcForecast)
           var targetStock = dailyReq * targetDOI;
@@ -5103,10 +5106,10 @@ function generateUpdateDelDate() {
           } else {
             dayN = Math.min(Math.ceil(D), days_m);
           }
-          var dt = new Date(curYear, mn-1, dayN);
+          var dt = new Date(_mnYear, mn-1, dayN);
           assignedISO = dt <= today
             ? todayISO
-            : curYear+'-'+String(mn).padStart(2,'0')+'-'+String(dayN).padStart(2,'0');
+            : _mnYear+'-'+String(mn).padStart(2,'0')+'-'+String(dayN).padStart(2,'0');
         }
 
         newUpdateDelDate[key] = assignedISO;
@@ -12122,9 +12125,14 @@ function _calcForecast(code, ospoIdx) {
 
   // ── Tgl Create PR ─────────────────────────────────────────────────────────
   var suggestions = [];
+  var _fcStartNum = (FC_MONTH_NUMS && FC_MONTH_NUMS.length) ? FC_MONTH_NUMS[0] : (new Date().getMonth()+1);
   for(var si = 0; si < FC_MONTHS.length; si++) {
     if(totalProp[si] <= 0) continue;
-    var delivDate = new Date(curYear, FC_MONTH_NUMS[si]-1, 1);
+    // Tahun kebutuhan: kalau nomor bulan sudah wrap melewati Des (nomornya < bulan mulai),
+    // berarti tahun berikutnya. Contoh (mulai Agu): Jan/Feb → curYear+1.
+    var _delivMonNum = FC_MONTH_NUMS[si];
+    var _delivYear = _delivMonNum < _fcStartNum ? curYear + 1 : curYear;
+    var delivDate = new Date(_delivYear, _delivMonNum-1, 1);
     var createPR  = new Date(delivDate);
     createPR.setDate(createPR.getDate() - lt_days);
     var daysLeft = Math.round((createPR - nowReal) / 86400000);
@@ -14153,6 +14161,19 @@ function _mpsCompareExport() {
   toast('Perbandingan MPS di-export ✓','ok');
 }
 
+// Hitung ulang bulan aktif dari isi _mpsData: hanya bulan yang punya minimal 1 FG > 0,
+// diurutkan kronologis. Dipakai saat restore dari IndexedDB supaya data lama yang menyimpan
+// bulan-nol (mis. Mar/Apr kosong) langsung dibersihkan tanpa perlu upload MPS ulang.
+function _mpsRecomputeActiveMonths(fallbackMonths) {
+  if(!_mpsData || !Object.keys(_mpsData).length) return _mpsSortChrono(fallbackMonths || []);
+  var base = (fallbackMonths && fallbackMonths.length) ? fallbackMonths : MRP_MONTHS;
+  var withVal = base.filter(function(m) {
+    return Object.keys(_mpsData).some(function(c){ return (_mpsData[c][m] || 0) > 0; });
+  });
+  if(!withVal.length) withVal = base;
+  return _mpsSortChrono(withVal);
+}
+
 function _mpsMrpCalculate() {
   if(!_mpsData || !_bomData) { toast('Upload MPS dan BOM terlebih dahulu','err'); return; }
 
@@ -14643,9 +14664,11 @@ function _mrpIdbLoad() {
       tx3.objectStore('mps').get('mps_data').onsuccess = function(e3) {
         if(e3.target.result) {
           _mpsData = e3.target.result.data;
-          if(e3.target.result.months)   _mpsActiveMonths = _mpsSortChrono(e3.target.result.months);
           if(e3.target.result.fgDescs)  _fgDescFromMps   = e3.target.result.fgDescs;
-          _syncFcMonthsToMps(); // perluas FC_MONTHS lintas tahun sesuai MPS tersimpan
+          // Hitung ulang bulan aktif dari isi data (buang bulan berkolom-nol seperti Mar/Apr),
+          // pakai months tersimpan sebagai kandidat awal. Tidak perlu upload MPS ulang.
+          _mpsActiveMonths = _mpsRecomputeActiveMonths(e3.target.result.months);
+          _syncFcMonthsToMps(); // perluas FC_MONTHS lintas tahun sesuai bulan aktif
           var ts3  = e3.target.result.ts ? new Date(e3.target.result.ts).toLocaleDateString('id-ID') : '';
           var cnt  = Object.keys(_mpsData).length;
           var el3  = document.getElementById('mps-status');
@@ -14663,7 +14686,7 @@ function _mrpIdbLoad() {
       if(e.target.result) {
         _mrpResult = e.target.result.data;
         if(e.target.result.months && e.target.result.months.length) {
-          _mpsActiveMonths = _mpsSortChrono(e.target.result.months);
+          _mpsActiveMonths = _mpsRecomputeActiveMonths(e.target.result.months);
           _syncFcMonthsToMps();
         }
         var _savedTs = localStorage.getItem('mrp_last_calc') || '';
