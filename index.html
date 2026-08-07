@@ -3060,6 +3060,7 @@ var CLOUD_KEYS = [
   'sap_cache_stock','sap_cache_po','sap_cache_grpo','sap_cache_ospr',
   'admin_user','admin_pass',
   'master_data','mrp_data','realname_data','pallet_pm','pallet_rm',
+  'mps_compare_result',
   'wh_capacity_rm','wh_capacity_pm','update_deldate_data',
   'fc_propose','fc_ospo_ovr','fc_ospr_ovr','fc_doi2','fc_doi2_suppliers','mrp_source',
   'fc_autopropose','fc_doi_item_month_ovr',
@@ -13944,6 +13945,10 @@ function _mpsUpload(input) {
       _mrpIdbSaveMps(_mpsData, _mpsActiveMonths);
       _mrpUpdateDetailStatus();
 
+      // Hitung & simpan hasil perbandingan (diff) ke localStorage + Firebase, supaya
+      // tab Perbandingan MPS bisa dilihat di laptop lain (seperti hasil MRP).
+      _mpsSaveCompareResult();
+
       statusEl.textContent = '✓ ' + count + ' FG item dari sheet "' + sheetName + '"';
       statusEl.style.color = 'var(--green)';
       _mrpCheckReady();
@@ -14117,7 +14122,53 @@ function _mpsComputeDiff() {
   return { months: monthList, fgRows: fgRows, rmRows: rmRows, oldTs: snap.ts, bomAvailable: !!(_bomData&&_bomData.length) };
 }
 
-// Bangun HTML tabel perbandingan (dipakai popup & tab inline). Return null kalau error.
+// Simpan hasil perbandingan (diff) ke localStorage + Firebase. Ringan karena hanya
+// baris yang BERUBAH yang disimpan (bukan seluruh MPS). Dipanggil tiap upload MPS baru.
+function _mpsSaveCompareResult() {
+  var d = _mpsComputeDiff();
+  if(d.error) return; // belum ada pembanding — jangan simpan
+  // Simpan struktur minimal untuk render ulang (months + rows diff + meta)
+  var payload = {
+    months: d.months,
+    fgRows: d.fgRows,
+    rmRows: d.rmRows,
+    bomAvailable: d.bomAvailable,
+    oldTs: d.oldTs,
+    newTs: new Date().toISOString()
+  };
+  try {
+    var str = JSON.stringify(payload);
+    localStorage.setItem('mps_compare_result', str);
+    cloudSave('mps_compare_result', str);
+    console.log('[compare] hasil perbandingan MPS disimpan ('+str.length+' bytes)');
+  } catch(e) { console.warn('Gagal simpan hasil perbandingan:', e); }
+}
+
+// Ambil hasil perbandingan tersimpan (dari Firebase/localStorage). Return null kalau kosong.
+function _mpsLoadCompareResult() {
+  var raw = localStorage.getItem('mps_compare_result');
+  if(!raw) return null;
+  try { return JSON.parse(raw); } catch(e){ return null; }
+}
+
+// Ambil data perbandingan untuk ditampilkan. Prioritas: hasil tersimpan (dari Firebase,
+// bisa dilihat lintas laptop) → kalau tidak ada, hitung lokal dari snapshot MPS di laptop ini.
+function _mpsGetCompareData() {
+  var saved = _mpsLoadCompareResult();
+  if(saved && saved.months && (saved.fgRows || saved.rmRows)) {
+    return {
+      months: saved.months || [],
+      fgRows: saved.fgRows || [],
+      rmRows: saved.rmRows || [],
+      bomAvailable: !!saved.bomAvailable,
+      oldTs: saved.oldTs,
+      newTs: saved.newTs
+    };
+  }
+  return _mpsComputeDiff(); // fallback: hitung lokal (laptop yang punya snapshot lama)
+}
+
+// Bangun HTML tabel perbandingan (dipakai popup & tab inline).
 function _mpsCompareBuildHTML(d) {
   if(d.error) return '<div style="padding:24px;text-align:center;color:var(--muted)">'+d.error+'</div>';
   var oldDate = d.oldTs ? new Date(d.oldTs).toLocaleString('id-ID') : '-';
@@ -14153,7 +14204,7 @@ function _mpsCompareBuildHTML(d) {
 
 // Popup (dari tombol "Bandingkan MPS")
 function _mpsCompareShow() {
-  var d = _mpsComputeDiff();
+  var d = _mpsGetCompareData();
   var body = document.getElementById('mps-compare-body');
   var overlay = document.getElementById('mps-compare-overlay');
   if(!body || !overlay) return;
@@ -14166,14 +14217,14 @@ function _mpsCompareShow() {
 function _mpsCompareRenderInline() {
   var el = document.getElementById('mrp-compare-inline');
   if(!el) return;
-  var d = _mpsComputeDiff();
+  var d = _mpsGetCompareData();
   if(!d.error) window._mpsCompareData = d;
   el.innerHTML = _mpsCompareBuildHTML(d);
 }
 
 // Save as PDF — buka print window dengan tampilan tabel yang SAMA PERSIS dengan tab/popup
 function _mpsComparePDF() {
-  var d = _mpsComputeDiff();
+  var d = _mpsGetCompareData();
   if(d.error) { toast(d.error, 'err'); return; }
   var oldDate = d.oldTs ? new Date(d.oldTs).toLocaleString('id-ID') : '-';
   var docHtml = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Perbandingan MPS</title>'
