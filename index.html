@@ -1135,7 +1135,7 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
     </div>
     <div class="ph-r" style="flex-wrap:wrap;gap:6px;max-width:500px;justify-content:flex-end">
       <button class="btn btn-primary btn-sm" onclick="_mpsMrpCalculate()" id="btn-calc-mrp" style="font-size:11px" disabled>&#x26A1; Hitung MRP</button>
-      <button class="btn btn-sm" onclick="_mpsCompareShow()" id="btn-compare-mps" style="font-size:11px" title="Bandingkan MPS baru dengan MPS sebelumnya">&#x1F504; Bandingkan MPS</button>
+      <button class="btn btn-sm" onclick="_mrpSwitchTab('banding')" id="btn-compare-mps" style="font-size:11px" title="Lihat perbandingan MPS baru vs sebelumnya">&#x1F504; Bandingkan MPS</button>
       <span id="mrp-last-calc-label" style="font-size:11px;color:var(--muted);padding:0 4px"></span>
       <button class="btn btn-primary btn-sm" onclick="_mrpTerapkan()" id="btn-terapkan-mrp" style="font-size:11px" disabled>&#x2713; Terapkan MRP</button>
       <button class="btn btn-sm" onclick="_mpsMrpSaveToFirebase()" id="btn-save-mrp" style="font-size:11px" disabled>&#x2601; Simpan ke Firebase</button>
@@ -1196,13 +1196,31 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
     </div>
   </div>
 
-  <!-- Search item -->
+  <!-- Tab bar: Hasil MRP / Perbandingan MPS -->
+  <div id="mrp-tabbar" style="display:flex;gap:4px;border-bottom:2px solid var(--border);margin-bottom:14px">
+    <button id="mrptab-hasil" onclick="_mrpSwitchTab('hasil')" class="mrp-tab" style="padding:8px 16px;font-size:12px;font-weight:600;background:none;border:none;border-bottom:2px solid var(--teal);color:var(--teal);cursor:pointer;margin-bottom:-2px">Hasil MRP</button>
+    <button id="mrptab-banding" onclick="_mrpSwitchTab('banding')" class="mrp-tab" style="padding:8px 16px;font-size:12px;font-weight:600;background:none;border:none;border-bottom:2px solid transparent;color:var(--muted);cursor:pointer;margin-bottom:-2px">🔄 Perbandingan MPS</button>
+  </div>
+
+  <!-- Search item (hanya di tab Hasil MRP) -->
   <div id="mrp-search-wrap" style="display:none;margin-bottom:12px">
     <input id="mrp-search" type="text" placeholder="🔍 Cari kode / nama item RM atau PM..." oninput="_mrpFilterResult(this.value)"
       style="width:100%;box-sizing:border-box;font-size:12px;padding:7px 12px;border:1.5px solid var(--border2);border-radius:6px;background:var(--bg3);color:var(--text);outline:none;font-family:var(--font)">
   </div>
-  <!-- Result summary -->
+  <!-- Result summary (tab Hasil MRP) -->
   <div id="mrp-result"></div>
+
+  <!-- Section inline Perbandingan MPS (tab Perbandingan) -->
+  <div id="mrp-compare-section" style="display:none">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div style="font-size:12px;color:var(--muted)">Perbandingan MPS baru dengan MPS sebelumnya</div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-sm" onclick="_mpsComparePDF()" style="font-size:11px">🖨 Save as PDF</button>
+        <button class="btn btn-sm" onclick="_mpsCompareExport()" style="font-size:11px">↓ Export Excel</button>
+      </div>
+    </div>
+    <div id="mrp-compare-inline"></div>
+  </div>
 
   <!-- Modal hasil Bandingkan MPS -->
   <div id="mps-compare-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:900;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto">
@@ -1210,6 +1228,7 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
       <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:var(--bg2);border-radius:12px 12px 0 0">
         <div style="font-weight:700;font-size:15px">🔄 Perbandingan MPS</div>
         <div style="display:flex;gap:8px;align-items:center">
+          <button class="btn btn-sm" onclick="_mpsComparePDF()" id="btn-compare-pdf" style="font-size:11px">🖨 Save as PDF</button>
           <button class="btn btn-sm" onclick="_mpsCompareExport()" id="btn-compare-export" style="font-size:11px">↓ Export Excel</button>
           <button onclick="document.getElementById('mps-compare-overlay').style.display='none'" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">✕</button>
         </div>
@@ -14098,17 +14117,9 @@ function _mpsComputeDiff() {
   return { months: monthList, fgRows: fgRows, rmRows: rmRows, oldTs: snap.ts, bomAvailable: !!(_bomData&&_bomData.length) };
 }
 
-function _mpsCompareShow() {
-  var d = _mpsComputeDiff();
-  var body = document.getElementById('mps-compare-body');
-  var overlay = document.getElementById('mps-compare-overlay');
-  if(!body || !overlay) return;
-  if(d.error) {
-    body.innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted)">'+d.error+'</div>';
-    overlay.style.display = 'flex';
-    return;
-  }
-  window._mpsCompareData = d; // untuk export
+// Bangun HTML tabel perbandingan (dipakai popup & tab inline). Return null kalau error.
+function _mpsCompareBuildHTML(d) {
+  if(d.error) return '<div style="padding:24px;text-align:center;color:var(--muted)">'+d.error+'</div>';
   var oldDate = d.oldTs ? new Date(d.oldTs).toLocaleString('id-ID') : '-';
   var fmt = function(v){ return v==null?'':(Math.round(v*100)/100).toLocaleString('id-ID'); };
   var arrow = function(diff){
@@ -14117,7 +14128,6 @@ function _mpsCompareShow() {
     return '<span style="color:var(--muted)">–</span>';
   };
   var mHdr = d.months.map(function(m){ return '<th style="padding:6px 8px;text-align:right;font-size:10px;background:var(--bg3)">'+m+'</th>'; }).join('');
-
   function tbl(rows, label){
     if(!rows.length) return '<div style="color:var(--muted);font-size:12px;padding:8px">Tidak ada perubahan '+label+'.</div>';
     var h = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11.5px">'
@@ -14134,15 +14144,88 @@ function _mpsCompareShow() {
     });
     return h + '</tbody></table></div>';
   }
-
-  body.innerHTML =
-      '<div style="font-size:11px;color:var(--muted);margin-bottom:14px">Membandingkan MPS baru dengan MPS sebelumnya (disimpan: '+oldDate+'). ▲ merah = naik, ▼ hijau = turun. Hover angka untuk lihat nilai lama → baru.</div>'
+  return '<div style="font-size:11px;color:var(--muted);margin-bottom:14px">Membandingkan MPS baru dengan MPS sebelumnya (disimpan: '+oldDate+'). ▲ merah = naik, ▼ hijau = turun. Hover angka untuk lihat nilai lama → baru.</div>'
     + '<div style="font-weight:700;font-size:13px;margin:6px 0 8px">📦 Perubahan FG (MPS) — '+d.fgRows.length+' item</div>'
     + tbl(d.fgRows, 'FG')
     + '<div style="font-weight:700;font-size:13px;margin:20px 0 8px">🧪 Dampak ke RM/PM (MPS × BOM) — '+(d.bomAvailable ? d.rmRows.length+' item' : 'BOM belum dimuat')+'</div>'
     + (d.bomAvailable ? tbl(d.rmRows, 'RM/PM') : '<div style="color:var(--amber);font-size:12px;padding:8px">⚠ Muat BOM dulu untuk melihat dampak ke kebutuhan RM/PM.</div>');
+}
+
+// Popup (dari tombol "Bandingkan MPS")
+function _mpsCompareShow() {
+  var d = _mpsComputeDiff();
+  var body = document.getElementById('mps-compare-body');
+  var overlay = document.getElementById('mps-compare-overlay');
+  if(!body || !overlay) return;
+  if(!d.error) window._mpsCompareData = d; // untuk export
+  body.innerHTML = _mpsCompareBuildHTML(d);
   overlay.style.display = 'flex';
 }
+
+// Inline (dari tab "Perbandingan MPS")
+function _mpsCompareRenderInline() {
+  var el = document.getElementById('mrp-compare-inline');
+  if(!el) return;
+  var d = _mpsComputeDiff();
+  if(!d.error) window._mpsCompareData = d;
+  el.innerHTML = _mpsCompareBuildHTML(d);
+}
+
+// Save as PDF — buka print window dengan tampilan tabel yang SAMA PERSIS dengan tab/popup
+function _mpsComparePDF() {
+  var d = _mpsComputeDiff();
+  if(d.error) { toast(d.error, 'err'); return; }
+  var oldDate = d.oldTs ? new Date(d.oldTs).toLocaleString('id-ID') : '-';
+  var docHtml = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Perbandingan MPS</title>'
+    + '<style>@page{margin:12mm;size:A4 landscape}'
+    + 'body{font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;margin:0;padding:18px;-webkit-print-color-adjust:exact;print-color-adjust:exact}'
+    + '*{-webkit-print-color-adjust:exact;print-color-adjust:exact;color-adjust:exact;box-sizing:border-box}'
+    + 'table{width:100%;border-collapse:collapse;font-size:10px;margin-bottom:8px}'
+    + 'th,td{padding:5px 7px}'
+    + 'thead th{background:#eef2f5 !important;border-bottom:1.5px solid #c9d4dc;font-size:9px;text-transform:uppercase;letter-spacing:.03em;color:#556}'
+    + 'tbody tr{border-bottom:.5px solid #e5e9ec;page-break-inside:avoid}'
+    + '.sec{font-weight:700;font-size:13px;margin:16px 0 8px}'
+    + '</style></head><body>'
+    + '<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:1.5px solid #1a1a1a;padding-bottom:8px;margin-bottom:6px">'
+    +   '<p style="font-size:15px;font-weight:700;margin:0">🔄 Perbandingan MPS</p>'
+    +   '<p style="font-size:10px;color:#888;margin:0">Dicetak ' + new Date().toLocaleDateString('id-ID') + '</p>'
+    + '</div>'
+    + _mpsCompareBuildHTML(d)
+    + '</body></html>';
+  var w = window.open('', '_blank');
+  if(!w) { toast('Popup diblokir browser — izinkan popup untuk dashboard ini','err'); return; }
+  w.document.write(docHtml);
+  w.document.close();
+  w.focus();
+  setTimeout(function(){ w.print(); }, 300);
+}
+
+// Switch tab di halaman MPS→MRP
+function _mrpSwitchTab(tab) {
+  var tHasil = document.getElementById('mrptab-hasil');
+  var tBand  = document.getElementById('mrptab-banding');
+  var secHasil = document.getElementById('mrp-result');
+  var secSearch = document.getElementById('mrp-search-wrap');
+  var secBand  = document.getElementById('mrp-compare-section');
+  var isBand = (tab === 'banding');
+  if(tHasil) {
+    tHasil.style.color = isBand ? 'var(--muted)' : 'var(--teal)';
+    tHasil.style.borderBottomColor = isBand ? 'transparent' : 'var(--teal)';
+  }
+  if(tBand) {
+    tBand.style.color = isBand ? 'var(--teal)' : 'var(--muted)';
+    tBand.style.borderBottomColor = isBand ? 'var(--teal)' : 'transparent';
+  }
+  if(secHasil) secHasil.style.display = isBand ? 'none' : 'block';
+  if(secBand)  secBand.style.display  = isBand ? 'block' : 'none';
+  // Search box hanya di tab Hasil MRP, dan hanya kalau sudah ada hasil MRP
+  if(secSearch) {
+    if(isBand) secSearch.style.display = 'none';
+    else if(_mrpResult && Object.keys(_mrpResult).length) secSearch.style.display = 'block';
+  }
+  if(isBand) _mpsCompareRenderInline();
+}
+
 
 function _mpsCompareExport() {
   var d = window._mpsCompareData;
