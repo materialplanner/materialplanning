@@ -13278,6 +13278,32 @@ function _fcDeleteSnapshot(id) {
   });
 }
 
+// Filter baris Rekap PR sesuai kontrol toolbar (type RM/PM, Class ABC, Status, Search).
+// Dipakai untuk data LIVE maupun SNAPSHOT supaya keduanya bisa difilter sama.
+function _fcApplyRekapFilters(rows) {
+  var fType   = (document.getElementById('f-fc-type')   || {value:''}).value;
+  var fAbc    = (document.getElementById('f-fc-abc')    || {value:''}).value;
+  var fStatus = (document.getElementById('f-fc-status') || {value:''}).value;
+  var srchRaw = (document.getElementById('srch-fc')     || {value:''}).value.trim().toLowerCase();
+  // search bisa banyak kode dipisah spasi/koma/baris
+  var terms = srchRaw ? srchRaw.split(/[\s,]+/).filter(Boolean) : [];
+
+  return rows.filter(function(r){
+    if(fType && r.iType !== fType) return false;
+    if(fAbc  && (r.abc||'') !== fAbc) return false;
+    if(fStatus === 'overdue' && !r.isOverdue) return false;
+    if(fStatus === 'urgent'  && !(r.isUrgent && !r.isOverdue)) return false;
+    if(fStatus === 'ok'      && !(!r.isUrgent && !r.isOverdue)) return false;
+    if(terms.length) {
+      var hay = (String(r.code||'') + ' ' + String(r.name||'')).toLowerCase();
+      // cocok kalau SALAH SATU term ada (biar bisa paste banyak kode)
+      var hit = terms.some(function(t){ return hay.indexOf(t) >= 0; });
+      if(!hit) return false;
+    }
+    return true;
+  });
+}
+
 function _fcShowSnapshot(id) {
   _prSnapIdbOpen(function(db){
     if(!db) { toast('Gagal buka penyimpanan lokal','err'); return; }
@@ -13292,11 +13318,15 @@ function _fcShowSnapshot(id) {
         c.createPRBy = new Date(r.createPRBy);
         return c;
       });
+      var totalSnap = rows.length;
+      // Terapkan filter toolbar (type/class/status/search) ke data snapshot juga
+      rows = _fcApplyRekapFilters(rows);
       var d = new Date(s.ts);
       var dTxt = String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();
       var tTxt = String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+      var _filtNote = rows.length !== totalSnap ? (' · ditampilkan ' + rows.length + ' dari ' + totalSnap) : '';
       var banner = '<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--amber-bg);border:1px solid rgba(245,158,11,.35);border-radius:var(--r);margin-bottom:10px;font-size:11.5px">'
-        + '📸 Menampilkan <b>snapshot ' + dTxt + ' · ' + tTxt + '</b> (' + rows.length + ' baris) — angka dibekukan, tidak ikut berubah dengan data live.'
+        + '📸 Menampilkan <b>snapshot ' + dTxt + ' · ' + tTxt + '</b> (' + totalSnap + ' baris' + _filtNote + ') — angka dibekukan, tidak ikut berubah dengan data live.'
         + '<button class="btn btn-sm" onclick="_fcExitSnapshot()" style="margin-left:auto;font-size:11px">← Kembali ke Data Live</button>'
         + '</div>';
       var el = document.getElementById('fc-table');
