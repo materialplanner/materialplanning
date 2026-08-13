@@ -3390,6 +3390,7 @@ function _applyRealtimeChanges(keys) {
           renderFlags.dash = true;
           break;
         case 'sap_cache_ospr':
+          if(_OSPR_DISABLED) { STATE.osprData = []; STATE.osprByItem = {}; break; }
           var rawO2 = JSON.parse(val || '[]');
           STATE.osprData = rawO2.map(function(o){
             if(o.d !== undefined) return {docNum:o.d,itemCode:o.i,itemName:o.n,supplierName:o.s,openQty:o.q,uom:o.u,prReqDate:fmtSAPDate(o.r),site:o.t};
@@ -4521,7 +4522,19 @@ async function loadStock() {
   }
 }
 
+// ⛔ Saklar OSPR: kalau true, OSPR TIDAK ditarik dari SAP dan dikosongkan (0).
+// Ubah ke false untuk mengaktifkan tarikan OSPR kembali.
+var _OSPR_DISABLED = true;
+
 async function loadOSPR() {
+  if(_OSPR_DISABLED) {
+    // Jalur OSPR diputus sementara — kosongkan tanpa fetch ke SAP
+    STATE.osprData = [];
+    STATE.osprByItem = {};
+    _setSyncItem('ospr', 'ok');
+    console.log('[OSPR] jalur diputus (_OSPR_DISABLED=true) — OSPR dikosongkan, tidak fetch SAP');
+    return;
+  }
   _setSyncItem('ospr', 'loading');
   try {
     var raw = await sapFetchTO(34, { '[%0]': '2025-01-01T00:00:00.000Z', '[%1]': '2030-12-31T00:00:00.000Z' });
@@ -10783,20 +10796,22 @@ function _appInit() {
         return g;
       });
     }
-    if(cachedOSPR) {
+    if(cachedOSPR && !_OSPR_DISABLED) {
       var rawO = JSON.parse(cachedOSPR);
       STATE.osprData = rawO.map(function(o){
         if(o.d !== undefined) return {docNum:o.d,itemCode:o.i,itemName:o.n,supplierName:o.s,openQty:o.q,uom:o.u,prReqDate:fmtSAPDate(o.r),site:o.t};
         return o;
       });
     }
-    // Rebuild osprByItem from restored osprData
-    if(STATE.osprData && STATE.osprData.length) {
+    // Rebuild osprByItem from restored osprData (skip kalau OSPR diputus)
+    if(!_OSPR_DISABLED && STATE.osprData && STATE.osprData.length) {
       STATE.osprByItem = {};
       STATE.osprData.forEach(function(r) {
         if(!STATE.osprByItem[r.itemCode]) STATE.osprByItem[r.itemCode] = 0;
         STATE.osprByItem[r.itemCode] += (r.openQty || 0);
       });
+    } else if(_OSPR_DISABLED) {
+      STATE.osprData = []; STATE.osprByItem = {};
     }
     if(STATE.poData && STATE.poData.length) loadOSPO();
     console.log('[boot] SAP cache restored — stock:', Object.keys(STATE.stockData||{}).length, 'po:', (STATE.poData||[]).length);
