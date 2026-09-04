@@ -4492,7 +4492,8 @@ async function loadStock() {
     var whsParam = JSON.stringify(BTG_WHS.concat(SNG_WHS).concat(JTK_WHS).concat(PJT_WHS));
     var itemGroupParam = JSON.stringify([101,102,103,104]);
     var ctrl = new AbortController();
-    var timer = setTimeout(function(){ ctrl.abort(); }, 30000);
+    var _stockTimedOut = false;
+    var timer = setTimeout(function(){ _stockTimedOut = true; ctrl.abort(); }, 90000); // 90s — query stock terberat
     var url = CFG.url + '/report/api/Report/GetReportDataFromQuery/90?' +
       encodeURIComponent('[%0]') + '=' + encodeURIComponent(whsParam) + '&' +
       encodeURIComponent('[%1]') + '=' + encodeURIComponent(itemGroupParam);
@@ -4517,8 +4518,16 @@ async function loadStock() {
     toast(Object.keys(STATE.stockData).length + ' item stock ✓', 'ok');
   } catch(e) {
     _setSyncItem('stock', 'err');
-    toast('Stock gagal: ' + e.message, 'err');
-    STATE.stockData = {};
+    var _msg;
+    if(_stockTimedOut || (e && e.name === 'AbortError') || /aborted/i.test(e.message||'')) {
+      _msg = 'Stock timeout (>90 dtk) — SAP lambat/tidak merespons. Coba lagi beberapa saat, atau cek koneksi ke server SAP.';
+    } else {
+      _msg = 'Stock gagal: ' + (e.message || e);
+    }
+    toast(_msg, 'err');
+    console.warn('[loadStock] gagal:', e);
+    // JANGAN kosongkan STATE.stockData — pertahankan stock terakhir yang berhasil,
+    // supaya projection tidak jadi 0 semua gara-gara 1 kali fetch gagal.
   }
 }
 
