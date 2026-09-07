@@ -14274,6 +14274,19 @@ function _mpsLoadCompareResult() {
 // Ambil data perbandingan untuk ditampilkan. Prioritas: hasil tersimpan (dari Firebase,
 // bisa dilihat lintas laptop) → kalau tidak ada, hitung lokal dari snapshot MPS di laptop ini.
 function _mpsGetCompareData() {
+  // Kalau laptop ini PUNYA snapshot MPS lokal → hitung langsung (paling akurat & terkini).
+  // Sekalian refresh hasil tersimpan supaya laptop lain dapat versi benar.
+  var hasLocalSnap = !!localStorage.getItem('mps_prev_snapshot');
+  var hasLocalMps  = _mpsData && Object.keys(_mpsData).length > 0;
+  if(hasLocalSnap && hasLocalMps) {
+    var live = _mpsComputeDiff();
+    if(!live.error) {
+      // simpan ulang hasil terbaru (perbaiki hasil basi "0 item" di Firebase)
+      try { _mpsSaveCompareResult(); } catch(e){}
+      return live;
+    }
+  }
+  // Fallback: pakai hasil tersimpan (laptop lain yang tak punya snapshot lokal)
   var saved = _mpsLoadCompareResult();
   if(saved && saved.months && (saved.fgRows || saved.rmRows)) {
     return {
@@ -14285,7 +14298,7 @@ function _mpsGetCompareData() {
       newTs: saved.newTs
     };
   }
-  return _mpsComputeDiff(); // fallback: hitung lokal (laptop yang punya snapshot lama)
+  return _mpsComputeDiff();
 }
 
 // Bangun HTML tabel perbandingan (dipakai popup & tab inline).
