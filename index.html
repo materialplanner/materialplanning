@@ -11485,17 +11485,19 @@ function renderPalletPos() {
 // _buildFcMonths(lastNum) memanjangkan sampai bulan `lastNum` walau melewati Desember
 // (mis. sekarang Agu, MPS sampai Feb → Agu..Des..Jan..Feb). Dipanggil ulang setelah MPS
 // termuat via _syncFcMonthsToMps(). Tanpa argumen → berhenti di Desember (perilaku lama).
+var FC_MIN_MONTHS = 8; // minimal bulan yang ditampilkan dari bulan berjalan
+
 function _buildFcMonths(lastNum) {
   var _now      = new Date();
   var _startM   = Math.min(_now.getMonth() + 1, 12);
   var _allNames = ['','Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
   var _allDays  = [0,31,28,31,30,31,30,31,31,30,31,30,31];
   window.FC_MONTHS = []; window.FC_DAYS = []; window.FC_MONTH_NUMS = [];
-  // Jumlah bulan yang dibangun (1..12). Kalau lastNum diberikan, hitung jarak maju dari _startM.
-  var span = 12 - _startM + 1; // default: sampai Des
+  // Aturan: MINIMAL 8 bulan dari bulan berjalan. Kalau MPS (lastNum) lebih panjang, ikut MPS.
+  var span = FC_MIN_MONTHS; // default minimal 8 bulan
   if(lastNum != null) {
-    var dist = ((lastNum - _startM) % 12 + 12) % 12; // 0..11 maju dari start
-    span = dist + 1;
+    var dist = ((lastNum - _startM) % 12 + 12) % 12; // 0..11 jarak maju dari bulan mulai
+    span = Math.max(FC_MIN_MONTHS, dist + 1); // ambil yang lebih panjang antara 8 & rentang MPS
   }
   span = Math.max(1, Math.min(span, 12)); // aman 1..12, cegah bulan berulang
   for(var k = 0; k < span; k++) {
@@ -11505,7 +11507,7 @@ function _buildFcMonths(lastNum) {
     window.FC_MONTH_NUMS.push(mn);
   }
 }
-_buildFcMonths(); // default: bulan sekarang → Des
+_buildFcMonths(); // default: 8 bulan dari bulan berjalan
 
 // Tahun (2 digit) untuk kolom forecast index ke-i. FC_MONTH_NUMS[i] adalah nomor bulan
 // (1-12); kalau sudah wrap melewati Desember (nomornya < bulan mulai), tahunnya +1.
@@ -13882,18 +13884,26 @@ var MRP_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','N
 var _mpsActiveMonths = ['Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; // default; ditimpa saat upload
 var _MRP_MONTH_NUM = {Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12};
 
-// Urutkan daftar nama bulan secara KRONOLOGIS mulai bulan sekarang maju ke depan.
-// Bulan yang nomornya < bulan sekarang dianggap TAHUN DEPAN (ditaruh di belakang).
-// Contoh (sekarang Agu=8): ['Jan','Aug','Dec','Feb'] → ['Aug','Dec','Jan','Feb'].
+// Urutkan daftar nama bulan KRONOLOGIS mulai bulan sekarang maju ke depan, DAN buang
+// bulan yang sudah LEWAT (bulan sebelum bulan berjalan). Tanpa buang, bulan lampau
+// (mis. Agustus saat sekarang September) akan muncul di ujung sebagai "hampir setahun lagi".
 function _mpsSortChrono(names) {
   var cur = new Date().getMonth() + 1; // 1-12
-  return names.slice().sort(function(a, b) {
-    var na = _MRP_MONTH_NUM[a], nb = _MRP_MONTH_NUM[b];
-    // offset: 0..11 dari bulan sekarang; bulan < cur → +12 (tahun depan)
-    var oa = (na - cur + 12) % 12;
-    var ob = (nb - cur + 12) % 12;
-    return oa - ob;
+  // offset 0 = bulan ini; 1..N = ke depan. Bulan lampau dibuang.
+  // Ambang: bulan dianggap "ke depan" jika offset <= 11 (dalam 1 tahun). Bulan lampau
+  // paling dekat (bulan lalu) punya offset 11 → itu yang harus dibuang. Kita batasi
+  // rentang wajar forecast: buang offset yang menunjuk ke bulan SEBELUM bulan berjalan.
+  var withOffset = names.map(function(n){
+    var num = _MRP_MONTH_NUM[n];
+    return { name: n, off: (num - cur + 12) % 12, num: num };
+  }).filter(function(x){
+    // Buang bulan lampau: offset 0 = sekarang (boleh), 1..11 ke depan.
+    // Bulan lalu = offset 11. Rentang forecast maksimum realistis ~11 bulan ke depan,
+    // jadi kita anggap offset 11 sebagai bulan lampau dan buang.
+    return x.off <= 10; // simpan bulan ini + 10 bulan ke depan; buang yang lebih (bulan lampau)
   });
+  withOffset.sort(function(a,b){ return a.off - b.off; });
+  return withOffset.map(function(x){ return x.name; });
 }
 var MRP_MPS_COLS = ['AprPlan','MayPlan','JunPlan','JulPlan','AugPlan','SepPlan','OctPlan','NovPlan','DecPlan'];
 
