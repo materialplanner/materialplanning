@@ -13887,6 +13887,25 @@ var _MRP_MONTH_NUM = {Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:
 // Urutkan daftar nama bulan KRONOLOGIS mulai bulan sekarang maju ke depan, DAN buang
 // bulan yang sudah LEWAT (bulan sebelum bulan berjalan). Tanpa buang, bulan lampau
 // (mis. Agustus saat sekarang September) akan muncul di ujung sebagai "hampir setahun lagi".
+// Fingerprint ringkas isi MPS untuk deteksi "upload ulang MPS yang sama".
+// Gabungkan kode FG + nilai per bulan aktif jadi satu string, lalu hash sederhana.
+function _mpsFingerprint(mps, months) {
+  if(!mps) return '';
+  var mo = (months && months.length) ? months.slice() : MRP_MONTHS;
+  var codes = Object.keys(mps).sort();
+  var parts = [];
+  codes.forEach(function(c){
+    var row = mps[c] || {};
+    var vals = mo.map(function(m){ return (row[m]||0); }).join(',');
+    parts.push(c + ':' + vals);
+  });
+  var str = parts.join('|');
+  // hash djb2 sederhana (cukup untuk deteksi identik)
+  var h = 5381;
+  for(var i=0;i<str.length;i++){ h = ((h<<5)+h + str.charCodeAt(i)) | 0; }
+  return codes.length + '_' + str.length + '_' + (h>>>0).toString(36);
+}
+
 function _mpsSortChrono(names) {
   var cur = new Date().getMonth() + 1; // 1-12
   // offset 0 = bulan ini; 1..N = ke depan. Bulan lampau dibuang.
@@ -13974,16 +13993,26 @@ function _mpsUpload(input) {
       var descCol = headers.findIndex(function(h){ return /^(item\s*desc|description|deskripsi)/i.test(h); });
 
       // Snapshot MPS LAMA sebelum ditimpa — untuk fitur "Bandingkan dengan MPS sebelumnya".
+      // PROTEKSI: hanya simpan kalau MPS lama (yang sedang aktif) ada isinya. Perbandingan
+      // isi-identik ditangani nanti (0 perubahan wajar). Tapi supaya upload ULANG MPS yang
+      // sama tidak menimpa snapshot bulan lalu, kita cek dulu: kalau MPS lama == MPS baru
+      // (fingerprint sama), JANGAN timpa snapshot — pertahankan pembanding yang lama.
       if(_mpsData && Object.keys(_mpsData).length) {
         try {
+          // Fingerprint ringkas MPS lama (yang sedang aktif) untuk deteksi upload-ulang.
+          var _oldFp = _mpsFingerprint(_mpsData, _prevActiveMonths);
           var _prevSnap = {
             data: _mpsData,
             months: _prevActiveMonths,   // ← bulan LAMA, bukan yang baru
             fgDesc: _fgDescFromMps || {},
-            ts: new Date().toISOString()
+            ts: new Date().toISOString(),
+            fp: _oldFp
           };
-          localStorage.setItem('mps_prev_snapshot', JSON.stringify(_prevSnap));
-        } catch(e) { console.warn('Gagal simpan snapshot MPS lama:', e); }
+          // Simpan sementara; akan dibatalkan di bawah kalau ternyata MPS baru identik.
+          window._pendingMpsSnap = _prevSnap;
+        } catch(e) { console.warn('Gagal siapkan snapshot MPS lama:', e); }
+      } else {
+        window._pendingMpsSnap = null;
       }
 
       _mpsData = {};
@@ -14016,6 +14045,25 @@ function _mpsUpload(input) {
       // Save MPS to IndexedDB
       _mrpIdbSaveMps(_mpsData, _mpsActiveMonths);
       _mrpUpdateDetailStatus();
+
+      // ── Commit / batalkan snapshot MPS lama ──────────────────────────────────
+      // Bandingkan fingerprint MPS baru vs snapshot pending (MPS lama). Kalau IDENTIK,
+      // berarti upload ulang MPS yang sama → JANGAN timpa snapshot bulan lalu (biarkan
+      // pembanding lama tetap). Kalau BEDA → commit snapshot pending sebagai pembanding.
+      try {
+        var _pend = window._pendingMpsSnap;
+        if(_pend) {
+          var _newFp = _mpsFingerprint(_mpsData, _mpsActiveMonths);
+          if(_pend.fp && _newFp === _pend.fp) {
+            console.log('[compare] MPS baru identik dgn yang lama (upload ulang) — snapshot bulan lalu dipertahankan.');
+            // tidak menimpa mps_prev_snapshot
+          } else {
+            localStorage.setItem('mps_prev_snapshot', JSON.stringify(_pend));
+            console.log('[compare] snapshot MPS lama disimpan sebagai pembanding.');
+          }
+          window._pendingMpsSnap = null;
+        }
+      } catch(e) { console.warn('Commit snapshot gagal:', e); }
 
       // Hitung & simpan hasil perbandingan (diff) ke localStorage + Firebase, supaya
       // tab Perbandingan MPS bisa dilihat di laptop lain (seperti hasil MRP).
