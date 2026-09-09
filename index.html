@@ -12953,9 +12953,12 @@ function _fcRenderRekapTable(el, propRows, fcData, snapshotBanner) {
     + '<div style="font-size:11px;color:var(--muted)"><b>'+propRows.length+'</b> baris propose PR</div>'
     + '<div style="display:flex;gap:8px">'
     + '<button class="btn btn-sm" id="rekap-print-btn" onclick="_fcLampiranExportMenu()" disabled style="font-size:11px;opacity:.5">📎 Export Lampiran</button>'
+    + '<button class="btn btn-sm" onclick="_fcRekapCheckACC()" title="Centang otomatis semua baris yang propose PR-nya terisi (di-ACC)" style="font-size:11px">✓ Centang di-ACC</button>'
     + (snapshotBanner ? '' : '<button class="btn btn-sm" onclick="_fcSaveRekapSnapshot()" title="Bekukan angka rekap hari ini — bisa dicetak lagi nanti walau data live sudah berubah" style="font-size:11px">📸 Simpan Snapshot</button>'
       + '<button class="btn btn-sm" onclick="_fcShowSnapshotList()" title="Lihat/cetak snapshot yang pernah disimpan" style="font-size:11px">🕐 Riwayat Snapshot</button>')
     + '<button class="btn btn-sm btn-primary" onclick="_fcRekapExportMenu()" style="font-size:11px">↓ Export Rekap PR</button>'
+    + (snapshotBanner ? '' : '<button class="btn btn-sm" onclick="document.getElementById(\'pr-import-file\').click()" title="Import Excel Rekap PR yang sudah diedit SPV — isi propose PR otomatis dari kolom Tanggal PR & Qty" style="font-size:11px;background:var(--green);color:#fff">⬆ Import PR (SPV)</button>'
+      + '<input type="file" id="pr-import-file" accept=".xlsx,.xls,.csv" style="display:none" onchange="_fcImportPR(this)">')
     + '</div>'
     + '</div>'
     + '<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;min-width:900px;width:100%">'
@@ -12982,7 +12985,7 @@ function _fcRenderRekapTable(el, propRows, fcData, snapshotBanner) {
           ? '<span style="color:#c00;font-weight:700">⛔ URGENT</span>'
           : '<span style="color:#856404">🟡 BELUM - Buka: '+fmt(r.createPRBy)+' ('+r.daysLeft+' hari)</span>');
     html += '<tr style="'+rowBg+'">'
-      + '<td style="'+tdS+'text-align:center"><input type="checkbox" class="rekap-chk" data-code="'+r.code+'" data-idx="'+r.proposeIdx+'" onchange="_fcRekapUpdatePrintBtn()"></td>'
+      + '<td style="'+tdS+'text-align:center"><input type="checkbox" class="rekap-chk" data-code="'+r.code+'" data-idx="'+r.proposeIdx+'" data-hasprop="'+((_fcPropose[r.code] && _fcPropose[r.code][r.proposeIdx] > 0) ? '1' : '0')+'" onchange="_fcRekapUpdatePrintBtn()"></td>'
       + '<td style="'+tdS+'text-align:center;color:var(--muted);font-size:11px">'+(r.site||'—')+'</td>'
       + '<td style="'+tdS+'font-family:var(--mono);font-size:11px;white-space:nowrap">'+r.code+'</td>'
       + '<td style="'+tdS+'font-weight:500;max-width:220px">'+r.name+'</td>'
@@ -13196,6 +13199,21 @@ function _fcLampiranExportMenu() {
 function _fcRekapToggleAll(master) {
   document.querySelectorAll('.rekap-chk').forEach(function(chk){ chk.checked = master.checked; });
   _fcRekapUpdatePrintBtn();
+}
+
+// Centang otomatis baris yang propose PR-nya terisi (di-ACC SPV / hasil import).
+// Baris dengan propose 0 → hilangkan centang. Menggantikan cek manual satu-satu.
+function _fcRekapCheckACC() {
+  var n = 0;
+  document.querySelectorAll('.rekap-chk').forEach(function(chk){
+    var has = chk.getAttribute('data-hasprop') === '1';
+    chk.checked = has;
+    if(has) n++;
+  });
+  _fcRekapUpdatePrintBtn();
+  var master = document.getElementById('rekap-chk-all');
+  if(master) master.checked = false;
+  toast(n ? ('✓ '+n+' baris di-ACC dicentang otomatis') : 'Tidak ada propose PR terisi — isi/Import PR dulu', n ? 'ok' : 'err');
 }
 
 // ─── Snapshot Rekap PR — bekukan angka supaya Cetak Lampiran nanti (setelah   ─
@@ -13826,6 +13844,124 @@ function _fcExportRekapGSheet() {
       toast('Data Rekap PR disalin! Buka Sheets → klik A1 → Ctrl+V','ok');
     }).catch(function(){ _fcFallbackCopy(tsv); });
   } else { _fcFallbackCopy(tsv); }
+}
+
+// ─── IMPORT PR dari Excel yang sudah diedit SPV ─────────────────────────────
+// SPV menambah kolom "Tanggal PR" (= bulan barang masuk). Baris yang diisi tanggal
+// → jadi propose PR di bulan itu, qty dari kolom Qty (boleh diedit SPV). Baris kosong
+// → propose 0. Menggantikan input manual satu-per-satu di Forecast.
+function _fcImportPR(input) {
+  var file = input.files && input.files[0];
+  if(!file) return;
+  if(typeof XLSX === 'undefined') { toast('SheetJS belum siap','err'); input.value=''; return; }
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      var wb = XLSX.read(new Uint8Array(e.target.result), {type:'array', cellDates:true});
+      var ws = wb.Sheets[wb.SheetNames[0]];
+      var rows = XLSX.utils.sheet_to_json(ws, {header:1, raw:false, defval:''});
+      if(!rows.length) throw new Error('File kosong');
+
+      // Cari baris header (yang memuat "Item No" & "Qty")
+      var hdrIdx = -1;
+      for(var i=0;i<Math.min(rows.length,10);i++){
+        var low = rows[i].map(function(c){ return String(c).toLowerCase().trim(); });
+        if(low.some(function(h){return /item\s*no|item code|kode/.test(h);}) && low.some(function(h){return h==='qty'||/qty|jumlah/.test(h);})) { hdrIdx=i; break; }
+      }
+      if(hdrIdx<0) throw new Error('Header tidak ditemukan (butuh kolom "Item No" & "Qty")');
+      var H = rows[hdrIdx].map(function(c){ return String(c).toLowerCase().trim(); });
+      var findCol = function(pats){ for(var p=0;p<pats.length;p++){ for(var c=0;c<H.length;c++){ if(pats[p].test(H[c])) return c; } } return -1; };
+      var cItem = findCol([/^item\s*no$/, /item\s*code/, /^kode$/, /^item$/]);
+      var cQty  = findCol([/^qty$/, /qty|jumlah/]);
+      var cTgl  = findCol([/tanggal\s*pr/, /tgl\s*pr/, /tanggal/, /tgl/]);
+      var cBulan= findCol([/kebutuhan\s*bulan/, /bulan/]);
+      if(cItem<0) throw new Error('Kolom "Item No" tidak ditemukan');
+      if(cTgl<0)  throw new Error('Kolom "Tanggal PR" tidak ditemukan — SPV harus menambah kolom tanggal');
+
+      // Bulan → index FC_MONTHS. Pakai nomor bulan dari tanggal, cocokkan ke FC_MONTH_NUMS.
+      function monthIdxFromDate(val) {
+        if(val==null || String(val).trim()==='') return -1;
+        var mn = -1, yr = -1;
+        if(val instanceof Date && !isNaN(val)) { mn = val.getMonth()+1; yr = val.getFullYear(); }
+        else {
+          var s = String(val).trim();
+          // dd/mm/yyyy atau dd-mm-yyyy atau yyyy-mm-dd
+          var m1 = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+          var m2 = s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+          if(m1){ mn = parseInt(m1[2]); yr = parseInt(m1[3]); if(yr<100) yr+=2000; }
+          else if(m2){ mn = parseInt(m2[2]); yr = parseInt(m2[1]); }
+          else {
+            // coba parse sebagai Date
+            var d = new Date(s);
+            if(!isNaN(d)){ mn = d.getMonth()+1; yr = d.getFullYear(); }
+          }
+        }
+        if(mn<1) return -1;
+        // Cari index di FC_MONTH_NUMS yang cocok nomor bulan (dan tahun kalau tersedia)
+        for(var k=0;k<FC_MONTH_NUMS.length;k++){
+          if(FC_MONTH_NUMS[k]===mn){
+            if(yr>0){
+              var expYr = _fcYearForMonthIdx(k); // '26 / '27
+              if(String(yr).slice(-2)!==expYr) continue;
+            }
+            return k;
+          }
+        }
+        return -1;
+      }
+
+      var applied=0, skippedNoDate=0, notFound=[], badDate=[];
+      var touchedCodes = {};
+      for(var r=hdrIdx+1;r<rows.length;r++){
+        var row = rows[r];
+        var code = String(row[cItem]||'').trim();
+        if(!code) continue;
+        touchedCodes[code] = true;
+        var tglVal = cTgl>=0 ? row[cTgl] : '';
+        if(tglVal==null || String(tglVal).trim()===''){ skippedNoDate++; if(!_fcPropose[code]) _fcPropose[code]=[]; continue; }
+        var mIdx = monthIdxFromDate(tglVal);
+        if(mIdx<0){ badDate.push(code+' ("'+tglVal+'")'); continue; }
+        var qty = cQty>=0 ? parseFloat(String(row[cQty]).replace(/[.,](?=\d{3}\b)/g,'').replace(',','.')) : 0;
+        if(isNaN(qty)) qty = 0;
+        if(!_fcPropose[code]) _fcPropose[code] = [];
+        // Isi array sesuai panjang FC_MONTHS
+        for(var z=0;z<FC_MONTHS.length;z++){ if(_fcPropose[code][z]===undefined) _fcPropose[code][z]=null; }
+        // Reset semua bulan item ini dulu (biar bulan lama tidak nyangkut), lalu set yang di-ACC
+        for(var z2=0;z2<FC_MONTHS.length;z2++){ _fcPropose[code][z2]=0; }
+        _fcPropose[code][mIdx] = qty;
+        applied++;
+      }
+      // Baris tanpa tanggal → propose 0 semua bulan (tidak dibuat PR)
+      Object.keys(touchedCodes).forEach(function(code){
+        if(!_fcPropose[code]) return;
+        // kalau code tidak pernah di-set tanggal (skippedNoDate), pastikan 0
+      });
+
+      // Simpan + refresh
+      try {
+        localStorage.setItem('fc_propose', JSON.stringify(_fcPropose));
+        localStorage.setItem('fc_autopropose','0'); // matikan auto — pakai hasil ACC SPV
+        cloudSave('fc_propose', JSON.stringify(_fcPropose));
+        cloudSave('fc_autopropose','0');
+      } catch(err){}
+      _fcAutoPropose = false;
+      if(typeof renderForecast==='function') renderForecast();
+      // Auto-centang baris yang di-ACC untuk lampiran (setelah tabel ter-render)
+      setTimeout(function(){ if(typeof _fcRekapCheckACC==='function' && document.querySelector('.rekap-chk')) _fcRekapCheckACC(); }, 400);
+
+      var msg = '✓ Import PR: '+applied+' item di-ACC (propose di-set)';
+      if(skippedNoDate) msg += ', '+skippedNoDate+' tanpa tanggal (propose 0)';
+      if(badDate.length) msg += ' · ⚠ '+badDate.length+' tanggal tidak terbaca';
+      if(notFound.length) msg += ' · '+notFound.length+' item tidak dikenal';
+      toast(msg, badDate.length ? 'err' : 'ok');
+      if(badDate.length) console.warn('[import PR] tanggal tidak terbaca:', badDate);
+    } catch(err) {
+      toast('Import gagal: '+err.message, 'err');
+      console.error('[import PR]', err);
+    }
+    input.value='';
+  };
+  reader.readAsArrayBuffer(file);
 }
 
 function _fcExportRekap() {
