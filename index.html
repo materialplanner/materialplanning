@@ -14025,6 +14025,9 @@ function _fcCetakLampiranDariExcel(input) {
       var wb = XLSX.read(new Uint8Array(e.target.result), {type:'array', cellDates:false});
       var ws = wb.Sheets[wb.SheetNames[0]];
       var rows = XLSX.utils.sheet_to_json(ws, {header:1, raw:false, defval:''});
+      // rawRows: nilai MENTAH (serial number utk tanggal) — dipakai khusus kolom Tanggal PR,
+      // supaya tidak kena pemformatan string yang ambigu (mm/dd vs dd/mm).
+      var rawRows = XLSX.utils.sheet_to_json(ws, {header:1, raw:true, defval:''});
       if(!rows.length) throw new Error('File kosong');
 
       // Header row (memuat "Item No" & "Qty")
@@ -14088,11 +14091,13 @@ function _fcCetakLampiranDariExcel(input) {
       for(var r=hdrIdx+1;r<rows.length;r++){
         var code = String(rows[r][cItem]||'').trim();
         if(!code) continue;
-        var tglVal = rows[r][cTgl];
-        if(tglVal==null || String(tglVal).trim()==='') continue; // tidak di-ACC → skip
-        _dbgDates.push({code:code, raw:tglVal, type:(tglVal instanceof Date?'Date':typeof tglVal), str:String(tglVal)});
-        var mIdx = monthIdxFromDate(tglVal);
-        if(mIdx<0){ badDate.push(code+' ("'+tglVal+'")'); continue; }
+        // Tanggal dari rawRows (serial number asli — tidak ambigu). Fallback ke rows kalau kosong.
+        var tglRaw = (rawRows[r] && rawRows[r][cTgl] != null && String(rawRows[r][cTgl]).trim()!=='') ? rawRows[r][cTgl] : rows[r][cTgl];
+        var tglTxt = rows[r][cTgl];
+        if(tglRaw==null || String(tglRaw).trim()==='') continue; // tidak di-ACC → skip
+        _dbgDates.push({code:code, raw:tglRaw, rawType:(tglRaw instanceof Date?'Date':typeof tglRaw), txt:String(tglTxt)});
+        var mIdx = monthIdxFromDate(tglRaw);
+        if(mIdx<0){ badDate.push(code+' ("'+tglRaw+'")'); continue; }
         var qtyAcc = cQty>=0 ? parseFloat(String(rows[r][cQty]).replace(/[.,](?=\d{3}\b)/g,'').replace(',','.')) : 0;
         if(isNaN(qtyAcc)) qtyAcc = 0;
         if(!selByCode[code]) selByCode[code] = {};
@@ -14101,7 +14106,7 @@ function _fcCetakLampiranDariExcel(input) {
         proposeOverride[code][mIdx] = qtyAcc;
         count++;
       }
-      console.log('[cetak lampiran] kolom tanggal:', rows[hdrIdx][cTgl], '| nilai terbaca:', _dbgDates);
+      console.log('[cetak lampiran v2] nilai tanggal:', _dbgDates);
       if(!count){
         var why = badDate.length ? (badDate.length+' tanggal tidak terbaca') : 'tidak ada baris dengan Tanggal PR terisi';
         toast('Cetak lampiran dibatalkan: '+why, 'err');
