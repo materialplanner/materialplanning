@@ -13936,30 +13936,32 @@ function _fcImportPR(input) {
 
       var applied=0, skippedNoDate=0, notFound=[], badDate=[];
       var touchedCodes = {};
+
+      // ── RESET TOTAL: kosongkan SEMUA propose (semua item, semua bulan) ke 0 dulu ──
+      // Import = "sumber kebenaran" hasil ACC SPV. Propose lama (auto-propose atau import
+      // sebelumnya) harus dibersihkan total, kalau tidak → propose lama nyangkut & tercentang.
+      Object.keys(_fcPropose).forEach(function(c){
+        var arr = _fcPropose[c];
+        if(Array.isArray(arr)) { for(var z=0;z<arr.length;z++) arr[z]=0; }
+      });
+
       for(var r=hdrIdx+1;r<rows.length;r++){
         var row = rows[r];
         var code = String(row[cItem]||'').trim();
         if(!code) continue;
         touchedCodes[code] = true;
         var tglVal = cTgl>=0 ? row[cTgl] : '';
-        if(tglVal==null || String(tglVal).trim()===''){ skippedNoDate++; if(!_fcPropose[code]) _fcPropose[code]=[]; continue; }
+        if(tglVal==null || String(tglVal).trim()===''){ skippedNoDate++; continue; }
         var mIdx = monthIdxFromDate(tglVal);
         if(mIdx<0){ badDate.push(code+' ("'+tglVal+'")'); continue; }
         var qty = cQty>=0 ? parseFloat(String(row[cQty]).replace(/[.,](?=\d{3}\b)/g,'').replace(',','.')) : 0;
         if(isNaN(qty)) qty = 0;
         if(!_fcPropose[code]) _fcPropose[code] = [];
-        // Isi array sesuai panjang FC_MONTHS
-        for(var z=0;z<FC_MONTHS.length;z++){ if(_fcPropose[code][z]===undefined) _fcPropose[code][z]=null; }
-        // Reset semua bulan item ini dulu (biar bulan lama tidak nyangkut), lalu set yang di-ACC
-        for(var z2=0;z2<FC_MONTHS.length;z2++){ _fcPropose[code][z2]=0; }
+        // Pastikan panjang array = FC_MONTHS, semua 0
+        for(var z=0;z<FC_MONTHS.length;z++){ if(_fcPropose[code][z]===undefined || _fcPropose[code][z]==null) _fcPropose[code][z]=0; }
         _fcPropose[code][mIdx] = qty;
         applied++;
       }
-      // Baris tanpa tanggal → propose 0 semua bulan (tidak dibuat PR)
-      Object.keys(touchedCodes).forEach(function(code){
-        if(!_fcPropose[code]) return;
-        // kalau code tidak pernah di-set tanggal (skippedNoDate), pastikan 0
-      });
 
       // Simpan + refresh
       try {
