@@ -12957,8 +12957,8 @@ function _fcRenderRekapTable(el, propRows, fcData, snapshotBanner) {
     + (snapshotBanner ? '' : '<button class="btn btn-sm" onclick="_fcSaveRekapSnapshot()" title="Bekukan angka rekap hari ini — bisa dicetak lagi nanti walau data live sudah berubah" style="font-size:11px">📸 Simpan Snapshot</button>'
       + '<button class="btn btn-sm" onclick="_fcShowSnapshotList()" title="Lihat/cetak snapshot yang pernah disimpan" style="font-size:11px">🕐 Riwayat Snapshot</button>')
     + '<button class="btn btn-sm btn-primary" onclick="_fcRekapExportMenu()" style="font-size:11px">↓ Export Rekap PR</button>'
-    + (snapshotBanner ? '' : '<button class="btn btn-sm" onclick="document.getElementById(\'pr-import-file\').click()" title="Import Excel Rekap PR yang sudah diedit SPV — isi propose PR otomatis dari kolom Tanggal PR & Qty" style="font-size:11px;background:var(--green);color:#fff">⬆ Import PR (SPV)</button>'
-      + '<input type="file" id="pr-import-file" accept=".xlsx,.xls,.csv" style="display:none" onchange="_fcImportPR(this)">')
+    + (snapshotBanner ? '' : '<button class="btn btn-sm" onclick="document.getElementById(\'pr-lampiran-file\').click()" title="Upload Excel yang sudah di-ACC (kolom Tanggal PR terisi) → langsung cetak lampiran. Tidak mengubah angka/tanggal Forecast." style="font-size:11px;background:var(--green);color:#fff">🖨 Cetak Lampiran dari Excel ACC</button>'
+      + '<input type="file" id="pr-lampiran-file" accept=".xlsx,.xls,.csv" style="display:none" onchange="_fcCetakLampiranDariExcel(this)">')
     + '</div>'
     + '</div>'
     + '<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;min-width:900px;width:100%">'
@@ -13013,16 +13013,22 @@ function _fcRenderRekapTable(el, propRows, fcData, snapshotBanner) {
 // ─── Builder data Lampiran — dipakai bareng oleh export GSheet & Excel,     ─
 // biar formatnya selalu konsisten. Return: { blocks: [...], codes: [...] }   ─
 // blocks[i] = { title, headerRow, dataRows: [[label, sohVal, v1..v6], ...] } ─
-function _fcBuildLampiranBlocks() {
+function _fcBuildLampiranBlocks(selByCodeOverride) {
   var selByCode = {};
   var codes = [];
-  document.querySelectorAll('.rekap-chk:checked').forEach(function(chk){
-    var c = chk.getAttribute('data-code');
-    var idx = parseInt(chk.getAttribute('data-idx'), 10);
-    if(!c || isNaN(idx)) return;
-    if(!selByCode[c]) { selByCode[c] = {}; codes.push(c); }
-    selByCode[c][idx] = true;
-  });
+  if(selByCodeOverride) {
+    // Dipanggil dari import Excel — pakai pilihan item+bulan dari Excel langsung
+    selByCode = selByCodeOverride;
+    codes = Object.keys(selByCode);
+  } else {
+    document.querySelectorAll('.rekap-chk:checked').forEach(function(chk){
+      var c = chk.getAttribute('data-code');
+      var idx = parseInt(chk.getAttribute('data-idx'), 10);
+      if(!c || isNaN(idx)) return;
+      if(!selByCode[c]) { selByCode[c] = {}; codes.push(c); }
+      selByCode[c][idx] = true;
+    });
+  }
   if(!codes.length) return null;
 
   var ospoIdx = _buildOSPOIndex();
@@ -13459,19 +13465,24 @@ function _fcDoiFromStock(forecast, s, monthIdx) {
 // ─── Cetak Lampiran Forecast (untuk dilampirkan saat buka PR) ─────────────
 // Reuse _calcForecast via window._fcRekapFcData (di-set oleh _fcRenderRekap).
 // Browser print dialog menangani dua kebutuhan sekaligus: cetak fisik & Save as PDF.
-function _fcPrintLampiranPR() {
+function _fcPrintLampiranPR(selByCodeOverride) {
   // Map code -> Set bulan (proposeIdx) yang DICENTANG SAJA, bukan semua bulan
   // yang punya Propose PR di fc.propose — supaya lampiran hanya menampilkan
   // apa yang benar-benar dipilih user, bukan seluruh kebutuhan ke depan.
   var selByCode = {};
   var codes = [];
-  document.querySelectorAll('.rekap-chk:checked').forEach(function(chk){
-    var c = chk.getAttribute('data-code');
-    var idx = parseInt(chk.getAttribute('data-idx'), 10);
-    if(!c || isNaN(idx)) return;
-    if(!selByCode[c]) { selByCode[c] = {}; codes.push(c); }
-    selByCode[c][idx] = true;
-  });
+  if(selByCodeOverride) {
+    selByCode = selByCodeOverride;
+    codes = Object.keys(selByCode);
+  } else {
+    document.querySelectorAll('.rekap-chk:checked').forEach(function(chk){
+      var c = chk.getAttribute('data-code');
+      var idx = parseInt(chk.getAttribute('data-idx'), 10);
+      if(!c || isNaN(idx)) return;
+      if(!selByCode[c]) { selByCode[c] = {}; codes.push(c); }
+      selByCode[c][idx] = true;
+    });
+  }
   if(!codes.length) { toast('Pilih minimal 1 item dulu','err'); return; }
 
   var ospoIdx = _buildOSPOIndex();
@@ -13963,6 +13974,16 @@ function _fcImportPR(input) {
         applied++;
       }
 
+      // SAFETY: kalau tidak ada satupun propose berhasil di-set (applied=0), berarti
+      // tanggal tidak terbaca atau item tidak match. JANGAN commit reset (nanti kosong total).
+      if(applied === 0) {
+        var why = badDate.length ? (badDate.length+' tanggal tidak terbaca') : 'tidak ada baris dengan Tanggal PR terisi';
+        toast('Import dibatalkan: '+why+'. Propose lama tidak diubah.', 'err');
+        console.warn('[import PR] applied=0, dibatalkan. badDate:', badDate);
+        input.value='';
+        return; // _fcPropose sudah ke-reset di memori, tapi TIDAK disimpan — reload akan kembalikan
+      }
+
       // Simpan + refresh
       try {
         localStorage.setItem('fc_propose', JSON.stringify(_fcPropose));
@@ -13984,6 +14005,98 @@ function _fcImportPR(input) {
     } catch(err) {
       toast('Import gagal: '+err.message, 'err');
       console.error('[import PR]', err);
+    }
+    input.value='';
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// ─── CETAK LAMPIRAN LANGSUNG DARI EXCEL ACC (tanpa ubah forecast) ───────────
+// Upload Excel yang sudah di-ACC SPV → baca item + kolom "Tanggal PR" (bulan) →
+// langsung cetak lampiran (angka dari forecast dashboard). TIDAK menyentuh _fcPropose,
+// TIDAK mengubah angka/tanggal di Forecast. Murni untuk generate cetakan.
+function _fcCetakLampiranDariExcel(input) {
+  var file = input.files && input.files[0];
+  if(!file) return;
+  if(typeof XLSX === 'undefined') { toast('SheetJS belum siap','err'); input.value=''; return; }
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      var wb = XLSX.read(new Uint8Array(e.target.result), {type:'array', cellDates:true});
+      var ws = wb.Sheets[wb.SheetNames[0]];
+      var rows = XLSX.utils.sheet_to_json(ws, {header:1, raw:false, defval:''});
+      if(!rows.length) throw new Error('File kosong');
+
+      // Header row (memuat "Item No" & "Qty")
+      var hdrIdx = -1;
+      for(var i=0;i<Math.min(rows.length,10);i++){
+        var low = rows[i].map(function(c){ return String(c).toLowerCase().trim(); });
+        if(low.some(function(h){return /item\s*no|item code|kode/.test(h);}) && low.some(function(h){return h==='qty'||/qty|jumlah/.test(h);})) { hdrIdx=i; break; }
+      }
+      if(hdrIdx<0) throw new Error('Header tidak ditemukan (butuh "Item No" & "Qty")');
+      var H = rows[hdrIdx].map(function(c){ return String(c).toLowerCase().trim(); });
+      var cItem=-1; for(var c1=0;c1<H.length;c1++){ if(/^item\s*no$|item\s*code|^kode$|^item$/.test(H[c1])){ cItem=c1; break; } }
+      // Kolom Tanggal PR — exclude "PR Harus Dibuka"/status/kebutuhan
+      var cTgl=-1;
+      for(var c2=0;c2<H.length;c2++){ var h=H[c2]; if(/harus\s*dibuka|status|kebutuhan/.test(h)) continue; if(/tanggal\s*pr|tgl\s*pr|^tanggal$|^tgl$|acc/.test(h)){ cTgl=c2; break; } }
+      if(cItem<0) throw new Error('Kolom "Item No" tidak ditemukan');
+      if(cTgl<0)  throw new Error('Kolom "Tanggal PR" tidak ditemukan. Tambahkan kolom "Tanggal PR" di Excel.');
+
+      function monthIdxFromDate(val) {
+        if(val==null || String(val).trim()==='') return -1;
+        var mn=-1, yr=-1;
+        if(val instanceof Date && !isNaN(val)){ mn=val.getMonth()+1; yr=val.getFullYear(); }
+        else {
+          var s=String(val).trim();
+          var m1=s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+          var m2=s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+          if(m1){ mn=parseInt(m1[2]); yr=parseInt(m1[3]); if(yr<100)yr+=2000; }
+          else if(m2){ mn=parseInt(m2[2]); yr=parseInt(m2[1]); }
+          else { var d=new Date(s); if(!isNaN(d)){ mn=d.getMonth()+1; yr=d.getFullYear(); } }
+        }
+        if(mn<1) return -1;
+        for(var k=0;k<FC_MONTH_NUMS.length;k++){
+          if(FC_MONTH_NUMS[k]===mn){
+            if(yr>0 && String(yr).slice(-2)!==_fcYearForMonthIdx(k)) continue;
+            return k;
+          }
+        }
+        return -1;
+      }
+
+      // Bangun selByCode dari baris yang Tanggal PR-nya terisi
+      var selByCode = {}, count=0, badDate=[], notInFc=[];
+      var fcCache = window._fcRekapFcData || {};
+      for(var r=hdrIdx+1;r<rows.length;r++){
+        var code = String(rows[r][cItem]||'').trim();
+        if(!code) continue;
+        var tglVal = rows[r][cTgl];
+        if(tglVal==null || String(tglVal).trim()==='') continue; // tidak di-ACC → skip
+        var mIdx = monthIdxFromDate(tglVal);
+        if(mIdx<0){ badDate.push(code+' ("'+tglVal+'")'); continue; }
+        if(!selByCode[code]) selByCode[code] = {};
+        selByCode[code][mIdx] = true;
+        count++;
+      }
+      if(!count){
+        var why = badDate.length ? (badDate.length+' tanggal tidak terbaca') : 'tidak ada baris dengan Tanggal PR terisi';
+        toast('Cetak lampiran dibatalkan: '+why, 'err');
+        input.value=''; return;
+      }
+
+      var _codeCount = Object.keys(selByCode).length;
+      var _ok = confirm('Cetak Lampiran dari Excel:\n\n'
+        + _codeCount + ' item · ' + count + ' baris PR akan dicetak.\n'
+        + (badDate.length ? ('⚠ '+badDate.length+' tanggal tidak terbaca (dilewati).\n') : '')
+        + '\nAngka lampiran diambil dari Forecast dashboard. Forecast TIDAK diubah.\n\nLanjut cetak?');
+      if(!_ok){ toast('Dibatalkan','err'); input.value=''; return; }
+
+      // Panggil cetak lampiran dengan pilihan dari Excel (TIDAK sentuh _fcPropose)
+      _fcPrintLampiranPR(selByCode);
+      if(badDate.length) console.warn('[cetak lampiran excel] tanggal tidak terbaca:', badDate);
+    } catch(err) {
+      toast('Gagal: '+err.message, 'err');
+      console.error('[cetak lampiran excel]', err);
     }
     input.value='';
   };
