@@ -14022,7 +14022,7 @@ function _fcCetakLampiranDariExcel(input) {
   var reader = new FileReader();
   reader.onload = function(e) {
     try {
-      var wb = XLSX.read(new Uint8Array(e.target.result), {type:'array', cellDates:true});
+      var wb = XLSX.read(new Uint8Array(e.target.result), {type:'array', cellDates:false});
       var ws = wb.Sheets[wb.SheetNames[0]];
       var rows = XLSX.utils.sheet_to_json(ws, {header:1, raw:false, defval:''});
       if(!rows.length) throw new Error('File kosong');
@@ -14046,33 +14046,30 @@ function _fcCetakLampiranDariExcel(input) {
 
       function monthIdxFromDate(val) {
         if(val==null || String(val).trim()==='') return -1;
-        var mn=-1, yr=-1;
+        var mn=-1, yr=-1, dd=-1;
         if(val instanceof Date && !isNaN(val)){ mn=val.getMonth()+1; yr=val.getFullYear(); }
         else if(typeof val==='number' && val>30000 && val<80000){
-          // Serial number Excel (hari sejak 1899-12-30)
           var epoch = new Date(Date.UTC(1899,11,30));
           var d0 = new Date(epoch.getTime() + Math.round(val)*86400000);
           mn = d0.getUTCMonth()+1; yr = d0.getUTCFullYear();
         }
         else {
           var s=String(val).trim();
-          // serial number sebagai string
           if(/^\d{5}$/.test(s)){
             var epoch2 = new Date(Date.UTC(1899,11,30));
             var d1 = new Date(epoch2.getTime() + parseInt(s)*86400000);
             mn = d1.getUTCMonth()+1; yr = d1.getUTCFullYear();
           } else {
-            // dd/mm/yyyy, dd-mm-yyyy, dd.mm.yyyy (juga yyyy-mm-dd)
-            var m1=s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
-            var m2=s.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/);
-            if(m1){ mn=parseInt(m1[2]); yr=parseInt(m1[3]); if(yr<100)yr+=2000; }
-            else if(m2){ mn=parseInt(m2[2]); yr=parseInt(m2[1]); }
-            else { var d=new Date(s); if(!isNaN(d)){ mn=d.getMonth()+1; yr=d.getFullYear(); } }
+            // SELALU dd/mm/yyyy (format Indonesia) — JANGAN pakai new Date() yang
+            // menebak mm/dd US (bikin 02/10 → Feb, salah). yyyy-mm-dd juga didukung.
+            var m1=s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/); // dd/mm/yyyy
+            var m2=s.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/);   // yyyy-mm-dd
+            if(m1){ dd=parseInt(m1[1]); mn=parseInt(m1[2]); yr=parseInt(m1[3]); if(yr<100)yr+=2000; }
+            else if(m2){ yr=parseInt(m2[1]); mn=parseInt(m2[2]); dd=parseInt(m2[3]); }
+            else return -1; // format tak dikenal — jangan tebak
           }
         }
         if(mn<1||mn>12) return -1;
-        // Cari index di FC_MONTH_NUMS. Utamakan yang cocok bulan+tahun; kalau tahun tak cocok
-        // dengan satupun, jatuh ke pencocokan bulan saja (jangan tolak — tahun bisa beda tipis).
         var byMonthYear=-1, byMonthOnly=-1;
         for(var k=0;k<FC_MONTH_NUMS.length;k++){
           if(FC_MONTH_NUMS[k]===mn){
