@@ -13873,10 +13873,18 @@ function _fcImportPR(input) {
       var findCol = function(pats){ for(var p=0;p<pats.length;p++){ for(var c=0;c<H.length;c++){ if(pats[p].test(H[c])) return c; } } return -1; };
       var cItem = findCol([/^item\s*no$/, /item\s*code/, /^kode$/, /^item$/]);
       var cQty  = findCol([/^qty$/, /qty|jumlah/]);
-      var cTgl  = findCol([/tanggal\s*pr/, /tgl\s*pr/, /tanggal/, /tgl/]);
+      // Kolom Tanggal PR (yang SPV isi) — HARUS mengandung tanggal/tgl TAPI BUKAN
+      // "PR Harus Dibuka" (kolom bawaan export yang isinya tanggal semua → kalau ke-match
+      // bikin semua baris salah dianggap di-ACC). Cari kandidat yang lolos exclude.
+      var cTgl = -1;
+      for(var ci=0; ci<H.length; ci++){
+        var h = H[ci];
+        if(/harus\s*dibuka|status|kebutuhan/.test(h)) continue; // exclude kolom bawaan
+        if(/tanggal\s*pr|tgl\s*pr|^tanggal$|^tgl$|tanggal\s*buka|tgl\s*buka|acc/.test(h)) { cTgl = ci; break; }
+      }
       var cBulan= findCol([/kebutuhan\s*bulan/, /bulan/]);
       if(cItem<0) throw new Error('Kolom "Item No" tidak ditemukan');
-      if(cTgl<0)  throw new Error('Kolom "Tanggal PR" tidak ditemukan — SPV harus menambah kolom tanggal');
+      if(cTgl<0)  throw new Error('Kolom "Tanggal PR" tidak ditemukan. Tambahkan kolom bernama persis "Tanggal PR" (jangan pakai kolom "PR Harus Dibuka").');
 
       // Bulan → index FC_MONTHS. Pakai nomor bulan dari tanggal, cocokkan ke FC_MONTH_NUMS.
       function monthIdxFromDate(val) {
@@ -13909,6 +13917,22 @@ function _fcImportPR(input) {
         }
         return -1;
       }
+
+      // ── Safety check: hitung dulu berapa baris terisi tanggal, konfirmasi ke user ──
+      var _fillCount = 0, _totalRows = 0;
+      for(var pr=hdrIdx+1; pr<rows.length; pr++){
+        var _c = String(rows[pr][cItem]||'').trim(); if(!_c) continue;
+        _totalRows++;
+        var _tv = rows[pr][cTgl];
+        if(_tv!=null && String(_tv).trim()!=='') _fillCount++;
+      }
+      var _colName = rows[hdrIdx][cTgl];
+      var _ok = confirm('Import PR:\n\n'
+        + 'Kolom tanggal terbaca: "' + _colName + '"\n'
+        + 'Baris terisi tanggal (akan di-ACC): ' + _fillCount + ' dari ' + _totalRows + ' baris\n\n'
+        + (_fillCount > 20 ? '⚠ PERHATIAN: ' + _fillCount + ' baris akan jadi PR. Kalau kamu cuma isi sedikit tanggal, kemungkinan kolom yang terbaca SALAH (mis. kolom "PR Harus Dibuka"). Batalkan & cek nama kolom.\n\n' : '')
+        + 'Lanjut terapkan?');
+      if(!_ok){ toast('Import dibatalkan','err'); input.value=''; return; }
 
       var applied=0, skippedNoDate=0, notFound=[], badDate=[];
       var touchedCodes = {};
