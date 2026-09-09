@@ -14109,8 +14109,13 @@ function _fcCetakLampiranDariExcel(input) {
       }
 
       var _codeCount = Object.keys(selByCode).length;
-      var _ok = confirm('Cetak Lampiran dari Excel ACC:\n\n'
+      var _preview = Object.keys(selByCode).slice(0,8).map(function(code){
+        var mons = Object.keys(selByCode[code]).map(function(i){ return FC_MONTHS[i]; }).join(', ');
+        return '  • ' + code + ' → ' + mons;
+      }).join('\n');
+      var _ok = confirm('Cetak Lampiran dari Excel ACC [v2]:\n\n'
         + _codeCount + ' item · ' + count + ' baris PR akan dicetak.\n'
+        + 'Bulan terbaca:\n' + _preview + (_codeCount>8?'\n  ...':'') + '\n'
         + (badDate.length ? ('⚠ '+badDate.length+' tanggal tidak terbaca (dilewati).\n') : '')
         + '\nStock Ending & DOI dihitung ulang sesuai qty & bulan yang di-ACC.\nData Forecast dashboard TIDAK diubah (dikembalikan setelah cetak).\n\nLanjut cetak?');
       if(!_ok){ toast('Dibatalkan','err'); input.value=''; return; }
