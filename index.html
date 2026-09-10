@@ -856,6 +856,8 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
         style="padding:5px 14px;font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;background:transparent;color:var(--muted);border:none;cursor:pointer;font-family:var(--font)">Forecast</button>
       <button id="fc-tab-analisis" onclick="_fcSetView('analisis')"
         style="padding:5px 14px;font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;background:transparent;color:var(--muted);border:none;cursor:pointer;font-family:var(--font)">Analisis</button>
+      <button id="fc-tab-grafik" onclick="_fcSetView('grafik')"
+        style="padding:5px 14px;font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;background:transparent;color:var(--muted);border:none;cursor:pointer;font-family:var(--font)">📊 Grafik</button>
     </div>
 
     <!-- Type -->
@@ -873,6 +875,12 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
       <option value="stock">Stock saja</option>
       <option value="doi">DOI saja</option>
     </select>
+
+    <!-- Toggle Qty / Value (× COGM) -->
+    <div style="display:inline-flex;border:1px solid var(--border2);border-radius:6px;overflow:hidden;font-size:11px" title="Tampilkan sebagai kuantitas atau nilai (qty × COGM)">
+      <button id="fc-view-qty" onclick="_fcSetValueView(false)" style="padding:5px 12px;border:none;background:var(--teal);color:#fff;cursor:pointer;font-weight:600">Qty</button>
+      <button id="fc-view-value" onclick="_fcSetValueView(true)" style="padding:5px 12px;border:none;background:none;color:var(--muted);cursor:pointer;font-weight:600">Value</button>
+    </div>
 
     <!-- ABC filter (Detail only) -->
     <select id="f-fc-abc" onchange="renderForecast()" style="font-size:12px;padding:5px 10px" title="Filter Class ABC">
@@ -1002,6 +1010,18 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
         <div id="bom_sheet-info" style="margin-top:8px;font-size:11px;color:var(--muted)"></div>
         <div id="bom_sheet-ts" style="font-size:10px;color:var(--muted);margin-top:2px"></div>
         <div style="margin-top:8px;font-size:10px;color:var(--muted);line-height:1.5"><b>Samakan dengan file BOM xlsx</b> (baca per-posisi kolom). Urutan: <b>kolom 1</b>=FG, <b>kolom 2</b>=FG Desc, <b>kolom 3</b>=Component, kolom 4=Comp Desc. Header baris <u>wajib</u> memuat kolom bernama persis <b>"Qty per pcs"</b> dan <b>"BOM Type"</b> (dicari by-nama). Cara termudah: copy-paste isi file BOM xlsx apa adanya ke tab ini.</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-hdr"><span class="card-title">💰 COGM</span><span id="cogm-status" class="dot off"></span></div>
+      <div style="padding:14px">
+        <div class="fg"><label style="font-size:11px">Google Sheets URL</label><input id="cogm-url" placeholder="https://docs.google.com/spreadsheets/d/..." style="width:100%;font-size:11px"></div>
+        <div class="fg"><label style="font-size:11px">Nama Tab</label><input id="cogm-sheet" placeholder="COGM" style="width:100%;font-size:11px"></div>
+        <button class="btn btn-sm btn-primary" onclick="loadSheetData('cogm')" style="width:100%;margin-top:6px">Muat COGM</button>
+        <div id="cogm-info" style="margin-top:8px;font-size:11px;color:var(--muted)"></div>
+        <div id="cogm-ts" style="font-size:10px;color:var(--muted);margin-top:2px"></div>
+        <div style="margin-top:8px;font-size:10px;color:var(--muted);line-height:1.5">Kolom: <b>Code</b>, <b>Description</b>, <b>COGM</b> (value per item). Dipakai untuk Forecast "view by Value" (qty × COGM).</div>
       </div>
     </div>
 
@@ -2913,6 +2933,7 @@ async function _aiSend() {
 <div id="toast"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <!-- Firebase SDK v10 compat -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -3057,8 +3078,9 @@ var CLOUD_KEYS = [
   'schedule','po_overrides','proj_comments','stock_history',
   // proj_history: disimpan lokal saja (14 snapshot terlalu besar untuk Firebase 1MB limit)
   'suppliers','proj_hidden_cols','proj_snapshots',
-  'sheet_url_master','sheet_url_mrp','sheet_url_realname','sheet_url_pallet_pm','sheet_url_pallet_rm','sheet_url_bom_sheet',
-  'sheet_tab_master','sheet_tab_mrp','sheet_tab_realname','sheet_tab_pallet_pm','sheet_tab_pallet_rm','sheet_tab_bom_sheet',
+  'sheet_url_master','sheet_url_mrp','sheet_url_realname','sheet_url_pallet_pm','sheet_url_pallet_rm','sheet_url_bom_sheet','sheet_url_cogm',
+  'sheet_tab_master','sheet_tab_mrp','sheet_tab_realname','sheet_tab_pallet_pm','sheet_tab_pallet_rm','sheet_tab_bom_sheet','sheet_tab_cogm',
+  'cogm_data',
   'sap_url','sap_user','sap_pass','fonnte','wn','workdays','last_sync','proj_highlighted',
   'sap_cache_stock','sap_cache_po','sap_cache_grpo','sap_cache_ospr',
   'admin_user','admin_pass',
@@ -3524,6 +3546,11 @@ function _applyRealtimeChanges(keys) {
             if(document.getElementById('proj-tbody')||document.getElementById('proj-table')) { setTimeout(function(){buildProjection();renderProjection();}, 100); }
             if(document.getElementById('fc-table')) { setTimeout(renderForecast, 100); }
           } catch(e) {} break;
+        case 'cogm_data':
+          try {
+            STATE.cogmData = JSON.parse(val || '{}');
+            if(document.getElementById('fc-table')) { setTimeout(renderForecast, 100); }
+          } catch(e) {} break;
         case 'realname_data':
           try {
             STATE.realNameData = JSON.parse(val || '{}');
@@ -3710,6 +3737,30 @@ function _parseCSV(text, headerRowHint) {
 // Ini menjamin perhitungan MRP dari GSheet sama persis dengan upload xlsx: pakai posisi
 // kolom (FG=0, Component=2) + cari 'Qty per pcs'/'BOM Type' by-name di header row.
 // Tidak dipengaruhi header duplikat karena baca array baris, bukan object.
+// Parser COGM dari Google Sheets → { code: cogmValue }. Kolom: Code, Description, COGM.
+function processCOGM(rows, headers) {
+  if(!rows || !rows.length) return {};
+  var keys = Object.keys(rows[0] || {});
+  function findKey(cands) {
+    for(var i=0;i<cands.length;i++){
+      var want = cands[i].toLowerCase().replace(/[^a-z0-9]/g,'');
+      for(var j=0;j<keys.length;j++){ if(keys[j].toLowerCase().replace(/[^a-z0-9]/g,'')===want) return keys[j]; }
+    }
+    return null;
+  }
+  var kCode = findKey(['Code','Item Code','ItemCode','Kode','Item']);
+  var kCogm = findKey(['COGM','Cogm','Value','Nilai','Harga','Price']);
+  if(!kCode || !kCogm) { toast('COGM: kolom "Code" & "COGM" tidak ditemukan','err'); return {}; }
+  var out = {};
+  rows.forEach(function(row){
+    var code = String(row[kCode]||'').trim();
+    if(!code) return;
+    var v = _parseNumID(row[kCogm]);
+    out[code] = isNaN(v) ? 0 : v;
+  });
+  return out;
+}
+
 function _parseBomCSVByIndex(csvText) {
   // Parse CSV → array of arrays (RFC 4180), pertahankan semua kolom termasuk duplikat
   var allRows = []; var row = []; var cell = ''; var inQ = false;
@@ -3923,6 +3974,18 @@ function loadSheetData(type) {
       if(infoEl) infoEl.textContent = _bomData.length+' baris dimuat ✓';
       if(dotEl) dotEl.className='dot';
       toast('BOM: '+_bomData.length+' baris ✓','ok');
+
+    } else if(type==='cogm'){
+      STATE.cogmData = processCOGM(rows, headers);
+      var cnt = Object.keys(STATE.cogmData).length;
+      localStorage.setItem('cogm_data', JSON.stringify(STATE.cogmData));
+      localStorage.setItem('cogm_upload_ts', ts);
+      cloudSave('cogm_data', JSON.stringify(STATE.cogmData));
+      if(infoEl) infoEl.textContent = cnt+' item COGM dimuat ✓';
+      if(dotEl) dotEl.className='dot';
+      // refresh forecast kalau lagi mode value
+      if(typeof renderForecast==='function' && document.getElementById('fc-table')) renderForecast();
+      toast('COGM: '+cnt+' item ✓','ok');
     }
     if(tsEl) tsEl.textContent='Dimuat: '+ts+(sheet?' (tab: '+sheet+')':'');
   }).catch(function(e){
@@ -3933,7 +3996,7 @@ function loadSheetData(type) {
 
 function loadAllSheets(autoBuild) {
   var promises = [];
-  ['master','mrp','realname','pallet_pm','pallet_rm','bom_sheet'].forEach(function(t){
+  ['master','mrp','realname','pallet_pm','pallet_rm','bom_sheet','cogm'].forEach(function(t){
     if(localStorage.getItem('sheet_url_'+t)) promises.push(loadSheetData(t));
   });
   if(!promises.length) { toast('Belum ada URL Sheets. Buka menu Data Source terlebih dahulu.','err'); return Promise.resolve(); }
@@ -3948,7 +4011,7 @@ function loadAllSheets(autoBuild) {
 }
 
 function _restoreSheetUrls() {
-  ['master','mrp','realname','pallet_pm','pallet_rm','bom_sheet'].forEach(function(t){
+  ['master','mrp','realname','pallet_pm','pallet_rm','bom_sheet','cogm'].forEach(function(t){
     var u=localStorage.getItem('sheet_url_'+t), s=localStorage.getItem('sheet_tab_'+t);
     var ue=document.getElementById(t+'-url'), se=document.getElementById(t+'-sheet');
     if(ue&&u) ue.value=u; if(se&&s) se.value=s;
@@ -3979,6 +4042,7 @@ var _projFreezeCol = localStorage.getItem('proj_freeze_col') === '1';
 
 var STATE = {
   mrpData: JSON.parse(localStorage.getItem('mrp_data') || 'null'),
+  cogmData: JSON.parse(localStorage.getItem('cogm_data') || '{}'),
   matcomData: JSON.parse(localStorage.getItem('matcom_data') || 'null'),
   matcomMonthly: JSON.parse(localStorage.getItem('matcom_monthly') || 'null'),
   realNameData: JSON.parse(localStorage.getItem('realname_data') || '{}'),
@@ -11782,7 +11846,7 @@ function _fcDOI2ClearAll() {
 }
 function _fcSetView(v) {
   _fcView = v;
-  ['detail','rekap','supplier'].forEach(function(id) {
+  ['detail','rekap','supplier','analisis','grafik'].forEach(function(id) {
     var btn = document.getElementById('fc-tab-' + id);
     if(btn) { btn.style.background = v===id?'var(--accent)':'transparent'; btn.style.color = v===id?'#fff':'var(--muted)'; }
   });
@@ -12258,6 +12322,33 @@ function generateProposePR() {
 }
 
 // ─── Main render ──────────────────────────────────────────────────────────────
+// ── View by Qty / Value (× COGM) ────────────────────────────────────────────
+window._fcValueView = false;
+function _fcSetValueView(on) {
+  window._fcValueView = !!on;
+  var bQ = document.getElementById('fc-view-qty'), bV = document.getElementById('fc-view-value');
+  if(bQ){ bQ.style.background = on?'none':'var(--teal)'; bQ.style.color = on?'var(--muted)':'#fff'; }
+  if(bV){ bV.style.background = on?'var(--teal)':'none'; bV.style.color = on?'#fff':'var(--muted)'; }
+  if(on && (!STATE.cogmData || !Object.keys(STATE.cogmData).length)) {
+    toast('Data COGM belum dimuat — muat di Data Source dulu','err');
+  }
+  renderForecast();
+}
+// COGM per item (0 kalau tak ada). Value = qty × COGM.
+function _fcCOGM(code) { return (STATE.cogmData && STATE.cogmData[code]) ? STATE.cogmData[code] : 0; }
+// Konversi 1 angka qty → value kalau mode value aktif
+function _fcVal(qty, code) {
+  if(!window._fcValueView) return qty;
+  var c = _fcCOGM(code);
+  return (qty || 0) * c;
+}
+// Konversi array qty → array value (dipakai untuk baris forecast/ospo/stock/propose)
+function _fcValArr(arr, code) {
+  if(!window._fcValueView || !arr) return arr;
+  var c = _fcCOGM(code);
+  return arr.map(function(v){ return (v==null) ? v : (v||0)*c; });
+}
+
 function renderForecast(isGenerate) {
   var isRealtime = true;
   // Build supplier cache untuk DOI2
@@ -12350,6 +12441,7 @@ function renderForecast(isGenerate) {
   if(_fcView==='rekap')       { _fcRenderRekap(el, allItems, fcData, fStatus); }
   else if(_fcView==='supplier')  { _fcRenderSupplier(el, allItems, fcData); }
   else if(_fcView==='analisis')  { _fcRenderAnalisis(el, allItems, fcData); }
+  else if(_fcView==='grafik')    { _fcRenderGrafik(el, allItems, fcData); }
   else                           { _fcRenderDetail(el, allItems, fcData, fRows); }
 }
 
@@ -12566,8 +12658,10 @@ function _fcDetailRow(code, fc, master) {
   }
 
   function gRow(label, vals, clsFn, editable, fieldCode) {
+    var isValueMode = window._fcValueView;
+    var isDOI = (label === 'DOI (hari)');
     var cells = vals.map(function(v, i) {
-      if(editable) {
+      if(editable && !isValueMode) {
         var moqV  = fc.multiple || 1;  // step by multiple
         var cur   = (v != null && v !== 0) ? v : 0;
         var haVal = cur > 0;
@@ -12599,11 +12693,22 @@ function _fcDetailRow(code, fc, master) {
       var disp  = (v===0||v===null||v===undefined) ? '<span style="color:var(--hint)">—</span>' : n_id(v);
       return '<td style="text-align:right;padding:5px 5px;font-family:var(--mono);font-size:11px;'+style+'">'+disp+'</td>';
     }).join('');
+    // Kolom Total (jumlah semua bulan) — untuk baris nilai, bukan DOI.
+    var totalCell = '';
+    if(!isDOI) {
+      var sum = 0, anyNeg=false;
+      vals.forEach(function(v){ if(typeof v==='number'){ sum+=v; if(v<0)anyNeg=true; } });
+      var tStyle = 'color:var(--text)';
+      totalCell = '<td style="text-align:right;padding:5px 8px;font-family:var(--mono);font-size:11px;font-weight:700;background:var(--bg3);border-left:2px solid var(--border2);'+tStyle+'">'
+        + (sum===0 ? '<span style="color:var(--hint)">—</span>' : n_id(Math.round(sum*100)/100)) + '</td>';
+    } else {
+      totalCell = '<td style="background:var(--bg3);border-left:2px solid var(--border2)"></td>';
+    }
     var rowLabel = label==='Stock (Ending)'?'stock':label==='DOI (hari)'?'doi':label==='Propose PR'?'propose':label==='Adjusted OSPO'?'fcospo':label==='OSPR'?'fcospr':'';
     var rowAttr  = rowLabel ? ' data-rowlabel="'+rowLabel+'"' : '';
     return '<tr style="border-bottom:1px dotted var(--border)"'+rowAttr+'>'
       + '<td style="padding:5px 8px;font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--text);white-space:nowrap;width:140px">'+label+'</td>'
-      + cells + '</tr>';
+      + cells + totalCell + '</tr>';
   }
 
   var isFcView = (_fcGridViewMode === 'forecast');
@@ -12628,6 +12733,7 @@ function _fcDetailRow(code, fc, master) {
     + '<thead><tr>'
     + '<th style="text-align:left;padding:6px;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;color:var(--muted);border-bottom:2px solid var(--border2);width:130px;white-space:nowrap">Baris</th>'
     + mhdr
+    + '<th style="text-align:right;padding:6px 8px;font-size:9.5px;text-transform:uppercase;font-weight:700;color:var(--muted);border-bottom:2px solid var(--border2);background:var(--bg3);border-left:2px solid var(--border2);white-space:nowrap">Total'+(window._fcValueView?' (Value)':'')+'</th>'
     + '<th style="border-bottom:2px solid var(--border2);padding:4px 6px;text-align:right;white-space:nowrap;vertical-align:middle">'
     + '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">'
     + toggleBtn
@@ -12667,27 +12773,27 @@ function _fcDetailRow(code, fc, master) {
           +       ' style="font-size:8.5px;padding:1px 5px;border-radius:3px;border:1px solid var(--border2);background:var(--bg3);color:var(--muted);cursor:pointer;white-space:nowrap">→ Semua</button>'
           +   '</span>'
           + '</td>'
-          + cells + '</tr>';
+          + cells + '<td style="background:var(--bg3);border-left:2px solid var(--border2)"></td></tr>';
       })() : '')
-    + gRow('Requirement', fc.forecast, function(){ return 'color:var(--text)'; })
+    + gRow('Requirement', _fcValArr(fc.forecast, code), function(){ return 'color:var(--text)'; })
     + (isFcView
-        ? gRow('Adjusted OSPO', fc.forecastOspo, function(v){ return v>0?'color:var(--teal);font-weight:600':'color:var(--hint)'; })
-        : gRowOspo('OSPO', fc.ospo, fc.ospoBase, code, 'ospo')
+        ? gRow('Adjusted OSPO', _fcValArr(fc.forecastOspo, code), function(v){ return v>0?'color:var(--teal);font-weight:600':'color:var(--hint)'; })
+        : gRowOspo('OSPO', _fcValArr(fc.ospo, code), _fcValArr(fc.ospoBase, code), code, 'ospo')
       )
     + (isFcView
-        ? gRow('OSPR', fc.ospr, function(v){ return v>0?'color:var(--accent)':'color:var(--hint)'; })
-        : gRowOspo('OSPR', fc.ospr, fc.ospr_base || fc.ospr, code, 'ospr')
+        ? gRow('OSPR', _fcValArr(fc.ospr, code), function(v){ return v>0?'color:var(--accent)':'color:var(--hint)'; })
+        : gRowOspo('OSPR', _fcValArr(fc.ospr, code), _fcValArr(fc.ospr_base || fc.ospr, code), code, 'ospr')
       )
-    + gRow('Stock (Ending)', isFcView ? fc.stockFc : fc.stock, stockClsFn)
+    + gRow('Stock (Ending)', _fcValArr(isFcView ? fc.stockFc : fc.stock, code), stockClsFn)
     + gRow('DOI (hari)',     isFcView ? fc.doiFc   : fc.doi,   doiClsFn)
-    + gRow('Propose PR', fc.propose, null, true, code)
+    + gRow('Propose PR', _fcValArr(fc.propose, code), null, true, code)
     + (function(){
         var master=(STATE.masterData||{})[code]||{}, uom=master.uom||'';
         var pv=(isFcView?fc.stockFc:fc.stock||[]).map(function(v){return _fcCalcPallet(code,v||0,uom);});
         if(!pv.some(function(v){return v!==null;})) return '';
         return '<tr style="border-top:1px solid var(--border);background:rgba(20,184,166,.04)"><td style="padding:5px 6px;font-size:10.5px;font-weight:700;color:var(--teal);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap">Pallet Usage</td>'
           +pv.map(function(v){if(v===null)return '<td style="text-align:right;padding:5px 6px;width:92px;overflow:hidden;color:var(--hint)">—</td>';return '<td style="text-align:right;padding:5px 6px;'+(v>0?'color:var(--teal);font-weight:600':'color:var(--hint)')+'">'+v+'</td>';}).join('')
-          +'<td></td></tr>';
+          +'<td style="background:var(--bg3);border-left:2px solid var(--border2)"></td></tr>';
       }())
     + '</tbody></table></div>';
 
@@ -12728,6 +12834,147 @@ function _fcDetailRow(code, fc, master) {
 // ─── Rekap view ───────────────────────────────────────────────────────────────
 
 // ─── Tab Analisis: DOI rendah tapi tidak ada propose (demand 0) ──────────────
+// ═══ TAB GRAFIK ═══════════════════════════════════════════════════════════
+window._grafikCfg = window._grafikCfg || {
+  chartType: 'line',        // line | bar
+  dataMode: 'total',        // total (semua digabung) | item (per item)
+  itemCode: '',             // kalau dataMode=item
+  rows: { requirement:true, stock:true, ospo:false, ospr:false, propose:false, doi:false }
+};
+var _grafikChart = null;
+
+// Daftar baris + cara ambil arraynya dari fc
+var _GRAFIK_ROWS = [
+  {key:'requirement', label:'Requirement', color:'#3b82f6', get:function(fc){ return fc.forecast; }},
+  {key:'stock',       label:'Stock Ending', color:'#10b981', get:function(fc){ return fc.stockFc || fc.stock; }},
+  {key:'ospo',        label:'OSPO',        color:'#14b8a6', get:function(fc){ return fc.forecastOspo || fc.ospo; }},
+  {key:'ospr',        label:'OSPR',        color:'#f59e0b', get:function(fc){ return fc.ospr; }},
+  {key:'propose',     label:'Propose PR',  color:'#8b5cf6', get:function(fc){ return fc.propose; }},
+  {key:'doi',         label:'DOI (hari)',  color:'#ef4444', get:function(fc){ return fc.doiFc || fc.doi; }, isDOI:true}
+];
+
+function _fcRenderGrafik(el, items, fcData) {
+  var cfg = window._grafikCfg;
+  var isValue = window._fcValueView;
+
+  // Dropdown item (untuk mode per-item)
+  var itemOpts = items.map(function(c){
+    var m = (STATE.masterData||{})[c]||{};
+    var nm = (_isAdmin && (STATE.realNameData||{})[c]) ? STATE.realNameData[c] : (m.desc||'');
+    return '<option value="'+c+'"'+(cfg.itemCode===c?' selected':'')+'>'+c+' — '+(nm||'').slice(0,40)+'</option>';
+  }).join('');
+  if(!cfg.itemCode && items.length) cfg.itemCode = items[0];
+
+  var rowChecks = _GRAFIK_ROWS.map(function(r){
+    return '<label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;margin-right:14px;white-space:nowrap">'
+      + '<input type="checkbox" '+(cfg.rows[r.key]?'checked':'')+' onchange="_grafikToggleRow(\''+r.key+'\',this.checked)">'
+      + '<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:'+r.color+'"></span>'
+      + r.label + '</label>';
+  }).join('');
+
+  el.innerHTML =
+      '<div style="padding:12px 0">'
+    + '<div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--border)">'
+    +   '<div style="display:inline-flex;border:1px solid var(--border2);border-radius:6px;overflow:hidden;font-size:11px">'
+    +     '<button onclick="_grafikSet(\'dataMode\',\'total\')" style="padding:5px 12px;border:none;cursor:pointer;font-weight:600;background:'+(cfg.dataMode==='total'?'var(--accent)':'none')+';color:'+(cfg.dataMode==='total'?'#fff':'var(--muted)')+'">Semua (total)</button>'
+    +     '<button onclick="_grafikSet(\'dataMode\',\'item\')" style="padding:5px 12px;border:none;cursor:pointer;font-weight:600;background:'+(cfg.dataMode==='item'?'var(--accent)':'none')+';color:'+(cfg.dataMode==='item'?'#fff':'var(--muted)')+'">Per item</button>'
+    +   '</div>'
+    +   (cfg.dataMode==='item' ? '<select onchange="_grafikSet(\'itemCode\',this.value)" style="font-size:12px;padding:5px 10px;max-width:320px">'+itemOpts+'</select>' : '')
+    +   '<div style="display:inline-flex;border:1px solid var(--border2);border-radius:6px;overflow:hidden;font-size:11px">'
+    +     '<button onclick="_grafikSet(\'chartType\',\'line\')" style="padding:5px 12px;border:none;cursor:pointer;font-weight:600;background:'+(cfg.chartType==='line'?'var(--accent)':'none')+';color:'+(cfg.chartType==='line'?'#fff':'var(--muted)')+'">Line</button>'
+    +     '<button onclick="_grafikSet(\'chartType\',\'bar\')" style="padding:5px 12px;border:none;cursor:pointer;font-weight:600;background:'+(cfg.chartType==='bar'?'var(--accent)':'none')+';color:'+(cfg.chartType==='bar'?'#fff':'var(--muted)')+'">Bar</button>'
+    +   '</div>'
+    +   '<span style="font-size:11px;color:var(--muted)">Mode: <b style="color:var(--teal)">'+(isValue?'Value (× COGM)':'Qty')+'</b> — ubah di toggle atas</span>'
+    + '</div>'
+    + '<div style="margin-bottom:10px">'+rowChecks+'</div>'
+    + '<div style="position:relative;height:440px"><canvas id="fc-grafik-canvas"></canvas></div>'
+    + '</div>';
+
+  if(typeof Chart === 'undefined') {
+    document.getElementById('fc-grafik-canvas').parentNode.innerHTML = '<div style="padding:40px;text-align:center;color:var(--muted)">Chart.js belum termuat — cek koneksi internet, lalu buka tab ini lagi.</div>';
+    return;
+  }
+
+  // Bangun datasets
+  var labels = FC_MONTHS.map(function(m,i){ return m.slice(0,3)+" '"+_fcYearForMonthIdx(i); });
+  var activeRows = _GRAFIK_ROWS.filter(function(r){ return cfg.rows[r.key]; });
+  var hasDOI = activeRows.some(function(r){ return r.isDOI; });
+  var hasNonDOI = activeRows.some(function(r){ return !r.isDOI; });
+
+  var datasets = activeRows.map(function(r){
+    var arr = new Array(FC_MONTHS.length).fill(0);
+    if(cfg.dataMode==='total') {
+      // Jumlahkan semua item per bulan
+      items.forEach(function(code){
+        var fc = fcData[code]; if(!fc) return;
+        var src = r.get(fc) || [];
+        for(var i=0;i<FC_MONTHS.length;i++){
+          var v = src[i]||0;
+          if(r.isDOI) { /* DOI total tidak masuk akal dijumlah — pakai rata2 */ }
+          else if(isValue) v = v * _fcCOGM(code);
+          arr[i] += v;
+        }
+      });
+      if(r.isDOI) {
+        // DOI mode total: rata-rata DOI semua item (biar bermakna)
+        var cnt = new Array(FC_MONTHS.length).fill(0);
+        arr = new Array(FC_MONTHS.length).fill(0);
+        items.forEach(function(code){
+          var fc = fcData[code]; if(!fc) return;
+          var src = r.get(fc)||[];
+          for(var i=0;i<FC_MONTHS.length;i++){ if(src[i]!=null){ arr[i]+=src[i]; cnt[i]++; } }
+        });
+        arr = arr.map(function(s,i){ return cnt[i]?Math.round(s/cnt[i]):0; });
+      }
+    } else {
+      var fc = fcData[cfg.itemCode];
+      var src = (fc ? r.get(fc) : []) || [];
+      for(var i=0;i<FC_MONTHS.length;i++){
+        var v = src[i]||0;
+        if(!r.isDOI && isValue) v = v * _fcCOGM(cfg.itemCode);
+        arr[i] = Math.round(v*100)/100;
+      }
+    }
+    return {
+      label: r.label + (r.isDOI?' (hari)':(isValue?' (Rp)':'')),
+      data: arr,
+      borderColor: r.color,
+      backgroundColor: cfg.chartType==='bar' ? r.color+'cc' : r.color+'22',
+      borderWidth: 2,
+      tension: 0.3,
+      fill: cfg.chartType==='line' && !r.isDOI ? false : false,
+      yAxisID: r.isDOI ? 'yDOI' : 'y',
+      pointRadius: cfg.chartType==='line' ? 3 : 0
+    };
+  });
+
+  var scales = {
+    y: { position:'left', title:{display:true, text:isValue?'Value (Rp)':'Qty'}, grid:{color:'rgba(128,128,128,.1)'} }
+  };
+  if(hasDOI) scales.yDOI = { position:'right', title:{display:true, text:'DOI (hari)'}, grid:{drawOnChartArea:false} };
+
+  if(_grafikChart) { _grafikChart.destroy(); _grafikChart = null; }
+  var ctx = document.getElementById('fc-grafik-canvas').getContext('2d');
+  _grafikChart = new Chart(ctx, {
+    type: cfg.chartType,
+    data: { labels: labels, datasets: datasets },
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      interaction:{ mode:'index', intersect:false },
+      plugins:{
+        legend:{ position:'top' },
+        title:{ display:true, text: cfg.dataMode==='total' ? ('Total semua item — '+(isValue?'Value':'Qty')) : (cfg.itemCode+' — '+(isValue?'Value':'Qty')) },
+        tooltip:{ callbacks:{ label:function(c){ return c.dataset.label+': '+_fcGrafikFmt(c.parsed.y); } } }
+      },
+      scales: scales
+    }
+  });
+}
+
+function _fcGrafikFmt(v){ try{ return (Math.round(v*100)/100).toLocaleString('id-ID'); }catch(e){ return v; } }
+function _grafikSet(key, val){ window._grafikCfg[key] = val; renderForecast(); }
+function _grafikToggleRow(key, on){ window._grafikCfg.rows[key] = on; renderForecast(); }
+
 function _fcRenderAnalisis(el, items, fcData) {
   var maxDOI = parseInt(localStorage.getItem('fc_doi_target')||'30');
   var yr2    = String(new Date().getFullYear()).slice(-2);
@@ -12987,7 +13234,7 @@ function _fcRenderRekapTable(el, propRows, fcData, snapshotBanner) {
     + '<th style="'+thStyle+';text-align:center">L.T (hari)</th>'
     + '<th style="'+thStyle+'">Supplier</th>'
     + '<th style="'+thStyle+';text-align:center">Kebutuhan Bulan</th>'
-    + '<th style="'+thStyle+';text-align:right">Qty</th>'
+    + '<th style="'+thStyle+';text-align:right">'+(window._fcValueView?'Value':'Qty')+'</th>'
     + '<th style="'+thStyle+';text-align:center">PR Harus Dibuka</th>'
     + '<th style="'+thStyle+';text-align:center;border-right:none">Status Buka</th>'
     + '</tr></thead><tbody>';
@@ -13009,7 +13256,7 @@ function _fcRenderRekapTable(el, propRows, fcData, snapshotBanner) {
       + '<td style="'+tdS+'text-align:center;font-family:var(--mono)">'+(r.lt||'—')+'</td>'
       + '<td style="'+tdS+'max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:11px">'+(r.supplier||'—')+'</td>'
       + '<td style="'+tdS+'text-align:center;font-weight:600">'+r.proposeMonth+'</td>'
-      + '<td style="'+tdS+'text-align:right;font-family:var(--mono);font-weight:600">'+n_id(r.qty)+' '+r.uom+'</td>'
+      + '<td style="'+tdS+'text-align:right;font-family:var(--mono);font-weight:600">'+(window._fcValueView ? n_id(Math.round((r.qty||0)*_fcCOGM(r.code))) : (n_id(r.qty)+' '+r.uom))+'</td>'
       + '<td style="'+tdS+'text-align:center;font-family:var(--mono);font-weight:600">'+fmt(r.createPRBy)+'</td>'
       + '<td style="'+tdS+'border-right:none">'+stTxt+'</td>'
       + '</tr>';
