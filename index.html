@@ -11844,6 +11844,50 @@ function _fcDOI2ClearAll() {
   if(badge){badge.style.display='none';}
   renderForecast();
 }
+// Panel grand total — jumlah SEMUA item per baris, per bulan + total keseluruhan.
+// Ikut mode Qty/Value. Stock = jumlah stock ending semua item.
+function _fcGrandTotalHTML(items, fcData) {
+  var isValue = window._fcValueView;
+  var rows = [
+    {key:'requirement', label:'Requirement', get:function(fc){return fc.forecast;}, color:'var(--text)'},
+    {key:'ospo',        label:'OSPO',        get:function(fc){return fc.forecastOspo||fc.ospo;}, color:'var(--teal)'},
+    {key:'ospr',        label:'OSPR',        get:function(fc){return fc.ospr;}, color:'var(--accent)'},
+    {key:'stock',       label:'Stock Ending',get:function(fc){return fc.stockFc||fc.stock;}, color:'var(--green)'},
+    {key:'propose',     label:'Propose PR',  get:function(fc){return fc.propose;}, color:'var(--purple,#8b5cf6)'}
+  ];
+  var monthTotals = {}; // key -> [per bulan]
+  rows.forEach(function(r){ monthTotals[r.key] = new Array(FC_MONTHS.length).fill(0); });
+  items.forEach(function(code){
+    var fc = fcData[code]; if(!fc) return;
+    var cogm = isValue ? _fcCOGM(code) : 1;
+    rows.forEach(function(r){
+      var src = r.get(fc)||[];
+      for(var i=0;i<FC_MONTHS.length;i++){ monthTotals[r.key][i] += (src[i]||0) * cogm; }
+    });
+  });
+  var monthHdr = FC_MONTHS.map(function(m,i){ return '<th style="text-align:right;padding:4px 7px;font-size:9.5px;font-weight:700;color:var(--muted);white-space:nowrap">'+m.slice(0,3)+" '"+_fcYearForMonthIdx(i)+'</th>'; }).join('');
+  var body = rows.map(function(r){
+    var arr = monthTotals[r.key];
+    var grand = arr.reduce(function(a,b){return a+b;},0);
+    var cells = arr.map(function(v){
+      return '<td style="text-align:right;padding:4px 7px;font-family:var(--mono);font-size:10.5px;color:'+r.color+'">'+(Math.abs(v)<0.005?'<span style=\"color:var(--hint)\">—</span>':n_id(Math.round(v*100)/100))+'</td>';
+    }).join('');
+    return '<tr style="border-top:1px solid var(--border)">'
+      + '<td style="padding:4px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:'+r.color+';white-space:nowrap">'+r.label+'</td>'
+      + cells
+      + '<td style="text-align:right;padding:4px 10px;font-family:var(--mono);font-size:11px;font-weight:700;background:var(--bg4);border-left:2px solid var(--border2);color:'+r.color+'">'+n_id(Math.round(grand*100)/100)+'</td>'
+      + '</tr>';
+  }).join('');
+  return '<div style="margin:10px 0 4px;border:1px solid var(--border2);border-radius:var(--r);overflow:hidden;background:var(--bg2)">'
+    + '<div style="padding:6px 10px;background:var(--bg3);font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--text)">'
+    +   '📊 Total Keseluruhan '+items.length+' Item — '+(isValue?'<span style="color:var(--teal)">Value (Rp)</span>':'<span style="color:var(--teal)">Qty</span>')
+    + '</div>'
+    + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'
+    +   '<thead><tr style="background:var(--bg3)"><th style="text-align:left;padding:4px 8px;font-size:9.5px;font-weight:700;color:var(--muted)">Baris</th>'+monthHdr+'<th style="text-align:right;padding:4px 10px;font-size:9.5px;font-weight:700;color:var(--muted);background:var(--bg4);border-left:2px solid var(--border2)">TOTAL</th></tr></thead>'
+    +   '<tbody>'+body+'</tbody>'
+    + '</table></div></div>';
+}
+
 function _fcSetView(v) {
   _fcView = v;
   ['detail','rekap','supplier','analisis','grafik'].forEach(function(id) {
@@ -12433,6 +12477,18 @@ function renderForecast(isGenerate) {
   if(info) info.innerHTML = '<span>Menampilkan <b>'+allItems.length+'</b> item &nbsp;·&nbsp; ' + snapLabel + matcomTs + '</span>'
     + '<span>DOI target: <b>'+_fcGetDOI()+' hari</b>'+(_fcDOI2Suppliers.length?' &nbsp;·&nbsp; Impor: <b>'+_fcGetDOI2()+' hari</b> ('+_fcDOI2Suppliers.length+' supplier)':'')+' &nbsp;·&nbsp; klik baris untuk detail</span>';
 
+  // Panel grand total (semua item dijumlah) — tampil di view detail
+  var gtEl = document.getElementById('fc-grand-total');
+  if(!gtEl) {
+    gtEl = document.createElement('div');
+    gtEl.id = 'fc-grand-total';
+    if(info && info.parentNode) info.parentNode.insertBefore(gtEl, info.nextSibling);
+  }
+  if(gtEl) {
+    if(_fcView==='detail' && allItems.length) gtEl.innerHTML = _fcGrandTotalHTML(allItems, fcData);
+    else gtEl.innerHTML = '';
+  }
+
   if(!allItems.length) {
     el.innerHTML = '<div class="empty" style="padding:48px"><div class="empty-ico">✅</div><h3>Tidak ada item</h3><p>Ubah filter atau klik Generate</p></div>';
     return;
@@ -12629,14 +12685,21 @@ function _fcDetailRow(code, fc, master) {
 
   // Editable OSPO row — shows different color when manually edited
   function gRowOspo(label, vals, baseVals, itemCode, rowType) {
+    var isValueMode = window._fcValueView;
     var cells = vals.map(function(v, i) {
+      if(isValueMode) {
+        // Read-only, angka full seperti Requirement
+        var vv = v || 0;
+        var disp = vv===0 ? '<span style="color:var(--hint)">—</span>' : n_id(vv);
+        var clr = vv>0 ? 'var(--teal)' : 'var(--muted)';
+        return '<td style="text-align:right;padding:5px 5px;font-family:var(--mono);font-size:11px;color:'+clr+'">'+disp+'</td>';
+      }
       var base    = baseVals[i] || 0;
       var isOspr   = (rowType === 'ospr');
       var ovrStore = isOspr ? _fcOsprOverride : _fcOspoOverride;
       var isEdited = (ovrStore[itemCode] && ovrStore[itemCode][i] != null);
       var cur     = (v != null && v !== 0) ? v : 0;
       var haVal   = cur > 0;
-      // Colors: teal = SAP original, purple = manually edited
       var bdr      = isEdited ? 'rgba(139,92,246,.4)' : (haVal ? 'rgba(20,184,166,.3)' : 'var(--border2)');
       var inp_clr  = isEdited ? 'var(--purple,#8b5cf6)' : (haVal ? 'var(--teal)' : 'var(--muted)');
       var inp_wt   = haVal ? '600' : '400';
@@ -12693,22 +12756,11 @@ function _fcDetailRow(code, fc, master) {
       var disp  = (v===0||v===null||v===undefined) ? '<span style="color:var(--hint)">—</span>' : n_id(v);
       return '<td style="text-align:right;padding:5px 5px;font-family:var(--mono);font-size:11px;'+style+'">'+disp+'</td>';
     }).join('');
-    // Kolom Total (jumlah semua bulan) — untuk baris nilai, bukan DOI.
-    var totalCell = '';
-    if(!isDOI) {
-      var sum = 0, anyNeg=false;
-      vals.forEach(function(v){ if(typeof v==='number'){ sum+=v; if(v<0)anyNeg=true; } });
-      var tStyle = 'color:var(--text)';
-      totalCell = '<td style="text-align:right;padding:5px 8px;font-family:var(--mono);font-size:11px;font-weight:700;background:var(--bg3);border-left:2px solid var(--border2);'+tStyle+'">'
-        + (sum===0 ? '<span style="color:var(--hint)">—</span>' : n_id(Math.round(sum*100)/100)) + '</td>';
-    } else {
-      totalCell = '<td style="background:var(--bg3);border-left:2px solid var(--border2)"></td>';
-    }
     var rowLabel = label==='Stock (Ending)'?'stock':label==='DOI (hari)'?'doi':label==='Propose PR'?'propose':label==='Adjusted OSPO'?'fcospo':label==='OSPR'?'fcospr':'';
     var rowAttr  = rowLabel ? ' data-rowlabel="'+rowLabel+'"' : '';
     return '<tr style="border-bottom:1px dotted var(--border)"'+rowAttr+'>'
       + '<td style="padding:5px 8px;font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--text);white-space:nowrap;width:140px">'+label+'</td>'
-      + cells + totalCell + '</tr>';
+      + cells + '</tr>';
   }
 
   var isFcView = (_fcGridViewMode === 'forecast');
@@ -12733,7 +12785,6 @@ function _fcDetailRow(code, fc, master) {
     + '<thead><tr>'
     + '<th style="text-align:left;padding:6px;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;color:var(--muted);border-bottom:2px solid var(--border2);width:130px;white-space:nowrap">Baris</th>'
     + mhdr
-    + '<th style="text-align:right;padding:6px 8px;font-size:9.5px;text-transform:uppercase;font-weight:700;color:var(--muted);border-bottom:2px solid var(--border2);background:var(--bg3);border-left:2px solid var(--border2);white-space:nowrap">Total'+(window._fcValueView?' (Value)':'')+'</th>'
     + '<th style="border-bottom:2px solid var(--border2);padding:4px 6px;text-align:right;white-space:nowrap;vertical-align:middle">'
     + '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">'
     + toggleBtn
@@ -12773,7 +12824,7 @@ function _fcDetailRow(code, fc, master) {
           +       ' style="font-size:8.5px;padding:1px 5px;border-radius:3px;border:1px solid var(--border2);background:var(--bg3);color:var(--muted);cursor:pointer;white-space:nowrap">→ Semua</button>'
           +   '</span>'
           + '</td>'
-          + cells + '<td style="background:var(--bg3);border-left:2px solid var(--border2)"></td></tr>';
+          + cells + '</tr>';
       })() : '')
     + gRow('Requirement', _fcValArr(fc.forecast, code), function(){ return 'color:var(--text)'; })
     + (isFcView
@@ -12793,7 +12844,7 @@ function _fcDetailRow(code, fc, master) {
         if(!pv.some(function(v){return v!==null;})) return '';
         return '<tr style="border-top:1px solid var(--border);background:rgba(20,184,166,.04)"><td style="padding:5px 6px;font-size:10.5px;font-weight:700;color:var(--teal);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap">Pallet Usage</td>'
           +pv.map(function(v){if(v===null)return '<td style="text-align:right;padding:5px 6px;width:92px;overflow:hidden;color:var(--hint)">—</td>';return '<td style="text-align:right;padding:5px 6px;'+(v>0?'color:var(--teal);font-weight:600':'color:var(--hint)')+'">'+v+'</td>';}).join('')
-          +'<td style="background:var(--bg3);border-left:2px solid var(--border2)"></td></tr>';
+          +'<td></td></tr>';
       }())
     + '</tbody></table></div>';
 
