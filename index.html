@@ -12913,9 +12913,10 @@ function _fcRenderGrafik(el, items, fcData) {
   var itemOpts = items.map(function(c){
     var m = (STATE.masterData||{})[c]||{};
     var nm = (_isAdmin && (STATE.realNameData||{})[c]) ? STATE.realNameData[c] : (m.desc||'');
-    return '<option value="'+c+'"'+(cfg.itemCode===c?' selected':'')+'>'+c+' — '+(nm||'').slice(0,40)+'</option>';
+    return '<option value="'+c+'">'+c+' — '+(nm||'').slice(0,40)+'</option>';
   }).join('');
   if(!cfg.itemCode && items.length) cfg.itemCode = items[0];
+  var curName = (function(){ var m=(STATE.masterData||{})[cfg.itemCode]||{}; var nm=(_isAdmin&&(STATE.realNameData||{})[cfg.itemCode])?STATE.realNameData[cfg.itemCode]:(m.desc||''); return cfg.itemCode+(nm?' — '+nm.slice(0,30):''); })();
 
   var rowChecks = _GRAFIK_ROWS.map(function(r){
     return '<label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;margin-right:14px;white-space:nowrap">'
@@ -12931,7 +12932,7 @@ function _fcRenderGrafik(el, items, fcData) {
     +     '<button onclick="_grafikSet(\'dataMode\',\'total\')" style="padding:5px 12px;border:none;cursor:pointer;font-weight:600;background:'+(cfg.dataMode==='total'?'var(--accent)':'none')+';color:'+(cfg.dataMode==='total'?'#fff':'var(--muted)')+'">Semua (total)</button>'
     +     '<button onclick="_grafikSet(\'dataMode\',\'item\')" style="padding:5px 12px;border:none;cursor:pointer;font-weight:600;background:'+(cfg.dataMode==='item'?'var(--accent)':'none')+';color:'+(cfg.dataMode==='item'?'#fff':'var(--muted)')+'">Per item</button>'
     +   '</div>'
-    +   (cfg.dataMode==='item' ? '<select onchange="_grafikSet(\'itemCode\',this.value)" style="font-size:12px;padding:5px 10px;max-width:320px">'+itemOpts+'</select>' : '')
+    +   (cfg.dataMode==='item' ? '<input list="grafik-item-list" placeholder="Ketik kode/nama item..." value="'+cfg.itemCode+'" onchange="_grafikPickItem(this.value)" onfocus="this.select()" style="font-size:12px;padding:5px 10px;width:280px;border:1px solid var(--border2);border-radius:6px;background:var(--bg3);color:var(--text)" title="'+curName+'"><datalist id="grafik-item-list">'+itemOpts+'</datalist>' : '')
     +   '<div style="display:inline-flex;border:1px solid var(--border2);border-radius:6px;overflow:hidden;font-size:11px">'
     +     '<button onclick="_grafikSet(\'chartType\',\'line\')" style="padding:5px 12px;border:none;cursor:pointer;font-weight:600;background:'+(cfg.chartType==='line'?'var(--accent)':'none')+';color:'+(cfg.chartType==='line'?'#fff':'var(--muted)')+'">Line</button>'
     +     '<button onclick="_grafikSet(\'chartType\',\'bar\')" style="padding:5px 12px;border:none;cursor:pointer;font-weight:600;background:'+(cfg.chartType==='bar'?'var(--accent)':'none')+';color:'+(cfg.chartType==='bar'?'#fff':'var(--muted)')+'">Bar</button>'
@@ -12952,6 +12953,18 @@ function _fcRenderGrafik(el, items, fcData) {
   var activeRows = _GRAFIK_ROWS.filter(function(r){ return cfg.rows[r.key]; });
   var hasDOI = activeRows.some(function(r){ return r.isDOI; });
   var hasNonDOI = activeRows.some(function(r){ return !r.isDOI; });
+
+  // Guard mode per-item: item tidak ditemukan di data
+  if(cfg.dataMode==='item' && !fcData[cfg.itemCode]) {
+    document.getElementById('fc-grafik-canvas').parentNode.innerHTML =
+      '<div style="padding:40px;text-align:center;color:var(--muted)">Item "<b>'+cfg.itemCode+'</b>" tidak ditemukan / sedang ter-filter keluar.<br>Ketik kode item yang benar, atau hapus filter di toolbar atas.</div>';
+    return;
+  }
+  if(!activeRows.length) {
+    document.getElementById('fc-grafik-canvas').parentNode.innerHTML =
+      '<div style="padding:40px;text-align:center;color:var(--muted)">Pilih minimal 1 baris (Requirement, Stock, dll) untuk ditampilkan.</div>';
+    return;
+  }
 
   var datasets = activeRows.map(function(r){
     var arr = new Array(FC_MONTHS.length).fill(0);
@@ -13026,6 +13039,13 @@ function _fcRenderGrafik(el, items, fcData) {
 function _fcGrafikFmt(v){ try{ return (Math.round(v*100)/100).toLocaleString('id-ID'); }catch(e){ return v; } }
 function _grafikSet(key, val){ window._grafikCfg[key] = val; renderForecast(); }
 function _grafikToggleRow(key, on){ window._grafikCfg.rows[key] = on; renderForecast(); }
+// Pilih item dari input searchable — ekstrak kode (bisa "3000010001" atau "3000010001 — Nama")
+function _grafikPickItem(val){
+  if(!val) return;
+  var code = String(val).trim().split(/[\s—-]/)[0].trim(); // ambil token pertama = kode
+  // Kalau user ketik kode lengkap, pakai itu; validasi ada di master/mrp
+  if(code) { window._grafikCfg.itemCode = code; renderForecast(); }
+}
 
 function _fcRenderAnalisis(el, items, fcData) {
   var maxDOI = parseInt(localStorage.getItem('fc_doi_target')||'30');
