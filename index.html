@@ -3068,7 +3068,7 @@ var CLOUD_KEYS = [
   'fc_propose','fc_ospo_ovr','fc_ospr_ovr','fc_doi2','fc_doi2_suppliers','mrp_source',
   'fc_autopropose','fc_doi_item_month_ovr',
   'matcom_monthly','matcom_data','matcom_count','last_matcom_sync',
-  'mps_ui_status','bom_ui_status','mrp_last_calc',
+  'mps_ui_status','bom_ui_status','mrp_last_calc','mrp_data_ts',
   'email_daily_data',
   'ai_api_key',
   'ai_model'
@@ -3496,7 +3496,17 @@ function _applyRealtimeChanges(keys) {
           } catch(e) {} break;
         case 'mrp_data':
           try {
+            // Newer-wins: jangan timpa kalau versi LOKAL lebih baru dari yang datang.
+            // Di realtime, mrp_data_ts incoming sudah tersimpan ke localStorage oleh handler.
+            // Bandingkan dengan ts yang kita ingat di window._mrpDataTs (versi lokal terakhir).
+            var _incomingTs = parseInt(localStorage.getItem('mrp_data_ts') || '0', 10) || 0;
+            var _localTs    = window._mrpDataTs || 0;
+            if(_localTs > 0 && _incomingTs > 0 && _incomingTs < _localTs) {
+              console.log('[mrp_data] skip realtime — lokal lebih baru ('+_localTs+' > '+_incomingTs+')');
+              break;
+            }
             STATE.mrpData = JSON.parse(val || 'null');
+            if(_incomingTs > 0) window._mrpDataTs = _incomingTs;
             // Refresh MPS page jika terbuka (terima data baru dari laptop lain)
             var _mrpPg = document.getElementById('pg-mps-mrp');
             if(_mrpPg && _mrpPg.classList.contains('active')) {
@@ -3995,6 +4005,8 @@ var STATE = {
 
 var _whCapacityRM = parseInt(localStorage.getItem('wh_capacity_rm') || '0') || 0;
 var _whCapacityPM = parseInt(localStorage.getItem('wh_capacity_pm') || '0') || 0;
+// Baseline timestamp mrp_data lokal (untuk newer-wins saat realtime sync mrp_data)
+window._mrpDataTs = parseInt(localStorage.getItem('mrp_data_ts') || '0', 10) || 0;
 
 // Supplier blacklist — PO dari supplier ini tidak dipakai di semua kalkulasi
 var _SUPPLIER_BLACKLIST = ['hk holistar limited','hk holistar'];
@@ -14981,9 +14993,13 @@ function _mrpApplyToState(result) {
     mrpData[code].actualMRP = existing.actualMRP || 0;
   });
   STATE.mrpData = mrpData;
+  var _mrpTs = Date.now();
+  window._mrpDataTs = _mrpTs;
   localStorage.setItem('mrp_data', JSON.stringify(mrpData));
+  localStorage.setItem('mrp_data_ts', String(_mrpTs));
   // Auto-sync ke Firebase supaya laptop lain langsung update
   cloudSave('mrp_data', JSON.stringify(mrpData));
+  cloudSave('mrp_data_ts', String(_mrpTs));
   localStorage.setItem('mrp_source', 'mps'); // flag: jangan overwrite dari GSheet
   cloudSave('mrp_source', 'mps');
   // Refresh forecast & projection — selalu rebuild, tidak peduli halaman aktif
