@@ -637,6 +637,7 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
         <label style="display:flex;align-items:center;gap:7px;font-size:12px;cursor:pointer;padding:3px 0;margin:0;white-space:nowrap"><input type="checkbox" value="B" onchange="_onAbcChange()" class="proj-abc-cb"> <span style="color:var(--amber);font-weight:700">B</span> Class B</label>
         <label style="display:flex;align-items:center;gap:7px;font-size:12px;cursor:pointer;padding:3px 0;margin:0;white-space:nowrap"><input type="checkbox" value="C" onchange="_onAbcChange()" class="proj-abc-cb"> <span style="color:var(--teal);font-weight:700">C</span> Class C</label>
         <hr style="border:none;border-top:1px solid var(--border);margin:5px 0">
+        <label style="display:flex;align-items:center;gap:7px;font-size:12px;cursor:pointer;padding:3px 0;margin:0;white-space:nowrap"><input type="checkbox" value="NPD" onchange="_onAbcChange()" class="proj-abc-cb"> <span style="color:var(--muted);font-weight:700">◆</span> NPD</label>
         <label style="display:flex;align-items:center;gap:7px;font-size:12px;cursor:pointer;padding:3px 0;margin:0;white-space:nowrap"><input type="checkbox" value="OBSOLET" onchange="_onAbcChange()" class="proj-abc-cb"> <span style="color:var(--muted);font-weight:700">⊘</span> Obsolet</label>
       </div>
     </div>
@@ -879,6 +880,8 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
       <option value="A">Class A</option>
       <option value="B">Class B</option>
       <option value="C">Class C</option>
+      <option value="NPD">NPD</option>
+      <option value="OBSOLETE">Obsolete</option>
     </select>
 
     <!-- Status filter (Rekap only) -->
@@ -6443,8 +6446,9 @@ function processMasterData(rows) {
     var status  = String(row['Status'] || row['status'] || '').trim();
     var phase   = String(row['Phase'] || row['phase'] || row['Phase Code'] || '').trim();
     var isObs   = /obsolet/i.test(status) || /obsolet/i.test(phase) || /obsolet/i.test(abc);
-    // If abc is Obsolete/NPD, it's not a class — blank it so color coding doesn't break
-    var abcClass = /^[ABC]$/i.test(abc) ? abc.toUpperCase() : '';
+    // Tampilkan nilai ABC apa adanya dari master (A, B, C, NPD, OBSOLETE, dst) — bukan
+    // hanya A/B/C. Warna & filter menangani nilai non-ABC dengan warna netral.
+    var abcClass = abc; // sudah di-trim & di-uppercase di atas
     result[code] = { desc: desc, moq: moq, multiple: multiple, uom: uom, supplier: supplier, lt: lt, abc: abcClass, status: status, phase: phase, obsolet: isObs };
   });
   return result;
