@@ -11848,11 +11848,12 @@ function _fcDOI2ClearAll() {
 // Ikut mode Qty/Value. Stock = jumlah stock ending semua item.
 function _fcGrandTotalHTML(items, fcData) {
   var isValue = window._fcValueView;
+  var isFcView = (_fcGridViewMode === 'forecast');
   var rows = [
     {key:'requirement', label:'Requirement', get:function(fc){return fc.forecast;}, color:'var(--text)'},
-    {key:'ospo',        label:'OSPO',        get:function(fc){return fc.forecastOspo||fc.ospo;}, color:'var(--teal)'},
+    {key:'ospo',        label:isFcView?'Adjusted OSPO':'OSPO', get:function(fc){return isFcView?(fc.forecastOspo||fc.ospo):fc.ospo;}, color:'var(--teal)'},
     {key:'ospr',        label:'OSPR',        get:function(fc){return fc.ospr;}, color:'var(--accent)'},
-    {key:'stock',       label:'Stock Ending',get:function(fc){return fc.stockFc||fc.stock;}, color:'var(--green)'},
+    {key:'stock',       label:'Stock Ending',get:function(fc){return isFcView?(fc.stockFc||fc.stock):fc.stock;}, color:'var(--green)'},
     {key:'propose',     label:'Propose PR',  get:function(fc){return fc.propose;}, color:'var(--purple,#8b5cf6)'}
   ];
   var monthTotals = {}; // key -> [per bulan]
