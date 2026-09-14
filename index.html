@@ -4930,6 +4930,23 @@ async function syncAll() {
   loadOSPO();
   // Matcom ikut sync otomatis
   loadMatcomSAP().catch(function(e){ console.warn('[syncAll] matcom gagal:', e.message); });
+  // GRPO historis 6 bulan ke belakang → untuk fallback nama supplier item yang jarang PO.
+  // Disimpan di STATE.grpoHistori (tidak ganggu grpoData bulan berjalan).
+  (function(){
+    var _n=new Date(); var _fromY=_n.getFullYear(), _fromM=_n.getMonth()+1-6;
+    while(_fromM<1){_fromM+=12;_fromY--;}
+    var _fromYM=_fromY+'-'+String(_fromM).padStart(2,'0');
+    var _toYM=_n.getFullYear()+'-'+String(_n.getMonth()+1).padStart(2,'0');
+    if(typeof _grafikLoadGrpoHistori==='function'){
+      _grafikLoadGrpoHistori(_fromYM,_toYM).then(function(loaded){
+        if(loaded){
+          // Rebuild projection supaya supplier ke-refresh dgn data GRPO historis
+          if(STATE.projectionData && STATE.projectionData.length){ buildProjection(); if(document.getElementById('proj-table')) renderProjection(); }
+          if(document.getElementById('fc-table')) renderForecast();
+        }
+      }).catch(function(e){ console.warn('[syncAll] GRPO histori gagal:', e.message); });
+    }
+  })();
   var failed = results.filter(function(r){ return r.status === 'rejected'; });
   console.log('[syncAll] API done. Failed:', failed.length, '| Stock:', Object.keys(STATE.stockData||{}).length, '| PO:', (STATE.poData||[]).length);
 
@@ -6546,13 +6563,15 @@ function _buildSupplierByItem() {
       map[o.itemCode] = o.supplierName;
     }
   });
-  // 2) GRPO terbaru — hanya untuk item yang BELUM punya supplier dari OSPO
+  // 2) GRPO terbaru — hanya untuk item yang BELUM punya supplier dari OSPO.
+  //    Gabungkan grpoHistori (6 bulan, dari Sync) + grpoData (bulan berjalan).
   var bestGrpo = {};
-  (STATE.grpoData||[]).forEach(function(g){
+  var _grpoAll = ((STATE.grpoHistori && STATE.grpoHistori.length) ? STATE.grpoHistori : []).concat(STATE.grpoData||[]);
+  _grpoAll.forEach(function(g){
     if(!g.itemCode || !g.supplierName || map[g.itemCode]) return;
     // urutkan by grpoDocNum (angka) lalu grpoDate
     var dn = parseInt(String(g.grpoDocNum||'').replace(/\D/g,''),10) || 0;
-    var dt = g.grpoDate ? Date.parse(g.grpoDate.split('-').reverse().join('-')) : 0;
+    var dt = g.grpoDate ? Date.parse(g.grpoDate.split('/').reverse().join('-')) : 0;
     var score = dn>0 ? dn : (dt||0);
     if(bestGrpo[g.itemCode]===undefined || score > bestGrpo[g.itemCode]){
       bestGrpo[g.itemCode] = score;
@@ -12909,12 +12928,12 @@ function _fcDetailRow(code, fc, master) {
 // ─── Tab Analisis: DOI rendah tapi tidak ada propose (demand 0) ──────────────
 // ═══ TAB GRAFIK ═══════════════════════════════════════════════════════════
 window._grafikCfg = window._grafikCfg || {
-  chartType: 'line',        // line | bar
-  dataMode: 'total',        // total (semua digabung) | item (per item)
-  itemCode: '',             // kalau dataMode=item
+  chartType: 'line',
+  itemCode: '',             // filter item (kosong = semua)
   supplier: '',             // filter supplier (kosong = semua)
-  fromYM: '',               // range dari 'YYYY-MM' (kosong = auto)
-  toYM: '',                 // range sampai 'YYYY-MM' (kosong = auto)
+  rmpm: '',                 // '', 'rm' (3xxx), 'pm' (4xxx)
+  fromYM: '',
+  toYM: '',
   rows: { requirement:true, stock:true, ospo:false, ospr:false, propose:false, grpo:false, doi:false }
 };
 var _grafikChart = null;
@@ -12934,20 +12953,54 @@ var _GRAFIK_ROWS = [
 // Return { 'YYYY-MM': { qty, value } }.
 function _grafikGrpoByMonth(supplierFilter, itemFilter) {
   var out = {};
-  (STATE.grpoData||[]).forEach(function(g){
+  var src = (STATE.grpoHistori && STATE.grpoHistori.length) ? STATE.grpoHistori : (STATE.grpoData||[]);
+  src.forEach(function(g){
     if(!g.grpoDate || !g.itemCode) return;
     if(itemFilter && g.itemCode !== itemFilter) return;
     if(supplierFilter && (g.supplierName||'') !== supplierFilter) return;
-    // grpoDate DD/MM/YYYY → YYYY-MM
     var p = g.grpoDate.split('/'); if(p.length!==3) return;
     var ym = p[2]+'-'+String(p[1]).padStart(2,'0');
     var qty = parseFloat(g.qty)||0;
-    if((g.uom||'').toUpperCase()==='GR') qty/=1000; // normalisasi gram→kg (opsional)
+    if((g.uom||'').toUpperCase()==='GR') qty/=1000;
     if(!out[ym]) out[ym] = { qty:0, value:0 };
     out[ym].qty += qty;
     out[ym].value += qty * _fcCOGM(g.itemCode);
   });
   return out;
+}
+
+// Fetch GRPO historis untuk rentang [fromYM..toYM] sekaligus. Cache per-range.
+window._grpoHistoriRange = window._grpoHistoriRange || '';
+STATE.grpoHistori = STATE.grpoHistori || [];
+async function _grafikLoadGrpoHistori(fromYM, toYM) {
+  var rangeKey = fromYM+'_'+toYM;
+  if(window._grpoHistoriRange === rangeKey && STATE.grpoHistori.length) return false; // sudah ada
+  if(typeof sapFetchTO !== 'function') return false;
+  var fp = fromYM.split('-'), tp = toYM.split('-');
+  var fy=parseInt(fp[0]), fm=parseInt(fp[1]), ty=parseInt(tp[0]), tm=parseInt(tp[1]);
+  // batasi: jangan fetch masa depan (GRPO historis) — potong toYM ke bulan ini
+  var now=new Date(); var curYM = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+  var effTo = toYM > curYM ? curYM : toYM;
+  var etp = effTo.split('-'); ty=parseInt(etp[0]); tm=parseInt(etp[1]);
+  var startDate = fy+'-'+String(fm).padStart(2,'0')+'-01T00:00:00.000Z';
+  var lastDay = new Date(ty, tm, 0).getDate();
+  var endDate = ty+'-'+String(tm).padStart(2,'0')+'-'+String(lastDay).padStart(2,'0')+'T23:59:59.000Z';
+  try {
+    var raw = await sapFetchTO(27, { '[%0]': startDate, '[%1]': endDate });
+    STATE.grpoHistori = (raw||[]).filter(function(r){
+      var s=(r.DocStatus||'').toLowerCase();
+      if(s==='cancelled'||s==='cancellation') return false;
+      var ic=(r.ItemCode||'').toString();
+      if(/^6/.test(ic) && r.CardName !== 'Berkat Asia Kemasindo, PT') return false;
+      return true;
+    }).map(function(r){
+      return { grpoDate: fmtSAPDate(r.GRPO_Date), itemCode: r.ItemCode,
+        itemName: r.Dscription, supplierName: r.CardName, qty: r.Quantity, uom: r.unitMsr,
+        grpoDocNum: String(r.DocNum||r.DocEntry||'') };
+    });
+    window._grpoHistoriRange = rangeKey;
+    return true;
+  } catch(e){ console.warn('[grafik] load GRPO histori gagal:', e.message); return false; }
 }
 
 // Daftar bulan absolut dalam range [fromYM..toYM] → [{ym, label, year, mon}]
@@ -12975,10 +13028,12 @@ function _fcRenderGrafik(el, items, fcData) {
   var cfg = window._grafikCfg;
   var isValue = window._fcValueView;
 
-  // Filter item berdasarkan supplier (kalau dipilih)
-  var supItems = items;
+  // Filter item: RM/PM → supplier
+  var supItems = items.slice();
+  if(cfg.rmpm==='rm') supItems = supItems.filter(function(c){ return /^3/.test(c); });
+  else if(cfg.rmpm==='pm') supItems = supItems.filter(function(c){ return /^4/.test(c); });
   if(cfg.supplier) {
-    supItems = items.filter(function(c){ return (_fcSupplierByItemCache[c]||'') === cfg.supplier; });
+    supItems = supItems.filter(function(c){ return (_fcSupplierByItemCache[c]||'') === cfg.supplier; });
   }
 
   // Daftar supplier (dari cache)
@@ -12988,14 +13043,15 @@ function _fcRenderGrafik(el, items, fcData) {
     return '<option value="'+s.replace(/"/g,'&quot;')+'"'+(cfg.supplier===s?' selected':'')+'>'+s+'</option>';
   }).join('');
 
-  // Item dropdown (dari item yang lolos filter supplier)
-  var itemOpts = supItems.map(function(c){
+  // Item dropdown (dari item yang lolos filter). Kosong = semua item.
+  var itemOpts = supItems.slice(0,2000).map(function(c){
     var m = (STATE.masterData||{})[c]||{};
     var nm = (_isAdmin && (STATE.realNameData||{})[c]) ? STATE.realNameData[c] : (m.desc||'');
     return '<option value="'+c+'">'+c+' — '+(nm||'').slice(0,40)+'</option>';
   }).join('');
-  if((!cfg.itemCode || supItems.indexOf(cfg.itemCode)<0) && supItems.length) cfg.itemCode = supItems[0];
-  var curName = (function(){ var m=(STATE.masterData||{})[cfg.itemCode]||{}; var nm=(_isAdmin&&(STATE.realNameData||{})[cfg.itemCode])?STATE.realNameData[cfg.itemCode]:(m.desc||''); return cfg.itemCode+(nm?' — '+nm.slice(0,30):''); })();
+  // itemCode dikosongkan kalau tidak lagi ada di supItems (mis. ganti filter)
+  if(cfg.itemCode && supItems.indexOf(cfg.itemCode)<0) cfg.itemCode = '';
+  var curName = cfg.itemCode ? (function(){ var m=(STATE.masterData||{})[cfg.itemCode]||{}; var nm=(_isAdmin&&(STATE.realNameData||{})[cfg.itemCode])?STATE.realNameData[cfg.itemCode]:(m.desc||''); return cfg.itemCode+(nm?' — '+nm.slice(0,30):''); })() : '';
 
   // ── Tentukan range bulan absolut ──
   // Default: dari 6 bulan lalu (GRPO historis) sampai bulan forecast terakhir
@@ -13033,11 +13089,13 @@ function _fcRenderGrafik(el, items, fcData) {
       '<div style="padding:12px 0">'
     + '<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border)">'
     +   '<div style="display:inline-flex;border:1px solid var(--border2);border-radius:6px;overflow:hidden;font-size:11px">'
-    +     '<button onclick="_grafikSet(\'dataMode\',\'total\')" style="padding:5px 12px;border:none;cursor:pointer;font-weight:600;background:'+(cfg.dataMode==='total'?'var(--accent)':'none')+';color:'+(cfg.dataMode==='total'?'#fff':'var(--muted)')+'">Semua (total)</button>'
-    +     '<button onclick="_grafikSet(\'dataMode\',\'item\')" style="padding:5px 12px;border:none;cursor:pointer;font-weight:600;background:'+(cfg.dataMode==='item'?'var(--accent)':'none')+';color:'+(cfg.dataMode==='item'?'#fff':'var(--muted)')+'">Per item</button>'
+    +     '<button onclick="_grafikSet(\'rmpm\',\'\')" style="padding:5px 11px;border:none;cursor:pointer;font-weight:600;background:'+(!cfg.rmpm?'var(--accent)':'none')+';color:'+(!cfg.rmpm?'#fff':'var(--muted)')+'">RM+PM</button>'
+    +     '<button onclick="_grafikSet(\'rmpm\',\'rm\')" style="padding:5px 11px;border:none;cursor:pointer;font-weight:600;background:'+(cfg.rmpm==='rm'?'var(--accent)':'none')+';color:'+(cfg.rmpm==='rm'?'#fff':'var(--muted)')+'">RM</button>'
+    +     '<button onclick="_grafikSet(\'rmpm\',\'pm\')" style="padding:5px 11px;border:none;cursor:pointer;font-weight:600;background:'+(cfg.rmpm==='pm'?'var(--accent)':'none')+';color:'+(cfg.rmpm==='pm'?'#fff':'var(--muted)')+'">PM</button>'
     +   '</div>'
-    +   '<select onchange="_grafikSet(\'supplier\',this.value)" style="font-size:12px;padding:5px 8px;max-width:220px;border:1px solid var(--border2);border-radius:6px;background:var(--bg3);color:var(--text)" title="Filter supplier">'+supOpts+'</select>'
-    +   (cfg.dataMode==='item' ? '<input list="grafik-item-list" placeholder="Ketik kode/nama item..." value="'+cfg.itemCode+'" onchange="_grafikPickItem(this.value)" onfocus="this.select()" style="font-size:12px;padding:5px 10px;width:240px;border:1px solid var(--border2);border-radius:6px;background:var(--bg3);color:var(--text)" title="'+curName+'"><datalist id="grafik-item-list">'+itemOpts+'</datalist>' : '')
+    +   '<select onchange="_grafikSet(\'supplier\',this.value)" style="font-size:12px;padding:5px 8px;max-width:220px;border:1px solid var(--border2);border-radius:6px;background:var(--bg3);color:var(--text)" title="Filter supplier (kosong = semua)">'+supOpts+'</select>'
+    +   '<input list="grafik-item-list" placeholder="Item (kosong = semua)..." value="'+cfg.itemCode+'" onchange="_grafikPickItem(this.value)" onfocus="this.select()" style="font-size:12px;padding:5px 10px;width:230px;border:1px solid var(--border2);border-radius:6px;background:var(--bg3);color:var(--text)" title="'+(curName||'Kosongkan untuk semua item')+'"><datalist id="grafik-item-list">'+itemOpts+'</datalist>'
+    +   (cfg.itemCode ? '<button onclick="_grafikPickItem(\'\')" style="font-size:11px;padding:4px 8px;border:1px solid var(--border2);border-radius:5px;background:var(--bg3);cursor:pointer;color:var(--muted)" title="Hapus filter item">✕ item</button>' : '')
     +   '<span style="font-size:11px;color:var(--muted)">Range:</span>'
     +   ymSelect(fromYM, '_grafikSet(\'fromYM\',this.value)')
     +   '<span style="font-size:11px;color:var(--muted)">s/d</span>'
@@ -13064,15 +13122,28 @@ function _fcRenderGrafik(el, items, fcData) {
       '<div style="padding:40px;text-align:center;color:var(--muted)">Pilih minimal 1 baris untuk ditampilkan.</div>';
     return;
   }
-  if(cfg.dataMode==='item' && !fcData[cfg.itemCode] && !cfg.rows.grpo) {
+  // Item terpilih (kosong = semua item yang lolos filter)
+  var itemsToUse = cfg.itemCode ? [cfg.itemCode] : supItems;
+  if(cfg.itemCode && !fcData[cfg.itemCode] && !cfg.rows.grpo) {
     document.getElementById('fc-grafik-canvas').parentNode.innerHTML =
       '<div style="padding:40px;text-align:center;color:var(--muted)">Item "<b>'+cfg.itemCode+'</b>" tidak ditemukan / ter-filter keluar.</div>';
     return;
   }
 
   // GRPO per bulan absolut (difilter supplier/item)
+  // Auto-load GRPO historis sesuai range kalau GRPO dicentang & belum ada data range ini
+  if(cfg.rows.grpo) {
+    var _rk = fromYM+'_'+toYM;
+    if(window._grpoHistoriRange !== _rk) {
+      var _tblEl = document.getElementById('fc-grafik-table');
+      if(_tblEl) _tblEl.innerHTML = '<div style="padding:16px;text-align:center;color:var(--muted);font-size:12px">⏳ Memuat GRPO historis '+fromYM+' s/d '+toYM+'...</div>';
+      _grafikLoadGrpoHistori(fromYM, toYM).then(function(loaded){
+        if(loaded && _fcView==='grafik') renderForecast();
+      });
+    }
+  }
   var grpoMonthly = cfg.rows.grpo
-    ? _grafikGrpoByMonth(cfg.supplier || '', cfg.dataMode==='item' ? cfg.itemCode : '')
+    ? _grafikGrpoByMonth(cfg.supplier || '', cfg.itemCode || '')
     : {};
 
   var labels = months.map(function(m){ return m.label; });
@@ -13087,8 +13158,6 @@ function _fcRenderGrafik(el, items, fcData) {
         if(g) arr[mi] = isValue ? Math.round(g.value*100)/100 : Math.round(g.qty*100)/100;
       });
     } else {
-      // Baris forecast: petakan index forecast → bulan absolut
-      var itemsToUse = cfg.dataMode==='item' ? [cfg.itemCode] : supItems;
       months.forEach(function(m, mi){
         // cari index forecast yang cocok dengan bulan absolut ini
         var fcIdx = -1;
@@ -13120,7 +13189,7 @@ function _fcRenderGrafik(el, items, fcData) {
   if(hasDOI) scales.yDOI = { position:'right', title:{display:true, text:'DOI (hari)'}, grid:{drawOnChartArea:false} };
 
   var titleTxt = (cfg.supplier ? cfg.supplier+' — ' : '')
-    + (cfg.dataMode==='total' ? 'Total '+supItems.length+' item' : cfg.itemCode)
+    + (cfg.itemCode ? cfg.itemCode : 'Total '+supItems.length+' item')
     + ' — ' + (isValue?'Value':'Qty');
 
   if(_grafikChart) { _grafikChart.destroy(); _grafikChart = null; }
@@ -13173,10 +13242,10 @@ function _grafikSet(key, val){ window._grafikCfg[key] = val; renderForecast(); }
 function _grafikToggleRow(key, on){ window._grafikCfg.rows[key] = on; renderForecast(); }
 // Pilih item dari input searchable — ekstrak kode (bisa "3000010001" atau "3000010001 — Nama")
 function _grafikPickItem(val){
-  if(!val) return;
-  var code = String(val).trim().split(/[\s—-]/)[0].trim(); // ambil token pertama = kode
-  // Kalau user ketik kode lengkap, pakai itu; validasi ada di master/mrp
-  if(code) { window._grafikCfg.itemCode = code; renderForecast(); }
+  if(!val || !String(val).trim()){ window._grafikCfg.itemCode=''; renderForecast(); return; }
+  var code = String(val).trim().split(/[\s—-]/)[0].trim();
+  window._grafikCfg.itemCode = code || '';
+  renderForecast();
 }
 
 function _fcRenderAnalisis(el, items, fcData) {
