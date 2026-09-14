@@ -13033,7 +13033,18 @@ function _fcRenderGrafik(el, items, fcData) {
   if(cfg.rmpm==='rm') supItems = supItems.filter(function(c){ return /^3/.test(c); });
   else if(cfg.rmpm==='pm') supItems = supItems.filter(function(c){ return /^4/.test(c); });
   if(cfg.supplier) {
-    supItems = supItems.filter(function(c){ return (_fcSupplierByItemCache[c]||'') === cfg.supplier; });
+    // Item dianggap milik supplier ini kalau: (a) supplier di cache cocok, ATAU
+    // (b) item punya GRPO dari supplier ini (biar konsisten dgn baris GRPO).
+    var _grpoItemsOfSup = {};
+    var _gsrc = ((STATE.grpoHistori&&STATE.grpoHistori.length)?STATE.grpoHistori:[]).concat(STATE.grpoData||[]);
+    _gsrc.forEach(function(g){ if(g.itemCode && (g.supplierName||'')===cfg.supplier) _grpoItemsOfSup[g.itemCode]=1; });
+    supItems = supItems.filter(function(c){
+      return (_fcSupplierByItemCache[c]||'') === cfg.supplier || _grpoItemsOfSup[c];
+    });
+    // Tambahkan item GRPO milik supplier ini yang belum masuk (mis. tidak lolos filter global)
+    Object.keys(_grpoItemsOfSup).forEach(function(c){
+      if(supItems.indexOf(c)<0 && fcData[c]) supItems.push(c);
+    });
   }
 
   // Daftar supplier (dari cache)
