@@ -4632,6 +4632,7 @@ async function loadOSPR() {
       if((r.OpenQty||0) <= 0) return false;
       var ic = (r.ItemCode||'').toString();
       if(/^6/.test(ic) && r.CardName !== 'Berkat Asia Kemasindo, PT') return false;
+      if(!/^[1234]/.test(ic)) return false; // hanya FG(1)/WIP(2)/RM(3)/PM(4)
       return true;
     }).map(function(r) {
       return { docNum: r.DocNum, itemCode: r.ItemCode, itemName: r.Dscription,
@@ -4664,6 +4665,7 @@ async function loadPO() {
       if((r.OpenQty||0) <= 0) return false;
       var ic = (r.ItemCode||'').toString();
       if(/^6/.test(ic) && r.CardName !== 'Berkat Asia Kemasindo, PT') return false;
+      if(!/^[1234]/.test(ic)) return false; // hanya FG(1)/WIP(2)/RM(3)/PM(4)
       return true;
     }).map(function(r){
       return { docNum: r.DocNum, docDate: fmtSAPDate(r.DocDate),
@@ -4711,6 +4713,7 @@ async function loadGRPO() {
       if(s === 'cancelled' || s === 'cancellation') return false;
       var ic = (r.ItemCode||'').toString();
       if(/^6/.test(ic) && r.CardName !== 'Berkat Asia Kemasindo, PT') return false;
+      if(!/^[1234]/.test(ic)) return false; // hanya FG(1)/WIP(2)/RM(3)/PM(4)
       return true;
     }).map(function(r){
       return { grpoDate: fmtSAPDate(r.GRPO_Date), itemCode: r.ItemCode,
@@ -6104,6 +6107,7 @@ async function loadGRPOMonth() {
       if(s==='cancelled'||s==='cancellation') return false;
       var ic=(r.ItemCode||'').toString();
       if(/^6/.test(ic)&&r.CardName!=='Berkat Asia Kemasindo, PT') return false;
+      if(!/^[1234]/.test(ic)) return false; // hanya FG/WIP/RM/PM
       return true;
     }).map(function(r){
       return { grpoDate:fmtSAPDate(r.GRPO_Date), itemCode:r.ItemCode,
@@ -12952,15 +12956,17 @@ var _GRAFIK_ROWS = [
   {key:'doi',         label:'DOI (hari)',  color:'#ef4444', get:function(fc){ return fc.doiFc || fc.doi; }, isDOI:true}
 ];
 
-// GRPO qty per bulan absolut (YYYY-MM), difilter supplier/item opsional.
+// GRPO qty per bulan absolut (YYYY-MM), difilter supplier/item/rmpm opsional.
 // Return { 'YYYY-MM': { qty, value } }.
-function _grafikGrpoByMonth(supplierFilter, itemFilter) {
+function _grafikGrpoByMonth(supplierFilter, itemFilter, rmpmFilter) {
   var out = {};
   var src = (STATE.grpoHistori && STATE.grpoHistori.length) ? STATE.grpoHistori : (STATE.grpoData||[]);
   src.forEach(function(g){
     if(!g.grpoDate || !g.itemCode) return;
     if(itemFilter && g.itemCode !== itemFilter) return;
     if(supplierFilter && (g.supplierName||'') !== supplierFilter) return;
+    if(rmpmFilter==='rm' && !/^3/.test(g.itemCode)) return;
+    if(rmpmFilter==='pm' && !/^4/.test(g.itemCode)) return;
     var p = g.grpoDate.split('/'); if(p.length!==3) return;
     var ym = p[2]+'-'+String(p[1]).padStart(2,'0');
     var qty = parseFloat(g.qty)||0;
@@ -13032,6 +13038,7 @@ async function _grpoHistoriFetchAll(showToast) {
         if(s==='cancelled'||s==='cancellation') return;
         var ic=(r.ItemCode||'').toString();
         if(/^6/.test(ic) && r.CardName !== 'Berkat Asia Kemasindo, PT') return;
+        if(!/^[1234]/.test(ic)) return; // hanya FG/WIP/RM/PM
         all.push({ grpoDate: fmtSAPDate(r.GRPO_Date), itemCode: r.ItemCode,
           itemName: r.Dscription, supplierName: r.CardName, qty: r.Quantity, uom: r.unitMsr,
           grpoDocNum: String(r.DocNum||r.DocEntry||'') });
@@ -13208,7 +13215,7 @@ function _fcRenderGrafik(el, items, fcData) {
     });
   }
   var grpoMonthly = cfg.rows.grpo
-    ? _grafikGrpoByMonth(cfg.supplier || '', cfg.itemCode || '')
+    ? _grafikGrpoByMonth(cfg.supplier || '', cfg.itemCode || '', cfg.rmpm || '')
     : {};
 
   var labels = months.map(function(m){ return m.label; });
