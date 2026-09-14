@@ -4043,6 +4043,7 @@ var _projFreezeCol = localStorage.getItem('proj_freeze_col') === '1';
 var STATE = {
   mrpData: JSON.parse(localStorage.getItem('mrp_data') || 'null'),
   cogmData: JSON.parse(localStorage.getItem('cogm_data') || '{}'),
+  grpoHistori: [],
   matcomData: JSON.parse(localStorage.getItem('matcom_data') || 'null'),
   matcomMonthly: JSON.parse(localStorage.getItem('matcom_monthly') || 'null'),
   realNameData: JSON.parse(localStorage.getItem('realname_data') || '{}'),
@@ -4930,22 +4931,24 @@ async function syncAll() {
   loadOSPO();
   // Matcom ikut sync otomatis
   loadMatcomSAP().catch(function(e){ console.warn('[syncAll] matcom gagal:', e.message); });
-  // GRPO historis 6 bulan ke belakang → untuk fallback nama supplier item yang jarang PO.
-  // Disimpan di STATE.grpoHistori (tidak ganggu grpoData bulan berjalan).
+  // GRPO historis (Jan 2025) — LOAD dari IndexedDB saja (tidak fetch tiap sync).
+  // Kalau IDB kosong (laptop baru / belum pernah), fetch sekali dari Jan 2025.
+  // Bulan berjalan sudah ditarik loadGRPO() di atas.
   (function(){
-    var _n=new Date(); var _fromY=_n.getFullYear(), _fromM=_n.getMonth()+1-6;
-    while(_fromM<1){_fromM+=12;_fromY--;}
-    var _fromYM=_fromY+'-'+String(_fromM).padStart(2,'0');
-    var _toYM=_n.getFullYear()+'-'+String(_n.getMonth()+1).padStart(2,'0');
-    if(typeof _grafikLoadGrpoHistori==='function'){
-      _grafikLoadGrpoHistori(_fromYM,_toYM).then(function(loaded){
-        if(loaded){
-          // Rebuild projection supaya supplier ke-refresh dgn data GRPO historis
-          if(STATE.projectionData && STATE.projectionData.length){ buildProjection(); if(document.getElementById('proj-table')) renderProjection(); }
-          if(document.getElementById('fc-table')) renderForecast();
-        }
-      }).catch(function(e){ console.warn('[syncAll] GRPO histori gagal:', e.message); });
+    if(window._grpoHistoriLoaded && STATE.grpoHistori && STATE.grpoHistori.length) {
+      // sudah ada di memori — cukup rebuild supplier
+      if(STATE.projectionData && STATE.projectionData.length){ buildProjection(); if(document.getElementById('proj-table')) renderProjection(); }
+      return;
     }
+    _grpoHistoriIdbLoad(function(ok){
+      if(ok){
+        if(STATE.projectionData && STATE.projectionData.length){ buildProjection(); if(document.getElementById('proj-table')) renderProjection(); }
+        if(document.getElementById('fc-table')) renderForecast();
+      } else {
+        // belum pernah — fetch sekali dari Jan 2025 (background)
+        _grpoHistoriFetchAll(true).catch(function(e){ console.warn('[syncAll] GRPO histori fetch gagal:', e.message); });
+      }
+    });
   })();
   var failed = results.filter(function(r){ return r.status === 'rejected'; });
   console.log('[syncAll] API done. Failed:', failed.length, '| Stock:', Object.keys(STATE.stockData||{}).length, '| PO:', (STATE.poData||[]).length);
@@ -12969,38 +12972,93 @@ function _grafikGrpoByMonth(supplierFilter, itemFilter) {
   return out;
 }
 
-// Fetch GRPO historis untuk rentang [fromYM..toYM] sekaligus. Cache per-range.
-window._grpoHistoriRange = window._grpoHistoriRange || '';
-STATE.grpoHistori = STATE.grpoHistori || [];
-async function _grafikLoadGrpoHistori(fromYM, toYM) {
-  var rangeKey = fromYM+'_'+toYM;
-  if(window._grpoHistoriRange === rangeKey && STATE.grpoHistori.length) return false; // sudah ada
+// ── GRPO Historis di IndexedDB (fetch sekali dari Jan 2025, simpan permanen) ──
+var GRPO_HISTORI_START = '2025-01'; // awal periode historis
+window._grpoHistoriLoaded = false;
+
+// Simpan GRPO historis ke IndexedDB
+function _grpoHistoriIdbSave(data) {
+  _mrpIdbOpen(function(db){
+    if(!db || !db.objectStoreNames.contains('grpo_histori')) return;
+    try {
+      var tx = db.transaction('grpo_histori','readwrite');
+      tx.objectStore('grpo_histori').put({ id:'grpo_data', data:data, ts:new Date().toISOString() });
+    } catch(e){ console.warn('[grpo histori] save gagal:', e); }
+  });
+}
+// Load GRPO historis dari IndexedDB → STATE.grpoHistori
+function _grpoHistoriIdbLoad(cb) {
+  _mrpIdbOpen(function(db){
+    if(!db || !db.objectStoreNames.contains('grpo_histori')) { cb && cb(false); return; }
+    try {
+      var tx = db.transaction('grpo_histori','readonly');
+      tx.objectStore('grpo_histori').get('grpo_data').onsuccess = function(e){
+        if(e.target.result && e.target.result.data) {
+          STATE.grpoHistori = e.target.result.data;
+          window._grpoHistoriLoaded = true;
+          console.log('[grpo histori] loaded dari IDB:', STATE.grpoHistori.length, 'baris');
+          cb && cb(true);
+        } else cb && cb(false);
+      };
+    } catch(e){ cb && cb(false); }
+  });
+}
+
+// Fetch GRPO dari Jan 2025 s/d bulan LALU (bulan berjalan pakai grpoData), simpan ke IDB.
+// Dipecah per-3-bulan biar query SAP tidak timeout.
+async function _grpoHistoriFetchAll(showToast) {
   if(typeof sapFetchTO !== 'function') return false;
-  var fp = fromYM.split('-'), tp = toYM.split('-');
-  var fy=parseInt(fp[0]), fm=parseInt(fp[1]), ty=parseInt(tp[0]), tm=parseInt(tp[1]);
-  // batasi: jangan fetch masa depan (GRPO historis) — potong toYM ke bulan ini
-  var now=new Date(); var curYM = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
-  var effTo = toYM > curYM ? curYM : toYM;
-  var etp = effTo.split('-'); ty=parseInt(etp[0]); tm=parseInt(etp[1]);
-  var startDate = fy+'-'+String(fm).padStart(2,'0')+'-01T00:00:00.000Z';
-  var lastDay = new Date(ty, tm, 0).getDate();
-  var endDate = ty+'-'+String(tm).padStart(2,'0')+'-'+String(lastDay).padStart(2,'0')+'T23:59:59.000Z';
-  try {
-    var raw = await sapFetchTO(27, { '[%0]': startDate, '[%1]': endDate });
-    STATE.grpoHistori = (raw||[]).filter(function(r){
-      var s=(r.DocStatus||'').toLowerCase();
-      if(s==='cancelled'||s==='cancellation') return false;
-      var ic=(r.ItemCode||'').toString();
-      if(/^6/.test(ic) && r.CardName !== 'Berkat Asia Kemasindo, PT') return false;
-      return true;
-    }).map(function(r){
-      return { grpoDate: fmtSAPDate(r.GRPO_Date), itemCode: r.ItemCode,
-        itemName: r.Dscription, supplierName: r.CardName, qty: r.Quantity, uom: r.unitMsr,
-        grpoDocNum: String(r.DocNum||r.DocEntry||'') };
-    });
-    window._grpoHistoriRange = rangeKey;
-    return true;
-  } catch(e){ console.warn('[grafik] load GRPO histori gagal:', e.message); return false; }
+  var now = new Date();
+  var sp = GRPO_HISTORI_START.split('-');
+  var startY=parseInt(sp[0]), startM=parseInt(sp[1]);
+  // sampai akhir bulan LALU (bulan berjalan di-handle grpoData terpisah)
+  var endBound = new Date(now.getFullYear(), now.getMonth(), 0); // hari terakhir bulan lalu
+  var all = [];
+  var cy=startY, cm=startM, guard=0;
+  if(showToast) toast('⏳ Menarik GRPO historis dari Jan 2025... (sekali saja)','ok');
+  while(guard<60){
+    // window 3 bulan
+    var wStart = new Date(cy, cm-1, 1);
+    if(wStart > endBound) break;
+    var wEndM = new Date(cy, cm-1+2, 1); // +2 bulan
+    var wEnd = new Date(wEndM.getFullYear(), wEndM.getMonth()+1, 0); // akhir bulan window
+    if(wEnd > endBound) wEnd = endBound;
+    var sd = wStart.getFullYear()+'-'+String(wStart.getMonth()+1).padStart(2,'0')+'-01T00:00:00.000Z';
+    var ed = wEnd.getFullYear()+'-'+String(wEnd.getMonth()+1).padStart(2,'0')+'-'+String(wEnd.getDate()).padStart(2,'0')+'T23:59:59.000Z';
+    try {
+      var raw = await sapFetchTO(27, { '[%0]': sd, '[%1]': ed });
+      (raw||[]).forEach(function(r){
+        var s=(r.DocStatus||'').toLowerCase();
+        if(s==='cancelled'||s==='cancellation') return;
+        var ic=(r.ItemCode||'').toString();
+        if(/^6/.test(ic) && r.CardName !== 'Berkat Asia Kemasindo, PT') return;
+        all.push({ grpoDate: fmtSAPDate(r.GRPO_Date), itemCode: r.ItemCode,
+          itemName: r.Dscription, supplierName: r.CardName, qty: r.Quantity, uom: r.unitMsr,
+          grpoDocNum: String(r.DocNum||r.DocEntry||'') });
+      });
+    } catch(e){ console.warn('[grpo histori] window '+sd+' gagal:', e.message); }
+    // maju 3 bulan
+    cm += 3; while(cm>12){ cm-=12; cy++; } guard++;
+  }
+  STATE.grpoHistori = all;
+  window._grpoHistoriLoaded = true;
+  _grpoHistoriIdbSave(all);
+  if(showToast) toast('✓ GRPO historis: '+all.length+' baris tersimpan','ok');
+  console.log('[grpo histori] fetch selesai:', all.length, 'baris');
+  // refresh tampilan
+  if(STATE.projectionData && STATE.projectionData.length){ buildProjection(); if(document.getElementById('proj-table')) renderProjection(); }
+  if(_fcView==='grafik' && document.getElementById('fc-table')) renderForecast();
+  return true;
+}
+
+// Dipanggil grafik: pastikan historis ada (dari IDB), fetch kalau belum pernah
+async function _grafikLoadGrpoHistori(fromYM, toYM) {
+  if(window._grpoHistoriLoaded && STATE.grpoHistori && STATE.grpoHistori.length) return false; // sudah ada
+  // coba load dari IDB dulu
+  var loaded = await new Promise(function(res){ _grpoHistoriIdbLoad(function(ok){ res(ok); }); });
+  if(loaded) return true;
+  // belum ada di IDB → fetch dari Jan 2025 (sekali)
+  return await _grpoHistoriFetchAll(true);
 }
 
 // Daftar bulan absolut dalam range [fromYM..toYM] → [{ym, label, year, mon}]
@@ -13141,17 +13199,13 @@ function _fcRenderGrafik(el, items, fcData) {
     return;
   }
 
-  // GRPO per bulan absolut (difilter supplier/item)
-  // Auto-load GRPO historis sesuai range kalau GRPO dicentang & belum ada data range ini
-  if(cfg.rows.grpo) {
-    var _rk = fromYM+'_'+toYM;
-    if(window._grpoHistoriRange !== _rk) {
-      var _tblEl = document.getElementById('fc-grafik-table');
-      if(_tblEl) _tblEl.innerHTML = '<div style="padding:16px;text-align:center;color:var(--muted);font-size:12px">⏳ Memuat GRPO historis '+fromYM+' s/d '+toYM+'...</div>';
-      _grafikLoadGrpoHistori(fromYM, toYM).then(function(loaded){
-        if(loaded && _fcView==='grafik') renderForecast();
-      });
-    }
+  // GRPO: pastikan data historis ada (dari IDB, atau fetch sekali kalau belum pernah)
+  if(cfg.rows.grpo && !(window._grpoHistoriLoaded && STATE.grpoHistori && STATE.grpoHistori.length)) {
+    var _tblEl = document.getElementById('fc-grafik-table');
+    if(_tblEl) _tblEl.innerHTML = '<div style="padding:16px;text-align:center;color:var(--muted);font-size:12px">⏳ Memuat GRPO historis (sekali saja, lalu tersimpan)...</div>';
+    _grafikLoadGrpoHistori(fromYM, toYM).then(function(loaded){
+      if(loaded && _fcView==='grafik') renderForecast();
+    });
   }
   var grpoMonthly = cfg.rows.grpo
     ? _grafikGrpoByMonth(cfg.supplier || '', cfg.itemCode || '')
@@ -13221,32 +13275,86 @@ function _fcRenderGrafik(el, items, fcData) {
   });
 
   // ── Tabel data di bawah grafik ──
-  _fcRenderGrafikTable(months, datasets, isValue);
+  _fcRenderGrafikTable(months, datasets, isValue, { supItems: itemsToUse, fcData: fcData, isValue: isValue });
 }
 
 // Tabel: baris = dataset, kolom = bulan + total
-function _fcRenderGrafikTable(months, datasets, isValue) {
+window._grafikExpanded = window._grafikExpanded || {};
+// Simpan konteks terakhir untuk breakdown
+window._grafikTableCtx = null;
+
+function _fcRenderGrafikTable(months, datasets, isValue, ctx) {
   var el = document.getElementById('fc-grafik-table');
   if(!el) return;
+  window._grafikTableCtx = ctx; // { supItems, fcData, isValue }
   var mHdr = months.map(function(m){ return '<th style="text-align:right;padding:5px 8px;font-size:10px;font-weight:700;color:var(--muted);white-space:nowrap">'+m.label+'</th>'; }).join('');
   var body = datasets.map(function(ds){
     var isDOI = ds.yAxisID==='yDOI';
+    var canBreak = !isDOI && ctx && ctx.supItems && ctx.supItems.length>1; // breakdown kalau >1 item
+    var exp = window._grafikExpanded[ds._rowKey];
     var cells = ds.data.map(function(v){
       return '<td style="text-align:right;padding:5px 8px;font-family:var(--mono);font-size:10.5px;color:'+ds._color+'">'+(v==null?'<span style=\"color:var(--hint)\">–</span>':n_id(Math.round(v*100)/100))+'</td>';
     }).join('');
     var tot = ds.data.reduce(function(a,b){ return a+(b||0); },0);
     var totCell = isDOI ? '<td style="background:var(--bg4);border-left:2px solid var(--border2)"></td>'
       : '<td style="text-align:right;padding:5px 10px;font-family:var(--mono);font-size:11px;font-weight:700;background:var(--bg4);border-left:2px solid var(--border2);color:'+ds._color+'">'+n_id(Math.round(tot*100)/100)+'</td>';
-    return '<tr style="border-top:1px solid var(--border)">'
-      + '<td style="padding:5px 8px;font-size:10.5px;font-weight:700;color:'+ds._color+';white-space:nowrap">'+ds.label+'</td>'
+    var arrow = canBreak ? '<span style="display:inline-block;width:14px;cursor:pointer;color:var(--muted);transform:'+(exp?'rotate(90deg)':'none')+';transition:transform .15s" onclick="_grafikToggleBreak(\''+ds._rowKey+'\')">▶</span> ' : '<span style="display:inline-block;width:14px"></span>';
+    var mainRow = '<tr style="border-top:1px solid var(--border)">'
+      + '<td style="padding:5px 8px;font-size:10.5px;font-weight:700;color:'+ds._color+';white-space:nowrap">'+arrow+ds.label+'</td>'
       + cells + totCell + '</tr>';
+    // Baris breakdown per item
+    var breakRows = '';
+    if(canBreak && exp) {
+      breakRows = _grafikBreakdownRows(ds, months, ctx);
+    }
+    return mainRow + breakRows;
   }).join('');
   el.innerHTML = '<div style="border:1px solid var(--border2);border-radius:var(--r);overflow:hidden">'
-    + '<div style="padding:7px 10px;background:var(--bg3);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text)">📋 Data '+(isValue?'Value (Rp)':'Qty')+'</div>'
+    + '<div style="padding:7px 10px;background:var(--bg3);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text)">📋 Data '+(isValue?'Value (Rp)':'Qty')+' <span style="font-weight:400;text-transform:none;color:var(--muted)">— klik ▶ untuk rincian per item</span></div>'
     + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'
     + '<thead><tr style="background:var(--bg3)"><th style="text-align:left;padding:5px 8px;font-size:10px;font-weight:700;color:var(--muted)">Baris</th>'+mHdr+'<th style="text-align:right;padding:5px 10px;font-size:10px;font-weight:700;color:var(--muted);background:var(--bg4);border-left:2px solid var(--border2)">TOTAL</th></tr></thead>'
     + '<tbody>'+body+'</tbody></table></div></div>';
 }
+
+// Baris breakdown per item untuk 1 dataset (row)
+function _grafikBreakdownRows(ds, months, ctx) {
+  var isValue = ctx.isValue;
+  var rowDef = _GRAFIK_ROWS.filter(function(r){ return r.key===ds._rowKey; })[0];
+  if(!rowDef) return '';
+  // Hitung nilai per item per bulan
+  var perItem = []; // {code, name, arr, total}
+  ctx.supItems.forEach(function(code){
+    var arr = months.map(function(m){ return 0; });
+    var any = false;
+    if(rowDef.isGRPO) {
+      var gm = _grafikGrpoByMonth(window._grafikCfg.supplier||'', code); // per item
+      months.forEach(function(m,mi){ var g=gm[m.ym]; if(g){ arr[mi]=isValue?g.value:g.qty; if(arr[mi])any=true; } });
+    } else {
+      var fc = ctx.fcData[code]; if(!fc) return;
+      months.forEach(function(m,mi){
+        var fcIdx=-1; for(var i=0;i<FC_MONTHS.length;i++){ if(_grafikFcMonthYM(i)===m.ym){fcIdx=i;break;} }
+        if(fcIdx<0) return;
+        var s = rowDef.get(fc)||[]; var v=s[fcIdx]||0; if(isValue) v*=_fcCOGM(code);
+        arr[mi]=v; if(v)any=true;
+      });
+    }
+    if(any){
+      var tot=arr.reduce(function(a,b){return a+(b||0);},0);
+      var m=(STATE.masterData||{})[code]||{}; var nm=(_isAdmin&&(STATE.realNameData||{})[code])?STATE.realNameData[code]:(m.desc||'');
+      perItem.push({code:code, name:nm, arr:arr, total:tot});
+    }
+  });
+  perItem.sort(function(a,b){ return b.total-a.total; }); // terbesar dulu
+  if(!perItem.length) return '<tr style="background:var(--bg)"><td colspan="'+(months.length+2)+'" style="padding:6px 8px 6px 28px;font-size:10px;color:var(--muted)">(tidak ada kontribusi)</td></tr>';
+  return perItem.map(function(it){
+    var cells = it.arr.map(function(v){ return '<td style="text-align:right;padding:3px 8px;font-family:var(--mono);font-size:10px;color:var(--muted)">'+(Math.abs(v)<0.005?'<span style=\"color:var(--hint)\">–</span>':n_id(Math.round(v*100)/100))+'</td>'; }).join('');
+    return '<tr style="background:var(--bg)">'
+      + '<td style="padding:3px 8px 3px 28px;font-size:10px;color:var(--text);white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis">'+it.code+' <span style="color:var(--muted)">'+(it.name||'').slice(0,26)+'</span></td>'
+      + cells
+      + '<td style="text-align:right;padding:3px 10px;font-family:var(--mono);font-size:10px;font-weight:600;background:var(--bg3);border-left:2px solid var(--border2);color:var(--muted)">'+n_id(Math.round(it.total*100)/100)+'</td></tr>';
+  }).join('');
+}
+function _grafikToggleBreak(key){ window._grafikExpanded[key] = !window._grafikExpanded[key]; renderForecast(); }
 
 function _fcGrafikFmt(v){ try{ return (Math.round(v*100)/100).toLocaleString('id-ID'); }catch(e){ return v; } }
 function _grafikSet(key, val){ window._grafikCfg[key] = val; renderForecast(); }
@@ -13776,13 +13884,14 @@ function _fcRekapCheckACC() {
 var PR_SNAPSHOT_MAX = 15; // simpan maksimal 15 snapshot terakhir, yang lama otomatis kehapus
 
 function _prSnapIdbOpen(cb) {
-  var req = indexedDB.open('mrp_db', 3);
+  var req = indexedDB.open('mrp_db', 4);
   req.onupgradeneeded = function(e) {
     var db2 = e.target.result;
     if(!db2.objectStoreNames.contains('bom')) db2.createObjectStore('bom', {keyPath:'id'});
     if(!db2.objectStoreNames.contains('mrp')) db2.createObjectStore('mrp', {keyPath:'id'});
     if(!db2.objectStoreNames.contains('mps')) db2.createObjectStore('mps', {keyPath:'id'});
     if(!db2.objectStoreNames.contains('pr_snapshots')) db2.createObjectStore('pr_snapshots', {keyPath:'id'});
+    if(!db2.objectStoreNames.contains('grpo_histori')) db2.createObjectStore('grpo_histori', {keyPath:'id'});
   };
   req.onsuccess = function(e) { cb(e.target.result); };
   req.onerror   = function()  { cb(null); };
@@ -15711,13 +15820,14 @@ function _mrpFallbackCopy(text, count) {
 
 // ── IndexedDB helpers for BOM (large data, local only) ────────────────────────
 function _mrpIdbOpen(cb) {
-  var req = indexedDB.open('mrp_db', 3);
+  var req = indexedDB.open('mrp_db', 4);
   req.onupgradeneeded = function(e) {
     var db2 = e.target.result;
     if(!db2.objectStoreNames.contains('bom')) db2.createObjectStore('bom', {keyPath:'id'});
     if(!db2.objectStoreNames.contains('mrp')) db2.createObjectStore('mrp', {keyPath:'id'});
     if(!db2.objectStoreNames.contains('mps')) db2.createObjectStore('mps', {keyPath:'id'});
     if(!db2.objectStoreNames.contains('pr_snapshots')) db2.createObjectStore('pr_snapshots', {keyPath:'id'});
+    if(!db2.objectStoreNames.contains('grpo_histori')) db2.createObjectStore('grpo_histori', {keyPath:'id'});
   };
   req.onsuccess = function(e) { cb(e.target.result); };
   req.onerror   = function()  { cb(null); };
@@ -15795,6 +15905,12 @@ function _autoLoadBomFromSheet() {
 }
 
 function _mrpIdbLoad() {
+  // Load GRPO historis dari IDB (untuk supplier lookup & grafik) — silent
+  if(typeof _grpoHistoriIdbLoad === 'function') {
+    _grpoHistoriIdbLoad(function(ok){
+      if(ok && STATE.projectionData && STATE.projectionData.length){ buildProjection(); if(document.getElementById('proj-table')) renderProjection(); }
+    });
+  }
   _mrpIdbOpen(function(db) {
     if(!db) return;
     // Load BOM
