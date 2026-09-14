@@ -860,10 +860,23 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
         style="padding:5px 14px;font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;background:transparent;color:var(--muted);border:none;cursor:pointer;font-family:var(--font)">📊 Grafik</button>
     </div>
 
-    <!-- Type -->
+    <!-- Type (global: Detail, Rekap, Grafik) -->
     <select id="f-fc-type" onchange="renderForecast()" style="font-size:12px;padding:5px 10px">
-      <option value="">RM + PM</option><option value="RM">RM</option><option value="PM">PM</option>
+      <option value="">RM + PM</option><option value="RM">RM</option><option value="PM">PM</option><option value="FG">FG</option><option value="WIP">WIP</option>
     </select>
+
+    <!-- Kontrol grafik (muncul hanya di tab Grafik) -->
+    <span id="fc-grafik-toolbar" style="display:none;align-items:center;gap:8px">
+      <select id="fc-g-supplier" onchange="_grafikToolbarChange()" style="font-size:12px;padding:5px 8px;max-width:180px;border:1px solid var(--border2);border-radius:6px" title="Filter supplier (grafik)"></select>
+      <span style="font-size:11px;color:var(--muted)">Range:</span>
+      <select id="fc-g-from" onchange="_grafikToolbarChange()" style="font-size:12px;padding:5px 6px;border:1px solid var(--border2);border-radius:6px"></select>
+      <span style="font-size:11px;color:var(--muted)">s/d</span>
+      <select id="fc-g-to" onchange="_grafikToolbarChange()" style="font-size:12px;padding:5px 6px;border:1px solid var(--border2);border-radius:6px"></select>
+      <div style="display:inline-flex;border:1px solid var(--border2);border-radius:6px;overflow:hidden;font-size:11px">
+        <button id="fc-g-line" onclick="_grafikSet('chartType','line')" style="padding:5px 11px;border:none;cursor:pointer;font-weight:600">Line</button>
+        <button id="fc-g-bar" onclick="_grafikSet('chartType','bar')" style="padding:5px 11px;border:none;cursor:pointer;font-weight:600">Bar</button>
+      </div>
+    </span>
 
     <!-- Filter rows (Detail only) -->
     <select id="f-fc-rows" onchange="renderForecast()" style="font-size:12px;padding:5px 10px" title="Filter tampilan baris (mode Detail)">
@@ -11947,6 +11960,7 @@ function _fcSetView(v) {
     if(btn) { btn.style.background = v===id?'var(--accent)':'transparent'; btn.style.color = v===id?'#fff':'var(--muted)'; }
   });
   renderForecast();
+  if(typeof _fcSyncGrafikToolbar==='function') _fcSyncGrafikToolbar();
 }
 
 // ─── Build OSPO index { itemCode: { yyyymm: qty } } ─────────────────────────
@@ -12490,9 +12504,11 @@ function renderForecast(isGenerate) {
   var srchCodeSet = isMultiCodeSearch ? srchTokens.reduce(function(acc,t){ acc[t]=true; return acc; }, {}) : null;
 
   var allItems = Object.keys(STATE.masterData).filter(function(code) {
-    var iType = /^3/.test(code)?'RM':(/^4/.test(code)?'PM':'FG');
-    if(iType==='FG') return false;
-    if(fType && iType!==fType) return false;
+    var iType = /^1/.test(code)?'FG':(/^2/.test(code)?'WIP':(/^3/.test(code)?'RM':(/^4/.test(code)?'PM':'OTHER')));
+    if(iType==='OTHER') return false;
+    // FG/WIP hanya muncul kalau dipilih eksplisit (fType FG/WIP), else default RM/PM saja
+    if(!fType) { if(iType==='FG'||iType==='WIP') return false; }
+    else if(iType!==fType) return false;
     if(fABC && (STATE.masterData[code].abc||'') !== fABC) return false;
     if(isMultiCodeSearch) {
       if(!srchCodeSet[code.toLowerCase()]) return false;
@@ -13116,61 +13132,33 @@ function _fcRenderGrafik(el, items, fcData) {
   var cfg = window._grafikCfg;
   var isValue = window._fcValueView;
 
-  // Filter item: RM/PM → supplier
-  var supItems;
-  if(cfg.rmpm==='fg' || cfg.rmpm==='wip') {
-    // FG/WIP tidak ada di allItems (forecast exclude FG) → ambil dari master + GRPO
-    var pref = cfg.rmpm==='fg' ? '1' : '2';
-    var _fgSet = {};
-    Object.keys(STATE.masterData||{}).forEach(function(c){ if(c.charAt(0)===pref) _fgSet[c]=1; });
-    ((STATE.grpoHistori&&STATE.grpoHistori.length)?STATE.grpoHistori:[]).concat(STATE.grpoData||[]).forEach(function(g){ if(g.itemCode && String(g.itemCode).charAt(0)===pref) _fgSet[g.itemCode]=1; });
-    supItems = Object.keys(_fgSet);
-  } else if(cfg.rmpm==='rm') {
-    supItems = items.filter(function(c){ return /^3/.test(c); });
-  } else if(cfg.rmpm==='pm') {
-    supItems = items.filter(function(c){ return /^4/.test(c); });
-  } else {
-    // ALL = semua kode 1/2/3/4. RM/PM dari items + FG/WIP dari master & GRPO
-    var _allSet = {};
-    items.forEach(function(c){ if(/^[34]/.test(c)) _allSet[c]=1; });
-    Object.keys(STATE.masterData||{}).forEach(function(c){ if(/^[12]/.test(c)) _allSet[c]=1; });
-    ((STATE.grpoHistori&&STATE.grpoHistori.length)?STATE.grpoHistori:[]).concat(STATE.grpoData||[]).forEach(function(g){ if(g.itemCode && /^[12]/.test(String(g.itemCode))) _allSet[g.itemCode]=1; });
-    supItems = Object.keys(_allSet);
-  }
+  // Filter jenis item dari toolbar GLOBAL (f-fc-type: ''=RM+PM, RM, PM, FG, WIP)
+  var fType = (document.getElementById('f-fc-type')||{value:''}).value;
+  // Search item dari toolbar GLOBAL (srch-fc) — kalau 1 kode persis, jadi item terpilih
+  var srchG = (document.getElementById('srch-fc')||{value:''}).value.trim();
+
+  // supItems = items yang lolos filter global (items sudah difilter fType & search di renderForecast)
+  var supItems = items.slice();
+  // Kalau FG/WIP dipilih, items mungkin sudah berisi FG/WIP (allItems support). Kalau ALL (RM+PM), items = RM/PM.
+  // Filter supplier (dari toolbar grafik)
   if(cfg.supplier) {
-    // Item dianggap milik supplier ini kalau: (a) supplier di cache cocok, ATAU
-    // (b) item punya GRPO dari supplier ini (biar konsisten dgn baris GRPO).
     var _grpoItemsOfSup = {};
     var _gsrc = ((STATE.grpoHistori&&STATE.grpoHistori.length)?STATE.grpoHistori:[]).concat(STATE.grpoData||[]);
     _gsrc.forEach(function(g){ if(g.itemCode && (g.supplierName||'')===cfg.supplier) _grpoItemsOfSup[g.itemCode]=1; });
     supItems = supItems.filter(function(c){
       return (_fcSupplierByItemCache[c]||'') === cfg.supplier || _grpoItemsOfSup[c];
     });
-    // Tambahkan item GRPO milik supplier ini yang belum masuk (mis. tidak lolos filter global)
-    Object.keys(_grpoItemsOfSup).forEach(function(c){
-      if(supItems.indexOf(c)<0 && fcData[c]) supItems.push(c);
-    });
+    Object.keys(_grpoItemsOfSup).forEach(function(c){ if(supItems.indexOf(c)<0 && fcData[c]) supItems.push(c); });
   }
 
-  // Daftar supplier (dari cache)
-  var supSet = {}; Object.keys(_fcSupplierByItemCache||{}).forEach(function(c){ var s=_fcSupplierByItemCache[c]; if(s) supSet[s]=1; });
-  var supList = Object.keys(supSet).sort();
-  var supOpts = '<option value="">— Semua Supplier —</option>' + supList.map(function(s){
-    return '<option value="'+s.replace(/"/g,'&quot;')+'"'+(cfg.supplier===s?' selected':'')+'>'+s+'</option>';
-  }).join('');
+  // Item terpilih: kalau search global 1 kode persis
+  var pickedItem = '';
+  if(srchG && /^\d{6,}$/.test(srchG) && (fcData[srchG] || supItems.indexOf(srchG)>=0)) pickedItem = srchG;
 
-  // Item dropdown (dari item yang lolos filter). Kosong = semua item.
-  var itemOpts = supItems.slice(0,2000).map(function(c){
-    var m = (STATE.masterData||{})[c]||{};
-    var nm = (_isAdmin && (STATE.realNameData||{})[c]) ? STATE.realNameData[c] : (m.desc||'');
-    return '<option value="'+c+'">'+c+' — '+(nm||'').slice(0,40)+'</option>';
-  }).join('');
-  // itemCode dikosongkan kalau tidak lagi ada di supItems (mis. ganti filter)
-  if(cfg.itemCode && supItems.indexOf(cfg.itemCode)<0) cfg.itemCode = '';
-  var curName = cfg.itemCode ? (function(){ var m=(STATE.masterData||{})[cfg.itemCode]||{}; var nm=(_isAdmin&&(STATE.realNameData||{})[cfg.itemCode])?STATE.realNameData[cfg.itemCode]:(m.desc||''); return cfg.itemCode+(nm?' — '+nm.slice(0,30):''); })() : '';
+  // Isi toolbar grafik atas (supplier, range, line/bar) — dilakukan di _fcSyncGrafikToolbar
+  _fcSyncGrafikToolbar();
 
-  // ── Tentukan range bulan absolut ──
-  // Default: dari 6 bulan lalu (GRPO historis) sampai bulan forecast terakhir
+  // ── Range bulan absolut ──
   var now = new Date();
   var defFromY = now.getFullYear(), defFromM = now.getMonth()+1-6;
   while(defFromM<1){ defFromM+=12; defFromY--; }
@@ -13181,19 +13169,6 @@ function _fcRenderGrafik(el, items, fcData) {
   if(fromYM > toYM) { var t=fromYM; fromYM=toYM; toYM=t; }
   var months = _grafikMonthRange(fromYM, toYM);
 
-  // Dropdown range (tahun-bulan)
-  function ymSelect(cur, onchAttr) {
-    // opsi 24 bulan lalu s/d 18 bulan depan
-    var opts=''; var base=new Date(); base.setDate(1);
-    var _names=['','Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
-    for(var k=-24;k<=18;k++){
-      var d=new Date(base.getFullYear(), base.getMonth()+k, 1);
-      var ym=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
-      opts += '<option value="'+ym+'"'+(cur===ym?' selected':'')+'>'+_names[d.getMonth()+1]+" '"+String(d.getFullYear()).slice(-2)+'</option>';
-    }
-    return '<select onchange="'+onchAttr+'" style="font-size:12px;padding:5px 8px;border:1px solid var(--border2);border-radius:6px;background:var(--bg3);color:var(--text)">'+opts+'</select>';
-  }
-
   var rowChecks = _GRAFIK_ROWS.map(function(r){
     return '<label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;margin-right:14px;white-space:nowrap">'
       + '<input type="checkbox" '+(cfg.rows[r.key]?'checked':'')+' onchange="_grafikToggleRow(\''+r.key+'\',this.checked)">'
@@ -13203,27 +13178,7 @@ function _fcRenderGrafik(el, items, fcData) {
 
   el.innerHTML =
       '<div style="padding:12px 0">'
-    + '<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border)">'
-    +   '<select onchange="_grafikSet(\'rmpm\',this.value)" style="font-size:12px;padding:5px 8px;border:1px solid var(--border2);border-radius:6px;background:var(--bg3);color:var(--text);font-weight:600" title="Filter jenis item">'
-    +     '<option value=""'+(!cfg.rmpm?' selected':'')+'>ALL</option>'
-    +     '<option value="rm"'+(cfg.rmpm==='rm'?' selected':'')+'>RM (3xxx)</option>'
-    +     '<option value="pm"'+(cfg.rmpm==='pm'?' selected':'')+'>PM (4xxx)</option>'
-    +     '<option value="fg"'+(cfg.rmpm==='fg'?' selected':'')+'>FG (1xxx)</option>'
-    +     '<option value="wip"'+(cfg.rmpm==='wip'?' selected':'')+'>WIP (2xxx)</option>'
-    +   '</select>'
-    +   '<select onchange="_grafikSet(\'supplier\',this.value)" style="font-size:12px;padding:5px 8px;max-width:220px;border:1px solid var(--border2);border-radius:6px;background:var(--bg3);color:var(--text)" title="Filter supplier (kosong = semua)">'+supOpts+'</select>'
-    +   '<input list="grafik-item-list" placeholder="Item (kosong = semua)..." value="'+cfg.itemCode+'" onchange="_grafikPickItem(this.value)" onfocus="this.select()" style="font-size:12px;padding:5px 10px;width:230px;border:1px solid var(--border2);border-radius:6px;background:var(--bg3);color:var(--text)" title="'+(curName||'Kosongkan untuk semua item')+'"><datalist id="grafik-item-list">'+itemOpts+'</datalist>'
-    +   (cfg.itemCode ? '<button onclick="_grafikPickItem(\'\')" style="font-size:11px;padding:4px 8px;border:1px solid var(--border2);border-radius:5px;background:var(--bg3);cursor:pointer;color:var(--muted)" title="Hapus filter item">✕ item</button>' : '')
-    +   '<span style="font-size:11px;color:var(--muted)">Range:</span>'
-    +   ymSelect(fromYM, '_grafikSet(\'fromYM\',this.value)')
-    +   '<span style="font-size:11px;color:var(--muted)">s/d</span>'
-    +   ymSelect(toYM, '_grafikSet(\'toYM\',this.value)')
-    +   '<div style="display:inline-flex;border:1px solid var(--border2);border-radius:6px;overflow:hidden;font-size:11px">'
-    +     '<button onclick="_grafikSet(\'chartType\',\'line\')" style="padding:5px 12px;border:none;cursor:pointer;font-weight:600;background:'+(cfg.chartType==='line'?'var(--accent)':'none')+';color:'+(cfg.chartType==='line'?'#fff':'var(--muted)')+'">Line</button>'
-    +     '<button onclick="_grafikSet(\'chartType\',\'bar\')" style="padding:5px 12px;border:none;cursor:pointer;font-weight:600;background:'+(cfg.chartType==='bar'?'var(--accent)':'none')+';color:'+(cfg.chartType==='bar'?'#fff':'var(--muted)')+'">Bar</button>'
-    +   '</div>'
-    +   '<span style="font-size:11px;color:var(--muted)">Mode: <b style="color:var(--teal)">'+(isValue?'Value (× COGM)':'Qty')+'</b></span>'
-    + '</div>'
+    + '<div style="font-size:11px;color:var(--muted);margin-bottom:10px">Filter jenis item, cari item, Qty/Value → pakai toolbar atas. Supplier & range → di toolbar atas juga.</div>'
     + '<div style="margin-bottom:10px">'+rowChecks+'</div>'
     + '<div style="position:relative;height:420px"><canvas id="fc-grafik-canvas"></canvas></div>'
     + '<div id="fc-grafik-table" style="margin-top:16px"></div>'
@@ -13240,11 +13195,11 @@ function _fcRenderGrafik(el, items, fcData) {
       '<div style="padding:40px;text-align:center;color:var(--muted)">Pilih minimal 1 baris untuk ditampilkan.</div>';
     return;
   }
-  // Item terpilih (kosong = semua item yang lolos filter)
-  var itemsToUse = cfg.itemCode ? [cfg.itemCode] : supItems;
-  if(cfg.itemCode && !fcData[cfg.itemCode] && !cfg.rows.grpo) {
+  // Item terpilih dari search global (pickedItem), kosong = semua supItems
+  var itemsToUse = pickedItem ? [pickedItem] : supItems;
+  if(pickedItem && !fcData[pickedItem] && !cfg.rows.grpo) {
     document.getElementById('fc-grafik-canvas').parentNode.innerHTML =
-      '<div style="padding:40px;text-align:center;color:var(--muted)">Item "<b>'+cfg.itemCode+'</b>" tidak ditemukan / ter-filter keluar.</div>';
+      '<div style="padding:40px;text-align:center;color:var(--muted)">Item "<b>'+pickedItem+'</b>" tidak ditemukan / ter-filter keluar.</div>';
     return;
   }
 
@@ -13257,7 +13212,7 @@ function _fcRenderGrafik(el, items, fcData) {
     });
   }
   var grpoMonthly = cfg.rows.grpo
-    ? _grafikGrpoByMonth(cfg.supplier || '', cfg.itemCode || '', cfg.rmpm || '')
+    ? _grafikGrpoByMonth(cfg.supplier || '', pickedItem || '', (fType||'').toLowerCase())
     : {};
 
   var labels = months.map(function(m){ return m.label; });
@@ -13303,7 +13258,7 @@ function _fcRenderGrafik(el, items, fcData) {
   if(hasDOI) scales.yDOI = { position:'right', title:{display:true, text:'DOI (hari)'}, grid:{drawOnChartArea:false} };
 
   var titleTxt = (cfg.supplier ? cfg.supplier+' — ' : '')
-    + (cfg.itemCode ? cfg.itemCode : 'Total '+supItems.length+' item')
+    + (pickedItem ? pickedItem : 'Total '+supItems.length+' item')
     + ' — ' + (isValue?'Value':'Qty');
 
   if(_grafikChart) { _grafikChart.destroy(); _grafikChart = null; }
@@ -13324,7 +13279,7 @@ function _fcRenderGrafik(el, items, fcData) {
   });
 
   // ── Tabel data di bawah grafik ──
-  _fcRenderGrafikTable(months, datasets, isValue, { supItems: itemsToUse, fcData: fcData, isValue: isValue });
+  _fcRenderGrafikTable(months, datasets, isValue, { supItems: itemsToUse, fcData: fcData, isValue: isValue, pickedItem: pickedItem, rmpm: (fType||'').toLowerCase(), supplier: cfg.supplier });
 }
 
 // Tabel: baris = dataset, kolom = bulan + total
@@ -13383,14 +13338,14 @@ function _grafikBreakdownRows(ds, months, ctx) {
     var _src = (STATE.grpoHistori&&STATE.grpoHistori.length)?STATE.grpoHistori:(STATE.grpoData||[]);
     _src.forEach(function(g){
       if(!g.itemCode || !g.supplierName) return;
-      if(cfg.itemCode && String(g.itemCode)!==cfg.itemCode) return; // hormati filter item
-      if(cfg.supplier && (g.supplierName||'')!==cfg.supplier) return;
+      if(ctx.pickedItem && String(g.itemCode)!==ctx.pickedItem) return;
+      if(ctx.supplier && (g.supplierName||'')!==ctx.supplier) return;
       var ic=String(g.itemCode);
-      if(cfg.rmpm==='rm' && !/^3/.test(ic)) return;
-      else if(cfg.rmpm==='pm' && !/^4/.test(ic)) return;
-      else if(cfg.rmpm==='fg' && !/^1/.test(ic)) return;
-      else if(cfg.rmpm==='wip' && !/^2/.test(ic)) return;
-      else if(!cfg.rmpm && !/^[1234]/.test(ic)) return;
+      if(ctx.rmpm==='rm' && !/^3/.test(ic)) return;
+      else if(ctx.rmpm==='pm' && !/^4/.test(ic)) return;
+      else if(ctx.rmpm==='fg' && !/^1/.test(ic)) return;
+      else if(ctx.rmpm==='wip' && !/^2/.test(ic)) return;
+      else if(!ctx.rmpm && !/^[1234]/.test(ic)) return;
       _codeSet[ic]=1;
     });
     codesToScan = Object.keys(_codeSet);
@@ -13402,7 +13357,7 @@ function _grafikBreakdownRows(ds, months, ctx) {
     var arr = months.map(function(m){ return 0; });
     var any = false;
     if(rowDef.isGRPO) {
-      var gm = _grafikGrpoByMonth(cfg.supplier||'', code, cfg.rmpm||''); // per item
+      var gm = _grafikGrpoByMonth(ctx.supplier||'', code, ctx.rmpm||''); // per item
       months.forEach(function(m,mi){ var g=gm[m.ym]; if(g){ arr[mi]=isValue?g.value:g.qty; if(arr[mi])any=true; } });
     } else {
       var fc = ctx.fcData[code]; if(!fc) return;
@@ -13435,6 +13390,48 @@ function _grafikToggleBreak(key){ window._grafikExpanded[key] = !window._grafikE
 
 function _fcGrafikFmt(v){ try{ return (Math.round(v*100)/100).toLocaleString('id-ID'); }catch(e){ return v; } }
 function _grafikSet(key, val){ window._grafikCfg[key] = val; renderForecast(); }
+
+// Isi & tampilkan toolbar grafik di atas (supplier, range, line/bar) saat tab grafik aktif
+function _fcSyncGrafikToolbar() {
+  var cfg = window._grafikCfg;
+  var bar = document.getElementById('fc-grafik-toolbar');
+  if(bar) bar.style.display = (_fcView==='grafik') ? 'inline-flex' : 'none';
+  if(_fcView!=='grafik') return;
+  // Supplier options
+  var supSel = document.getElementById('fc-g-supplier');
+  if(supSel && !supSel._filled){
+    var supSet={}; Object.keys(_fcSupplierByItemCache||{}).forEach(function(c){ var s=_fcSupplierByItemCache[c]; if(s) supSet[s]=1; });
+    var supList=Object.keys(supSet).sort();
+    supSel.innerHTML = '<option value="">— Semua Supplier —</option>' + supList.map(function(s){ return '<option value="'+s.replace(/"/g,'&quot;')+'">'+s+'</option>'; }).join('');
+    supSel._filled = true;
+  }
+  if(supSel) supSel.value = cfg.supplier||'';
+  // Range options
+  function fillYM(sel, cur){
+    if(!sel) return;
+    if(!sel._filled){
+      var opts=''; var base=new Date(); base.setDate(1);
+      var _n=['','Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
+      for(var k=-24;k<=18;k++){ var d=new Date(base.getFullYear(),base.getMonth()+k,1); var ym=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); opts+='<option value="'+ym+'">'+_n[d.getMonth()+1]+" '"+String(d.getFullYear()).slice(-2)+'</option>'; }
+      sel.innerHTML=opts; sel._filled=true;
+    }
+    if(cur) sel.value=cur;
+  }
+  var now=new Date(); var dF=now.getFullYear(), dM=now.getMonth()+1-6; while(dM<1){dM+=12;dF--;}
+  fillYM(document.getElementById('fc-g-from'), cfg.fromYM||(dF+'-'+String(dM).padStart(2,'0')));
+  fillYM(document.getElementById('fc-g-to'), cfg.toYM||_grafikFcMonthYM(FC_MONTHS.length-1));
+  // Line/Bar active state
+  var bL=document.getElementById('fc-g-line'), bB=document.getElementById('fc-g-bar');
+  if(bL){ bL.style.background=cfg.chartType==='line'?'var(--accent)':'none'; bL.style.color=cfg.chartType==='line'?'#fff':'var(--muted)'; }
+  if(bB){ bB.style.background=cfg.chartType==='bar'?'var(--accent)':'none'; bB.style.color=cfg.chartType==='bar'?'#fff':'var(--muted)'; }
+}
+function _grafikToolbarChange(){
+  var sup=document.getElementById('fc-g-supplier'), f=document.getElementById('fc-g-from'), t=document.getElementById('fc-g-to');
+  if(sup) window._grafikCfg.supplier=sup.value;
+  if(f) window._grafikCfg.fromYM=f.value;
+  if(t) window._grafikCfg.toYM=t.value;
+  renderForecast();
+}
 function _grafikToggleRow(key, on){ window._grafikCfg.rows[key] = on; renderForecast(); }
 // Pilih item dari input searchable — ekstrak kode (bisa "3000010001" atau "3000010001 — Nama")
 function _grafikPickItem(val){
