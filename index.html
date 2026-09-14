@@ -12762,11 +12762,14 @@ function _fcDetailRow(code, fc, master) {
         +   ' title="'+(isEdited ? 'SAP: '+n_id(base)+' (diedit manual)' : 'Klik untuk edit')+'">'
         + '</div></td>';
     }).join('');
+    var _sumO=0; vals.forEach(function(v){ if(typeof v==='number') _sumO+=v; });
+    var _totO = '<td style="text-align:right;padding:5px 8px;font-family:var(--mono);font-size:11px;font-weight:700;background:var(--bg3);border-left:2px solid var(--border2);color:var(--text)">'
+      + (_sumO===0?'<span style="color:var(--hint)">—</span>':n_id(Math.round(_sumO*100)/100)) + '</td>';
     var rowLabel = label==='Stock (Ending)'?'stock':label==='DOI (hari)'?'doi':label==='OSPO'?'ospo':label==='OSPR'?'ospr':'';
     var rowAttr  = rowLabel ? ' data-rowlabel="'+rowLabel+'"' : '';
     return '<tr style="border-bottom:1px dotted var(--border)"'+rowAttr+'>'
       + '<td style="padding:5px 8px;font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--text);white-space:nowrap;width:140px">'+label+'</td>'
-      + cells + '</tr>';
+      + cells + _totO + '</tr>';
   }
 
   function gRow(label, vals, clsFn, editable, fieldCode) {
@@ -12807,9 +12810,21 @@ function _fcDetailRow(code, fc, master) {
     }).join('');
     var rowLabel = label==='Stock (Ending)'?'stock':label==='DOI (hari)'?'doi':label==='Propose PR'?'propose':label==='Adjusted OSPO'?'fcospo':label==='OSPR'?'fcospr':'';
     var rowAttr  = rowLabel ? ' data-rowlabel="'+rowLabel+'"' : '';
+    // Kolom Total per baris. Stock & DOI tidak dijumlah (Stock=nilai akhir, DOI=tak bermakna).
+    var totalCell;
+    if(isDOI) {
+      totalCell = '<td style="background:var(--bg3);border-left:2px solid var(--border2)"></td>';
+    } else if(label==='Stock (Ending)') {
+      totalCell = '<td style="background:var(--bg3);border-left:2px solid var(--border2)"></td>';
+    } else {
+      var sum = 0;
+      vals.forEach(function(v){ if(typeof v==='number') sum+=v; });
+      totalCell = '<td style="text-align:right;padding:5px 8px;font-family:var(--mono);font-size:11px;font-weight:700;background:var(--bg3);border-left:2px solid var(--border2);color:var(--text)">'
+        + (sum===0 ? '<span style="color:var(--hint)">—</span>' : n_id(Math.round(sum*100)/100)) + '</td>';
+    }
     return '<tr style="border-bottom:1px dotted var(--border)"'+rowAttr+'>'
       + '<td style="padding:5px 8px;font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--text);white-space:nowrap;width:140px">'+label+'</td>'
-      + cells + '</tr>';
+      + cells + totalCell + '</tr>';
   }
 
   var isFcView = (_fcGridViewMode === 'forecast');
@@ -12834,6 +12849,7 @@ function _fcDetailRow(code, fc, master) {
     + '<thead><tr>'
     + '<th style="text-align:left;padding:6px;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;color:var(--muted);border-bottom:2px solid var(--border2);width:130px;white-space:nowrap">Baris</th>'
     + mhdr
+    + '<th style="text-align:right;padding:6px 8px;font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;font-weight:700;color:var(--muted);border-bottom:2px solid var(--border2);background:var(--bg3);border-left:2px solid var(--border2);white-space:nowrap">Total</th>'
     + '<th style="border-bottom:2px solid var(--border2);padding:4px 6px;text-align:right;white-space:nowrap;vertical-align:middle">'
     + '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">'
     + toggleBtn
@@ -12873,7 +12889,7 @@ function _fcDetailRow(code, fc, master) {
           +       ' style="font-size:8.5px;padding:1px 5px;border-radius:3px;border:1px solid var(--border2);background:var(--bg3);color:var(--muted);cursor:pointer;white-space:nowrap">→ Semua</button>'
           +   '</span>'
           + '</td>'
-          + cells + '</tr>';
+          + cells + '<td style="background:var(--bg3);border-left:2px solid var(--border2)"></td></tr>';
       })() : '')
     + gRow('Requirement', _fcValArr(fc.forecast, code), function(){ return 'color:var(--text)'; })
     + (isFcView
@@ -12893,7 +12909,7 @@ function _fcDetailRow(code, fc, master) {
         if(!pv.some(function(v){return v!==null;})) return '';
         return '<tr style="border-top:1px solid var(--border);background:rgba(20,184,166,.04)"><td style="padding:5px 6px;font-size:10.5px;font-weight:700;color:var(--teal);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap">Pallet Usage</td>'
           +pv.map(function(v){if(v===null)return '<td style="text-align:right;padding:5px 6px;width:92px;overflow:hidden;color:var(--hint)">—</td>';return '<td style="text-align:right;padding:5px 6px;'+(v>0?'color:var(--teal);font-weight:600':'color:var(--hint)')+'">'+v+'</td>';}).join('')
-          +'<td></td></tr>';
+          +'<td style="background:var(--bg3);border-left:2px solid var(--border2)"></td><td></td></tr>';
       }())
     + '</tbody></table></div>';
 
@@ -12968,6 +12984,8 @@ function _grafikGrpoByMonth(supplierFilter, itemFilter, rmpmFilter) {
     if(supplierFilter && (g.supplierName||'') !== supplierFilter) return;
     if(rmpmFilter==='rm' && !/^3/.test(g.itemCode)) return;
     else if(rmpmFilter==='pm' && !/^4/.test(g.itemCode)) return;
+    else if(rmpmFilter==='fg' && !/^1/.test(g.itemCode)) return;
+    else if(rmpmFilter==='wip' && !/^2/.test(g.itemCode)) return;
     else if(!rmpmFilter && !/^[34]/.test(g.itemCode)) return; // RM+PM = 3xxx & 4xxx saja (exclude FG/WIP)
     var p = g.grpoDate.split('/'); if(p.length!==3) return;
     var ym = p[2]+'-'+String(p[1]).padStart(2,'0');
@@ -13099,10 +13117,21 @@ function _fcRenderGrafik(el, items, fcData) {
   var isValue = window._fcValueView;
 
   // Filter item: RM/PM → supplier
-  var supItems = items.slice();
-  if(cfg.rmpm==='rm') supItems = supItems.filter(function(c){ return /^3/.test(c); });
-  else if(cfg.rmpm==='pm') supItems = supItems.filter(function(c){ return /^4/.test(c); });
-  else supItems = supItems.filter(function(c){ return /^[34]/.test(c); }); // RM+PM = 3xxx & 4xxx saja
+  var supItems;
+  if(cfg.rmpm==='fg' || cfg.rmpm==='wip') {
+    // FG/WIP tidak ada di allItems (forecast exclude FG) → ambil dari master + GRPO
+    var pref = cfg.rmpm==='fg' ? '1' : '2';
+    var _fgSet = {};
+    Object.keys(STATE.masterData||{}).forEach(function(c){ if(c.charAt(0)===pref) _fgSet[c]=1; });
+    // tambah dari GRPO histori (item FG/WIP yang mungkin tak ada di master)
+    ((STATE.grpoHistori&&STATE.grpoHistori.length)?STATE.grpoHistori:[]).concat(STATE.grpoData||[]).forEach(function(g){ if(g.itemCode && String(g.itemCode).charAt(0)===pref) _fgSet[g.itemCode]=1; });
+    supItems = Object.keys(_fgSet);
+  } else {
+    supItems = items.slice();
+    if(cfg.rmpm==='rm') supItems = supItems.filter(function(c){ return /^3/.test(c); });
+    else if(cfg.rmpm==='pm') supItems = supItems.filter(function(c){ return /^4/.test(c); });
+    else supItems = supItems.filter(function(c){ return /^[34]/.test(c); }); // RM+PM = 3xxx & 4xxx saja
+  }
   if(cfg.supplier) {
     // Item dianggap milik supplier ini kalau: (a) supplier di cache cocok, ATAU
     // (b) item punya GRPO dari supplier ini (biar konsisten dgn baris GRPO).
@@ -13174,6 +13203,8 @@ function _fcRenderGrafik(el, items, fcData) {
     +     '<button onclick="_grafikSet(\'rmpm\',\'\')" style="padding:5px 11px;border:none;cursor:pointer;font-weight:600;background:'+(!cfg.rmpm?'var(--accent)':'none')+';color:'+(!cfg.rmpm?'#fff':'var(--muted)')+'">RM+PM</button>'
     +     '<button onclick="_grafikSet(\'rmpm\',\'rm\')" style="padding:5px 11px;border:none;cursor:pointer;font-weight:600;background:'+(cfg.rmpm==='rm'?'var(--accent)':'none')+';color:'+(cfg.rmpm==='rm'?'#fff':'var(--muted)')+'">RM</button>'
     +     '<button onclick="_grafikSet(\'rmpm\',\'pm\')" style="padding:5px 11px;border:none;cursor:pointer;font-weight:600;background:'+(cfg.rmpm==='pm'?'var(--accent)':'none')+';color:'+(cfg.rmpm==='pm'?'#fff':'var(--muted)')+'">PM</button>'
+    +     '<button onclick="_grafikSet(\'rmpm\',\'fg\')" style="padding:5px 11px;border:none;cursor:pointer;font-weight:600;background:'+(cfg.rmpm==='fg'?'var(--accent)':'none')+';color:'+(cfg.rmpm==='fg'?'#fff':'var(--muted)')+'">FG</button>'
+    +     '<button onclick="_grafikSet(\'rmpm\',\'wip\')" style="padding:5px 11px;border:none;cursor:pointer;font-weight:600;background:'+(cfg.rmpm==='wip'?'var(--accent)':'none')+';color:'+(cfg.rmpm==='wip'?'#fff':'var(--muted)')+'">WIP</button>'
     +   '</div>'
     +   '<select onchange="_grafikSet(\'supplier\',this.value)" style="font-size:12px;padding:5px 8px;max-width:220px;border:1px solid var(--border2);border-radius:6px;background:var(--bg3);color:var(--text)" title="Filter supplier (kosong = semua)">'+supOpts+'</select>'
     +   '<input list="grafik-item-list" placeholder="Item (kosong = semua)..." value="'+cfg.itemCode+'" onchange="_grafikPickItem(this.value)" onfocus="this.select()" style="font-size:12px;padding:5px 10px;width:230px;border:1px solid var(--border2);border-radius:6px;background:var(--bg3);color:var(--text)" title="'+(curName||'Kosongkan untuk semua item')+'"><datalist id="grafik-item-list">'+itemOpts+'</datalist>'
