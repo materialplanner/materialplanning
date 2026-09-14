@@ -6560,10 +6560,11 @@ function processMasterData(rows) {
 //   4) Matcom sapName (fallback terakhir) — supaya semua item terisi
 function _buildSupplierByItem() {
   var map = {};
+  var _okCode = function(ic){ return ic && /^[1234]/.test(String(ic)); }; // FG/WIP/RM/PM saja
   // 1) OSPO — pilih supplier dari docNum tertinggi per item
   var bestOspoDoc = {};
   (STATE.ospoData||[]).forEach(function(o){
-    if(!o.itemCode || !o.supplierName) return;
+    if(!o.itemCode || !o.supplierName || !_okCode(o.itemCode)) return;
     var dn = parseInt(String(o.docNum).replace(/\D/g,''),10) || 0;
     if(bestOspoDoc[o.itemCode]===undefined || dn > bestOspoDoc[o.itemCode]){
       bestOspoDoc[o.itemCode] = dn;
@@ -6575,7 +6576,7 @@ function _buildSupplierByItem() {
   var bestGrpo = {};
   var _grpoAll = ((STATE.grpoHistori && STATE.grpoHistori.length) ? STATE.grpoHistori : []).concat(STATE.grpoData||[]);
   _grpoAll.forEach(function(g){
-    if(!g.itemCode || !g.supplierName || map[g.itemCode]) return;
+    if(!g.itemCode || !g.supplierName || map[g.itemCode] || !_okCode(g.itemCode)) return;
     // urutkan by grpoDocNum (angka) lalu grpoDate
     var dn = parseInt(String(g.grpoDocNum||'').replace(/\D/g,''),10) || 0;
     var dt = g.grpoDate ? Date.parse(g.grpoDate.split('/').reverse().join('-')) : 0;
@@ -12966,7 +12967,8 @@ function _grafikGrpoByMonth(supplierFilter, itemFilter, rmpmFilter) {
     if(itemFilter && g.itemCode !== itemFilter) return;
     if(supplierFilter && (g.supplierName||'') !== supplierFilter) return;
     if(rmpmFilter==='rm' && !/^3/.test(g.itemCode)) return;
-    if(rmpmFilter==='pm' && !/^4/.test(g.itemCode)) return;
+    else if(rmpmFilter==='pm' && !/^4/.test(g.itemCode)) return;
+    else if(!rmpmFilter && !/^[34]/.test(g.itemCode)) return; // RM+PM = 3xxx & 4xxx saja (exclude FG/WIP)
     var p = g.grpoDate.split('/'); if(p.length!==3) return;
     var ym = p[2]+'-'+String(p[1]).padStart(2,'0');
     var qty = parseFloat(g.qty)||0;
@@ -13000,7 +13002,10 @@ function _grpoHistoriIdbLoad(cb) {
       var tx = db.transaction('grpo_histori','readonly');
       tx.objectStore('grpo_histori').get('grpo_data').onsuccess = function(e){
         if(e.target.result && e.target.result.data) {
-          STATE.grpoHistori = e.target.result.data;
+          // Filter data lama yang mungkin belum kefilter (buang non-FG/WIP/RM/PM)
+          STATE.grpoHistori = (e.target.result.data||[]).filter(function(g){
+            return g.itemCode && /^[1234]/.test(String(g.itemCode));
+          });
           window._grpoHistoriLoaded = true;
           console.log('[grpo histori] loaded dari IDB:', STATE.grpoHistori.length, 'baris');
           cb && cb(true);
@@ -13097,6 +13102,7 @@ function _fcRenderGrafik(el, items, fcData) {
   var supItems = items.slice();
   if(cfg.rmpm==='rm') supItems = supItems.filter(function(c){ return /^3/.test(c); });
   else if(cfg.rmpm==='pm') supItems = supItems.filter(function(c){ return /^4/.test(c); });
+  else supItems = supItems.filter(function(c){ return /^[34]/.test(c); }); // RM+PM = 3xxx & 4xxx saja
   if(cfg.supplier) {
     // Item dianggap milik supplier ini kalau: (a) supplier di cache cocok, ATAU
     // (b) item punya GRPO dari supplier ini (biar konsisten dgn baris GRPO).
