@@ -12986,7 +12986,7 @@ function _grafikGrpoByMonth(supplierFilter, itemFilter, rmpmFilter) {
     else if(rmpmFilter==='pm' && !/^4/.test(g.itemCode)) return;
     else if(rmpmFilter==='fg' && !/^1/.test(g.itemCode)) return;
     else if(rmpmFilter==='wip' && !/^2/.test(g.itemCode)) return;
-    else if(!rmpmFilter && !/^[34]/.test(g.itemCode)) return; // RM+PM = 3xxx & 4xxx saja (exclude FG/WIP)
+    else if(!rmpmFilter && !/^[1234]/.test(g.itemCode)) return; // ALL = FG/WIP/RM/PM
     var p = g.grpoDate.split('/'); if(p.length!==3) return;
     var ym = p[2]+'-'+String(p[1]).padStart(2,'0');
     var qty = parseFloat(g.qty)||0;
@@ -13123,14 +13123,19 @@ function _fcRenderGrafik(el, items, fcData) {
     var pref = cfg.rmpm==='fg' ? '1' : '2';
     var _fgSet = {};
     Object.keys(STATE.masterData||{}).forEach(function(c){ if(c.charAt(0)===pref) _fgSet[c]=1; });
-    // tambah dari GRPO histori (item FG/WIP yang mungkin tak ada di master)
     ((STATE.grpoHistori&&STATE.grpoHistori.length)?STATE.grpoHistori:[]).concat(STATE.grpoData||[]).forEach(function(g){ if(g.itemCode && String(g.itemCode).charAt(0)===pref) _fgSet[g.itemCode]=1; });
     supItems = Object.keys(_fgSet);
+  } else if(cfg.rmpm==='rm') {
+    supItems = items.filter(function(c){ return /^3/.test(c); });
+  } else if(cfg.rmpm==='pm') {
+    supItems = items.filter(function(c){ return /^4/.test(c); });
   } else {
-    supItems = items.slice();
-    if(cfg.rmpm==='rm') supItems = supItems.filter(function(c){ return /^3/.test(c); });
-    else if(cfg.rmpm==='pm') supItems = supItems.filter(function(c){ return /^4/.test(c); });
-    else supItems = supItems.filter(function(c){ return /^[34]/.test(c); }); // RM+PM = 3xxx & 4xxx saja
+    // ALL = semua kode 1/2/3/4. RM/PM dari items + FG/WIP dari master & GRPO
+    var _allSet = {};
+    items.forEach(function(c){ if(/^[34]/.test(c)) _allSet[c]=1; });
+    Object.keys(STATE.masterData||{}).forEach(function(c){ if(/^[12]/.test(c)) _allSet[c]=1; });
+    ((STATE.grpoHistori&&STATE.grpoHistori.length)?STATE.grpoHistori:[]).concat(STATE.grpoData||[]).forEach(function(g){ if(g.itemCode && /^[12]/.test(String(g.itemCode))) _allSet[g.itemCode]=1; });
+    supItems = Object.keys(_allSet);
   }
   if(cfg.supplier) {
     // Item dianggap milik supplier ini kalau: (a) supplier di cache cocok, ATAU
@@ -13200,7 +13205,7 @@ function _fcRenderGrafik(el, items, fcData) {
       '<div style="padding:12px 0">'
     + '<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border)">'
     +   '<div style="display:inline-flex;border:1px solid var(--border2);border-radius:6px;overflow:hidden;font-size:11px">'
-    +     '<button onclick="_grafikSet(\'rmpm\',\'\')" style="padding:5px 11px;border:none;cursor:pointer;font-weight:600;background:'+(!cfg.rmpm?'var(--accent)':'none')+';color:'+(!cfg.rmpm?'#fff':'var(--muted)')+'">RM+PM</button>'
+    +     '<button onclick="_grafikSet(\'rmpm\',\'\')" style="padding:5px 11px;border:none;cursor:pointer;font-weight:600;background:'+(!cfg.rmpm?'var(--accent)':'none')+';color:'+(!cfg.rmpm?'#fff':'var(--muted)')+'">ALL</button>'
     +     '<button onclick="_grafikSet(\'rmpm\',\'rm\')" style="padding:5px 11px;border:none;cursor:pointer;font-weight:600;background:'+(cfg.rmpm==='rm'?'var(--accent)':'none')+';color:'+(cfg.rmpm==='rm'?'#fff':'var(--muted)')+'">RM</button>'
     +     '<button onclick="_grafikSet(\'rmpm\',\'pm\')" style="padding:5px 11px;border:none;cursor:pointer;font-weight:600;background:'+(cfg.rmpm==='pm'?'var(--accent)':'none')+';color:'+(cfg.rmpm==='pm'?'#fff':'var(--muted)')+'">PM</button>'
     +     '<button onclick="_grafikSet(\'rmpm\',\'fg\')" style="padding:5px 11px;border:none;cursor:pointer;font-weight:600;background:'+(cfg.rmpm==='fg'?'var(--accent)':'none')+';color:'+(cfg.rmpm==='fg'?'#fff':'var(--muted)')+'">FG</button>'
@@ -13334,7 +13339,7 @@ function _fcRenderGrafikTable(months, datasets, isValue, ctx) {
   var mHdr = months.map(function(m){ return '<th style="text-align:right;padding:5px 8px;font-size:10px;font-weight:700;color:var(--muted);white-space:nowrap">'+m.label+'</th>'; }).join('');
   var body = datasets.map(function(ds){
     var isDOI = ds.yAxisID==='yDOI';
-    var canBreak = !isDOI && ctx && ctx.supItems && ctx.supItems.length>1; // breakdown kalau >1 item
+    var canBreak = !isDOI && ((ds._rowKey==='grpo') || (ctx && ctx.supItems && ctx.supItems.length>1));
     var exp = window._grafikExpanded[ds._rowKey];
     var cells = ds.data.map(function(v){
       return '<td style="text-align:right;padding:5px 8px;font-family:var(--mono);font-size:10.5px;color:'+ds._color+'">'+(v==null?'<span style=\"color:var(--hint)\">–</span>':n_id(Math.round(v*100)/100))+'</td>';
@@ -13367,11 +13372,36 @@ function _grafikBreakdownRows(ds, months, ctx) {
   if(!rowDef) return '';
   // Hitung nilai per item per bulan
   var perItem = []; // {code, name, arr, total}
-  ctx.supItems.forEach(function(code){
+  var cfg = window._grafikCfg;
+
+  // Tentukan daftar item yang diproses:
+  // - GRPO: dari data GRPO langsung (item yg punya GRPO sesuai filter supplier+rmpm)
+  // - Forecast: dari supItems
+  var codesToScan;
+  if(rowDef.isGRPO) {
+    var _codeSet = {};
+    var _src = (STATE.grpoHistori&&STATE.grpoHistori.length)?STATE.grpoHistori:(STATE.grpoData||[]);
+    _src.forEach(function(g){
+      if(!g.itemCode || !g.supplierName) return;
+      if(cfg.supplier && (g.supplierName||'')!==cfg.supplier) return;
+      var ic=String(g.itemCode);
+      if(cfg.rmpm==='rm' && !/^3/.test(ic)) return;
+      else if(cfg.rmpm==='pm' && !/^4/.test(ic)) return;
+      else if(cfg.rmpm==='fg' && !/^1/.test(ic)) return;
+      else if(cfg.rmpm==='wip' && !/^2/.test(ic)) return;
+      else if(!cfg.rmpm && !/^[1234]/.test(ic)) return;
+      _codeSet[ic]=1;
+    });
+    codesToScan = Object.keys(_codeSet);
+  } else {
+    codesToScan = ctx.supItems;
+  }
+
+  codesToScan.forEach(function(code){
     var arr = months.map(function(m){ return 0; });
     var any = false;
     if(rowDef.isGRPO) {
-      var gm = _grafikGrpoByMonth(window._grafikCfg.supplier||'', code); // per item
+      var gm = _grafikGrpoByMonth(cfg.supplier||'', code, cfg.rmpm||''); // per item
       months.forEach(function(m,mi){ var g=gm[m.ym]; if(g){ arr[mi]=isValue?g.value:g.qty; if(arr[mi])any=true; } });
     } else {
       var fc = ctx.fcData[code]; if(!fc) return;
@@ -13385,6 +13415,8 @@ function _grafikBreakdownRows(ds, months, ctx) {
     if(any){
       var tot=arr.reduce(function(a,b){return a+(b||0);},0);
       var m=(STATE.masterData||{})[code]||{}; var nm=(_isAdmin&&(STATE.realNameData||{})[code])?STATE.realNameData[code]:(m.desc||'');
+      // fallback nama dari GRPO kalau master kosong
+      if(!nm && rowDef.isGRPO){ var _gg=((STATE.grpoHistori&&STATE.grpoHistori.length)?STATE.grpoHistori:(STATE.grpoData||[])).filter(function(g){return g.itemCode===code;})[0]; if(_gg) nm=_gg.itemName||''; }
       perItem.push({code:code, name:nm, arr:arr, total:tot});
     }
   });
