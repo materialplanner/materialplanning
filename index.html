@@ -12966,7 +12966,7 @@ var _grafikChart = null;
 var _GRAFIK_ROWS = [
   {key:'requirement', label:'Requirement', color:'#3b82f6', get:function(fc){ return fc.forecast; }},
   {key:'stock',       label:'Stock Ending', color:'#10b981', get:function(fc){ return fc.stockFc || fc.stock; }},
-  {key:'ospo',        label:'OSPO',        color:'#14b8a6', get:function(fc){ return fc.forecastOspo || fc.ospo; }},
+  {key:'ospo',        label:'OSPO',        color:'#14b8a6', get:function(fc){ return fc.ospo; }},
   {key:'ospr',        label:'OSPR',        color:'#f59e0b', get:function(fc){ return fc.ospr; }},
   {key:'propose',     label:'Propose PR',  color:'#8b5cf6', get:function(fc){ return fc.propose; }},
   {key:'grpo',        label:'GRPO (masuk)', color:'#06b6d4', isGRPO:true},
@@ -13204,13 +13204,13 @@ function _fcRenderGrafik(el, items, fcData) {
   el.innerHTML =
       '<div style="padding:12px 0">'
     + '<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border)">'
-    +   '<div style="display:inline-flex;border:1px solid var(--border2);border-radius:6px;overflow:hidden;font-size:11px">'
-    +     '<button onclick="_grafikSet(\'rmpm\',\'\')" style="padding:5px 11px;border:none;cursor:pointer;font-weight:600;background:'+(!cfg.rmpm?'var(--accent)':'none')+';color:'+(!cfg.rmpm?'#fff':'var(--muted)')+'">ALL</button>'
-    +     '<button onclick="_grafikSet(\'rmpm\',\'rm\')" style="padding:5px 11px;border:none;cursor:pointer;font-weight:600;background:'+(cfg.rmpm==='rm'?'var(--accent)':'none')+';color:'+(cfg.rmpm==='rm'?'#fff':'var(--muted)')+'">RM</button>'
-    +     '<button onclick="_grafikSet(\'rmpm\',\'pm\')" style="padding:5px 11px;border:none;cursor:pointer;font-weight:600;background:'+(cfg.rmpm==='pm'?'var(--accent)':'none')+';color:'+(cfg.rmpm==='pm'?'#fff':'var(--muted)')+'">PM</button>'
-    +     '<button onclick="_grafikSet(\'rmpm\',\'fg\')" style="padding:5px 11px;border:none;cursor:pointer;font-weight:600;background:'+(cfg.rmpm==='fg'?'var(--accent)':'none')+';color:'+(cfg.rmpm==='fg'?'#fff':'var(--muted)')+'">FG</button>'
-    +     '<button onclick="_grafikSet(\'rmpm\',\'wip\')" style="padding:5px 11px;border:none;cursor:pointer;font-weight:600;background:'+(cfg.rmpm==='wip'?'var(--accent)':'none')+';color:'+(cfg.rmpm==='wip'?'#fff':'var(--muted)')+'">WIP</button>'
-    +   '</div>'
+    +   '<select onchange="_grafikSet(\'rmpm\',this.value)" style="font-size:12px;padding:5px 8px;border:1px solid var(--border2);border-radius:6px;background:var(--bg3);color:var(--text);font-weight:600" title="Filter jenis item">'
+    +     '<option value=""'+(!cfg.rmpm?' selected':'')+'>ALL</option>'
+    +     '<option value="rm"'+(cfg.rmpm==='rm'?' selected':'')+'>RM (3xxx)</option>'
+    +     '<option value="pm"'+(cfg.rmpm==='pm'?' selected':'')+'>PM (4xxx)</option>'
+    +     '<option value="fg"'+(cfg.rmpm==='fg'?' selected':'')+'>FG (1xxx)</option>'
+    +     '<option value="wip"'+(cfg.rmpm==='wip'?' selected':'')+'>WIP (2xxx)</option>'
+    +   '</select>'
     +   '<select onchange="_grafikSet(\'supplier\',this.value)" style="font-size:12px;padding:5px 8px;max-width:220px;border:1px solid var(--border2);border-radius:6px;background:var(--bg3);color:var(--text)" title="Filter supplier (kosong = semua)">'+supOpts+'</select>'
     +   '<input list="grafik-item-list" placeholder="Item (kosong = semua)..." value="'+cfg.itemCode+'" onchange="_grafikPickItem(this.value)" onfocus="this.select()" style="font-size:12px;padding:5px 10px;width:230px;border:1px solid var(--border2);border-radius:6px;background:var(--bg3);color:var(--text)" title="'+(curName||'Kosongkan untuk semua item')+'"><datalist id="grafik-item-list">'+itemOpts+'</datalist>'
     +   (cfg.itemCode ? '<button onclick="_grafikPickItem(\'\')" style="font-size:11px;padding:4px 8px;border:1px solid var(--border2);border-radius:5px;background:var(--bg3);cursor:pointer;color:var(--muted)" title="Hapus filter item">✕ item</button>' : '')
@@ -13383,6 +13383,7 @@ function _grafikBreakdownRows(ds, months, ctx) {
     var _src = (STATE.grpoHistori&&STATE.grpoHistori.length)?STATE.grpoHistori:(STATE.grpoData||[]);
     _src.forEach(function(g){
       if(!g.itemCode || !g.supplierName) return;
+      if(cfg.itemCode && String(g.itemCode)!==cfg.itemCode) return; // hormati filter item
       if(cfg.supplier && (g.supplierName||'')!==cfg.supplier) return;
       var ic=String(g.itemCode);
       if(cfg.rmpm==='rm' && !/^3/.test(ic)) return;
