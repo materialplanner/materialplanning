@@ -12099,8 +12099,6 @@ function _calcForecast(code, ospoIdx) {
   var ospo = ospoBase.map(function(v, i) {
     return (ospoOvr && ospoOvr[i] != null) ? ospoOvr[i] : v;
   });
-  if(ospoOvr)
-
   // OSPR per month — distribute by prReqDate like OSPO
   if(!FC_MONTHS || !FC_MONTHS.length) return {forecast:[],ospo:[],ospoRaw:[],ospr:[],stock:[],doi:[],propose:[],forecastOspo:[],stockFc:[],doiFc:[],pullNotifs:[],suggestions:[],lt_days:30,moq:0,multiple:1,maxDOI:30,soh:0,ospoBase:[],ospr_base:[],stockBase:[]};
   var ospr_base = new Array(FC_MONTHS.length).fill(0);
@@ -12361,15 +12359,23 @@ function _calcForecast(code, ospoIdx) {
   var forecastOspo = new Array(FC_MONTHS.length).fill(0);
   var stockFc    = new Array(FC_MONTHS.length).fill(0);
   var prevStFc   = soh;
+  var _hasOspoOvr = _fcOspoOverride[code] && Object.keys(_fcOspoOverride[code]).length > 0;
   for(var fm2 = snapMoIdx; fm2 < FC_MONTHS.length; fm2++) {
-    var fm_DOI = _fcGetDOIForItem(code, fm2); // target DOI khusus bulan ini (override item+bulan jika ada)
+    var fm_DOI = _fcGetDOIForItem(code, fm2);
     var req_f  = forecast[fm2];
     var ospr_f = (osprPool2[fm2]||0) + (osprPulled[fm2]||0);
-    var minStF = req_f > 0 ? req_f * (fm_DOI / WD) : 0;
-    var needF  = Math.max(0, minStF + req_f - prevStFc - ospr_f);
-    var fromPool = Math.min(needF > 0 ? Math.max(moq, Math.ceil(needF/_step)*_step) : 0, ospoPoolFc);
-    ospoPoolFc -= fromPool;
-    forecastOspo[fm2] = fromPool;
+    var _fmOvr = _fcOspoOverride[code] && _fcOspoOverride[code][fm2] != null;
+    if(_hasOspoOvr) {
+      // Ada adjust manual → pakai OSPO apa adanya (raw ospo), JANGAN distribusi pool.
+      // ospo[fm2] sudah mencerminkan override (di-set di bagian ospo build).
+      forecastOspo[fm2] = ospo[fm2] || 0;
+    } else {
+      var minStF = req_f > 0 ? req_f * (fm_DOI / WD) : 0;
+      var needF  = Math.max(0, minStF + req_f - prevStFc - ospr_f);
+      var fromPool = Math.min(needF > 0 ? Math.max(moq, Math.ceil(needF/_step)*_step) : 0, ospoPoolFc);
+      ospoPoolFc -= fromPool;
+      forecastOspo[fm2] = fromPool;
+    }
     var prop_f = totalProp[fm2] || 0;
     stockFc[fm2] = prevStFc + forecastOspo[fm2] + ospr_f + prop_f - req_f;
     prevStFc = stockFc[fm2];
