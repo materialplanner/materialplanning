@@ -12710,9 +12710,15 @@ function _fcDetailRow(code, fc, master) {
       + n_id(_asmSoh) + '</span>';
   })();
 
+  // Total PO (OSPO open) & Total PR (OSPR open) untuk item ini
+  var _totPO = (fc.ospoBase||[]).reduce(function(s,v){ return s+(v||0); }, 0);
+  var _totPR = (fc.ospr_base||[]).reduce(function(s,v){ return s+(v||0); }, 0);
   var mRows = [['Kode','<span style="font-family:var(--mono)">'+code+'</span>'],['Tipe',iType],['UoM',master.uom||'—'],
     ['MOQ',n_id(master.moq||0)],['Multiple',n_id(master.multiple||1)],['Lead Time',fc.lt_days+' hari'],
-    ['SOH',_sohDisplay],['ABC','<span style="font-weight:700;color:'+abcColor+'">'+( abc||'—')+'</span>']];
+    ['SOH',_sohDisplay],
+    ['Total PO','<span style="color:'+(_totPO>0?'var(--teal)':'var(--muted)')+';font-weight:600">'+n_id(_totPO)+'</span> <small style="color:var(--muted)">'+(master.uom||'')+'</small>'],
+    ['Total PR','<span style="color:'+(_totPR>0?'var(--accent)':'var(--muted)')+';font-weight:600">'+n_id(_totPR)+'</span> <small style="color:var(--muted)">'+(master.uom||'')+'</small>'],
+    ['ABC','<span style="font-weight:700;color:'+abcColor+'">'+( abc||'—')+'</span>']];
   // Sisipkan matcom rows sebelum ABC
   matcomRows.forEach(function(r,i){ mRows.splice(mRows.length-1, 0, r); });
   if(rn && _isAdmin) mRows.splice(1,0,['Real Name','<span style="color:var(--teal)">'+rn+'</span>']);
@@ -16670,6 +16676,23 @@ function _fcLiveRecalc(code) {
         tds4[i].innerHTML = '<span style="font-family:var(--mono);font-size:11px;'+cls+'">'+disp+'</span>';
       });
     }
+    // Update kolom Total (sel terakhir) untuk baris yang dijumlah (bukan stock/doi)
+    if(lbl==='fcospo'||lbl==='fcospr'||lbl==='ospo'||lbl==='ospr'||lbl==='propose'||lbl==='requirement'){
+      var _srcTot = null;
+      if(lbl==='ospo'||lbl==='fcospo') _srcTot = ospoVals;
+      else if(lbl==='ospr'||lbl==='fcospr') _srcTot = fc.ospr;
+      else if(lbl==='propose') _srcTot = propVals;
+      else if(lbl==='requirement') _srcTot = fc.forecast;
+      if(_srcTot){
+        var _sumTot = 0; _srcTot.forEach(function(v){ if(typeof v==='number') _sumTot+=v; });
+        var _allTds = tr.querySelectorAll('td');
+        var _totTd = _allTds[_allTds.length-1]; // kolom Total = sel terakhir
+        // pastikan sel terakhir itu memang kolom total (punya border-left)
+        if(_totTd && /border-left/.test(_totTd.getAttribute('style')||'')){
+          _totTd.innerHTML = (_sumTot===0?'<span style="color:var(--hint)">—</span>':n_id(Math.round(_sumTot*100)/100));
+        }
+      }
+    }
   });
 }
 
@@ -16685,8 +16708,19 @@ function _fcOspoEdit(input) {
   var ospoOrig = FC_MONTH_NUMS.map(function(mn){ return (ospoIdx[code]||{})[yr*100+mn] || 0; });
   var total = ospoOrig.reduce(function(s,v){ return s+v; }, 0);
 
-  // Clamp ke total semua bulan
-  qty = Math.max(0, Math.min(qty, total));
+  // Alokasi bulan LAIN yang sudah di-override (selain bulan mi ini)
+  var ovrArr = _fcOspoOverride[code] || [];
+  var allocLain = 0;
+  for(var _k=0; _k<FC_MONTHS.length; _k++){
+    if(_k===mi) continue;
+    var _val = (ovrArr[_k]!=null) ? ovrArr[_k] : ospoOrig[_k]; // bulan tak di-override pakai nilai asli
+    allocLain += (_val||0);
+  }
+  // Sisa yang boleh untuk bulan ini = total - alokasi bulan lain (min 0)
+  var sisa = Math.max(0, total - allocLain);
+  // Clamp: tidak boleh > sisa (jumlah semua bulan ≤ total OSPO)
+  if(qty > sisa) { qty = sisa; toast('OSPO dibatasi: total semua bulan tidak boleh lebih dari '+n_id(total)+' (total PO)','err'); }
+  qty = Math.max(0, qty);
   input.value = qty > 0 ? n_id(qty) : '0';
 
   // Set override hanya untuk bulan yang diedit — bulan lain tidak berubah
