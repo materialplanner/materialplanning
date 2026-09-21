@@ -4479,12 +4479,8 @@ function _npdCellEdit(input){
   var ri=parseInt(input.getAttribute('data-ri')), key=input.getAttribute('data-key');
   if(!fm.rows[ri])return;
   var val=input.value.trim();
-  if(key==='pct'){ // input "76,91%" atau "0.7691" → simpan fraksi
-    val=val.replace('%','').trim();
-    var num=_parseNumID(val);
-    // kalau user ketik >1 (mis. 76.91) anggap persen → /100; kalau ≤1 anggap sudah fraksi
-    if(!isNaN(num)){ fm.rows[ri].pct = num>1 ? num/100 : num; }
-  } else if(key==='netto'){ fm.rows[ri].netto=_parseNumID(val)||0; }
+  if(key==='pct'){ var p=_npdParsePct(val); if(!isNaN(p)) fm.rows[ri].pct=p; }
+  else if(key==='netto'){ fm.rows[ri].netto=_parseNumID(val)||0; }
   else { fm.rows[ri][key]=val; }
   _npdSave(STATE.npdData); _npdRender();
 }
@@ -4516,8 +4512,23 @@ function _npdPasteCol(key){
   });
   _npdSave(STATE.npdData); _npdRender();
 }
+// Parse nilai % ke FRAKSI. Aturan:
+//  - Ada tanda "%" → buang %, parse angka (koma=desimal ID), lalu ÷100.
+//    "0,0500%" → 0,05 → ÷100 = 0,0005 ✓ ; "26,6500%" → 26,65 → 0,2665 ✓
+//  - Tanpa "%" → anggap sudah fraksi desimal apa adanya (0.0005 → 0.0005).
+function _npdParsePct(val){
+  if(val==null) return NaN;
+  var s = String(val).trim();
+  if(s==='') return NaN;
+  var hasPct = s.indexOf('%') >= 0;
+  s = s.replace('%','').trim();
+  var num = _parseNumID(s);
+  if(isNaN(num)) return NaN;
+  return hasPct ? num/100 : num;
+}
+
 function _npdSetCellVal(row, key, val){
-  if(key==='pct'){ val=val.replace('%','').trim(); var num=_parseNumID(val); if(!isNaN(num)) row.pct = num>1 ? num/100 : num; }
+  if(key==='pct'){ var p=_npdParsePct(val); if(!isNaN(p)) row.pct=p; }
   else if(key==='netto'){ row.netto=_parseNumID(val)||0; }
   else { row[key]=val; }
 }
