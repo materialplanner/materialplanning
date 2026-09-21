@@ -4310,8 +4310,8 @@ function _npdDetailByCode(code) {
 }
 
 // ── Navigasi state (FG mana yg dibuka, formula mana) ──
-window._npdOpenFg = window._npdOpenFg || null;
-window._npdOpenFormula = window._npdOpenFormula || null;
+window._npdVFg = window._npdVFg || null;
+window._npdVFm = window._npdVFm || null;
 
 function _npdRender() {
   _npdNormalize();
@@ -4325,8 +4325,8 @@ function _npdRender() {
     });
     dl.innerHTML=opts; dl._filled=true;
   }
-  if(window._npdOpenFg && window._npdOpenFormula) return _npdRenderGrid(el);
-  if(window._npdOpenFg) return _npdRenderFormulaList(el);
+  if(window._npdVFg && window._npdVFm) return _npdRenderGrid(el);
+  if(window._npdVFg) return _npdRenderFormulaList(el);
   return _npdRenderFgList(el);
 }
 
@@ -4363,21 +4363,23 @@ function _npdRenderFgList(el) {
 // LEVEL 2: daftar formula dalam 1 FG
 function _npdRenderFormulaList(el) {
   var data = _npdNormalize();
-  var fg = (data.fgs||[]).filter(function(f){return f.id===window._npdOpenFg;})[0];
-  if(!fg){ window._npdOpenFg=null; return _npdRender(); }
-  var rows = (fg.formulas||[]).map(function(fm){
+  var fg = (data.fgs||[]).filter(function(f){return f.id===window._npdVFg;})[0];
+  if(!fg){ window._npdVFg=null; return _npdRender(); }
+  var _fmSorted = (fg.formulas||[]).slice().sort(function(a,b){ return (b.ts||'').localeCompare(a.ts||''); });
+  var rows = _fmSorted.map(function(fm){
     var totKg=0; (fm.rows||[]).forEach(function(r){ totKg+=_npdMatReq(r,fm.plan); });
     return '<tr style="border-bottom:1px solid var(--border);'+(!fm.active?'opacity:.5':'')+'">'
       + '<td style="padding:10px 12px;cursor:pointer" onclick="_npdOpenFormula(\''+fm.id+'\')">'
       +   '<span style="font-size:15px">🧪</span> <b style="font-size:12.5px">'+(fm.name||'(formula)')+'</b>'
       +   (fm.active?'<span style="font-size:9px;background:var(--green);color:#fff;padding:1px 6px;border-radius:3px;margin-left:8px">AKTIF</span>':'<span style="font-size:9px;background:var(--muted);color:#fff;padding:1px 6px;border-radius:3px;margin-left:8px">nonaktif</span>')
-      +   '<div style="font-size:10.5px;color:var(--muted);margin-top:2px">Plan: '+n_id(fm.plan||0)+' pcs · '+(fm.rows||[]).length+' RM · '+n_id(Math.round(totKg))+' KG</div>'
+      +   '<div style="font-size:10.5px;color:var(--muted);margin-top:2px">'+(fm.ts?'📅 '+new Date(fm.ts).toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'})+' · ':'')+'Plan: '+n_id(fm.plan||0)+' pcs · '+(fm.rows||[]).length+' RM · '+n_id(Math.round(totKg))+' KG</div>'
       + '</td>'
       + '<td style="padding:10px 12px;text-align:center;white-space:nowrap">'
       +   '<label style="display:inline-flex;align-items:center;gap:5px;font-size:11px;cursor:pointer"><input type="radio" name="npd-active-'+fg.id+'" '+(fm.active?'checked':'')+' onchange="_npdSetActiveFormula(\''+fm.id+'\')"> Aktif</label>'
       + '</td>'
       + '<td style="padding:10px 12px;text-align:center;white-space:nowrap">'
       +   '<button class="btn btn-sm" onclick="_npdOpenFormula(\''+fm.id+'\')" style="font-size:11px">Buka →</button> '
+      +   '<button onclick="_npdEditFormulaDate(\''+fm.id+'\')" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:13px" title="Edit tanggal">📅</button> '
       +   '<button onclick="_npdRenameFormula(\''+fm.id+'\')" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:13px">✏️</button> '
       +   '<button onclick="_npdDeleteFormula(\''+fm.id+'\')" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:14px">✕</button>'
       + '</td></tr>';
@@ -4396,10 +4398,10 @@ function _npdRenderFormulaList(el) {
 // LEVEL 3: grid RM dalam 1 formula
 function _npdRenderGrid(el) {
   var data = _npdNormalize();
-  var fg = (data.fgs||[]).filter(function(f){return f.id===window._npdOpenFg;})[0];
-  if(!fg){ window._npdOpenFg=null; window._npdOpenFormula=null; return _npdRender(); }
-  var fm = (fg.formulas||[]).filter(function(f){return f.id===window._npdOpenFormula;})[0];
-  if(!fm){ window._npdOpenFormula=null; return _npdRender(); }
+  var fg = (data.fgs||[]).filter(function(f){return f.id===window._npdVFg;})[0];
+  if(!fg){ window._npdVFg=null; window._npdVFm=null; return _npdRender(); }
+  var fm = (fg.formulas||[]).filter(function(f){return f.id===window._npdVFm;})[0];
+  if(!fm){ window._npdVFm=null; return _npdRender(); }
   if(!fm.rows) fm.rows=[];
 
   // Header grid
@@ -4428,6 +4430,7 @@ function _npdRenderGrid(el) {
     + '<button class="btn btn-sm" onclick="_npdBackToFg()" style="font-size:12px">← Semua FG</button>'
     + '<button class="btn btn-sm" onclick="_npdBackToFormula()" style="font-size:12px">← '+fg.name+'</button>'
     + '<span style="font-size:13px;font-weight:700">🧪 '+fm.name+'</span>'
+    + (fm.ts?'<span style="font-size:11px;color:var(--muted)">📅 '+new Date(fm.ts).toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'})+'</span>':'')
     + '</div>'
     + '<div style="display:flex;gap:16px;align-items:center;margin-bottom:12px;flex-wrap:wrap">'
     +   '<label style="font-size:12px;display:flex;align-items:center;gap:6px">Plan produksi (pcs): <input type="text" inputmode="numeric" value="'+n_id(fm.plan||0)+'" onchange="_npdSetPlan(this.value)" style="width:130px;font-size:13px;font-weight:700;padding:5px 8px;border:1px solid var(--border2);border-radius:5px;text-align:right"></label>'
@@ -4444,24 +4447,28 @@ function _npdAddFg(){ var nm=prompt('Nama FG NPD (mis. FYNE Extrait Leather):');
 function _npdRenameFg(id){ var d=_npdNormalize(); var fg=d.fgs.filter(function(f){return f.id===id;})[0]; if(!fg)return; var nm=prompt('Rename FG:',fg.name); if(nm){fg.name=nm.trim(); _npdSave(d); _npdRender();} }
 function _npdDeleteFg(id){ var d=_npdNormalize(); var fg=d.fgs.filter(function(f){return f.id===id;})[0]; if(!fg)return; if(!confirm('Hapus FG "'+fg.name+'" beserta semua formula & RM-nya?'))return; d.fgs=d.fgs.filter(function(f){return f.id!==id;}); _npdSave(d); _npdRender(); }
 function _npdToggleFgBom(id,on){ var d=_npdNormalize(); var fg=d.fgs.filter(function(f){return f.id===id;})[0]; if(fg){fg.inBom=on; _npdSave(d); _npdRender();} }
-function _npdOpenFolder(id){ window._npdOpenFg=id; window._npdOpenFormula=null; _npdRender(); }
-function _npdBackToFg(){ window._npdOpenFg=null; window._npdOpenFormula=null; _npdRender(); }
+function _npdOpenFolder(id){ window._npdVFg=id; window._npdVFm=null; _npdRender(); }
+function _npdBackToFg(){ window._npdVFg=null; window._npdVFm=null; _npdRender(); }
 
 // ── Aksi Formula ──
-function _npdAddFormula(){ var nm=prompt('Nama/No Formula (mis. EDP01-200726H-SS):'); if(!nm)return; var d=_npdNormalize(); var fg=d.fgs.filter(function(f){return f.id===window._npdOpenFg;})[0]; if(!fg)return;
+function _npdAddFormula(){ var nm=prompt('Nama/No Formula (mis. EDP01-200726H-SS):'); if(!nm)return; var d=_npdNormalize(); var fg=d.fgs.filter(function(f){return f.id===window._npdVFg;})[0]; if(!fg)return;
   // formula baru → jadi aktif, yg lama non-aktif
   (fg.formulas||[]).forEach(function(f){f.active=false;});
-  fg.formulas.push({id:_npdUID(),name:nm.trim(),plan:0,active:true,ts:new Date().toISOString(),rows:[]}); _npdSave(d); _npdRender(); }
+  var _tgl = prompt('Tanggal formula (dd/mm/yyyy) — kosongkan untuk hari ini:', '');
+  var _ts = new Date().toISOString();
+  if(_tgl && _tgl.trim()){ var p=_tgl.trim().split(/[\/\-.]/); if(p.length===3){ var d2=new Date(parseInt(p[2]),parseInt(p[1])-1,parseInt(p[0])); if(!isNaN(d2)) _ts=d2.toISOString(); } }
+  fg.formulas.push({id:_npdUID(),name:nm.trim(),plan:0,active:true,ts:_ts,rows:[]}); _npdSave(d); _npdRender(); }
+function _npdEditFormulaDate(id){ var fm=_npdFindFormula(id); if(!fm)return; var cur=fm.ts?new Date(fm.ts).toLocaleDateString('id-ID',{day:'2-digit',month:'2-digit',year:'numeric'}):''; var t=prompt('Tanggal formula (dd/mm/yyyy):',cur); if(t){ var p=t.trim().split(/[\/\-.]/); if(p.length===3){ var d2=new Date(parseInt(p[2]),parseInt(p[1])-1,parseInt(p[0])); if(!isNaN(d2)){ fm.ts=d2.toISOString(); _npdSave(STATE.npdData); _npdRender(); } } } }
 function _npdRenameFormula(id){ var fm=_npdFindFormula(id); if(!fm)return; var nm=prompt('Rename formula:',fm.name); if(nm){fm.name=nm.trim(); _npdSave(STATE.npdData); _npdRender();} }
-function _npdDeleteFormula(id){ var d=_npdNormalize(); var fg=d.fgs.filter(function(f){return f.id===window._npdOpenFg;})[0]; if(!fg)return; var fm=(fg.formulas||[]).filter(function(f){return f.id===id;})[0]; if(!fm)return; if(!confirm('Hapus formula "'+fm.name+'"?'))return; fg.formulas=fg.formulas.filter(function(f){return f.id!==id;});
+function _npdDeleteFormula(id){ var d=_npdNormalize(); var fg=d.fgs.filter(function(f){return f.id===window._npdVFg;})[0]; if(!fg)return; var fm=(fg.formulas||[]).filter(function(f){return f.id===id;})[0]; if(!fm)return; if(!confirm('Hapus formula "'+fm.name+'"?'))return; fg.formulas=fg.formulas.filter(function(f){return f.id!==id;});
   // kalau yg dihapus aktif & masih ada formula lain, aktifkan yg terbaru
   if(fm.active && fg.formulas.length){ fg.formulas.forEach(function(f){f.active=false;}); fg.formulas[fg.formulas.length-1].active=true; }
   _npdSave(d); _npdRender(); }
-function _npdSetActiveFormula(id){ var d=_npdNormalize(); var fg=d.fgs.filter(function(f){return f.id===window._npdOpenFg;})[0]; if(!fg)return; (fg.formulas||[]).forEach(function(f){f.active=(f.id===id);}); _npdSave(d); _npdRender(); }
-function _npdOpenFormula(id){ window._npdOpenFormula=id; _npdRender(); }
-function _npdBackToFormula(){ window._npdOpenFormula=null; _npdRender(); }
-function _npdFindFormula(id){ var d=_npdNormalize(); var fg=d.fgs.filter(function(f){return f.id===window._npdOpenFg;})[0]; if(!fg)return null; return (fg.formulas||[]).filter(function(f){return f.id===id;})[0]||null; }
-function _npdCurFormula(){ return _npdFindFormula(window._npdOpenFormula); }
+function _npdSetActiveFormula(id){ var d=_npdNormalize(); var fg=d.fgs.filter(function(f){return f.id===window._npdVFg;})[0]; if(!fg)return; (fg.formulas||[]).forEach(function(f){f.active=(f.id===id);}); _npdSave(d); _npdRender(); }
+function _npdOpenFormula(id){ window._npdVFm=id; _npdRender(); }
+function _npdBackToFormula(){ window._npdVFm=null; _npdRender(); }
+function _npdFindFormula(id){ var d=_npdNormalize(); var fg=d.fgs.filter(function(f){return f.id===window._npdVFg;})[0]; if(!fg)return null; return (fg.formulas||[]).filter(function(f){return f.id===id;})[0]||null; }
+function _npdCurFormula(){ return _npdFindFormula(window._npdVFm); }
 
 // ── Aksi Grid ──
 function _npdSetPlan(val){ var fm=_npdCurFormula(); if(fm){ fm.plan=_parseNumID(val)||0; _npdSave(STATE.npdData); _npdRender(); } }
