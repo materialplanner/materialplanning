@@ -602,6 +602,7 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
           <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;padding:3px 0;cursor:pointer;color:var(--text);margin:0"><input type="checkbox" checked onchange="toggleProjCol('doifc',this)"> DOI</label>
           <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;padding:3px 0;cursor:pointer;color:var(--text);margin:0"><input type="checkbox" checked onchange="toggleProjCol('estusg',this)"> Est Usg/day</label>
           <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;padding:3px 0;cursor:pointer;color:var(--text);margin:0"><input type="checkbox" checked onchange="toggleProjCol('actualmrp',this)"> Actual MRP</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;padding:3px 0;cursor:pointer;color:var(--text);margin:0"><input type="checkbox" checked onchange="toggleProjCol('npdneed',this)"> Keb. NPD</label>
           
           
           <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;padding:3px 0;cursor:pointer;color:var(--text);margin:0"><input type="checkbox" checked onchange="toggleProjCol('grpo',this)"> GRPO Bln Ini</label>
@@ -917,6 +918,10 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
       <button id="fc-view-qty" onclick="_fcSetValueView(false)" style="padding:5px 12px;border:none;background:var(--teal);color:#fff;cursor:pointer;font-weight:600">Qty</button>
       <button id="fc-view-value" onclick="_fcSetValueView(true)" style="padding:5px 12px;border:none;background:none;color:var(--muted);cursor:pointer;font-weight:600">Value</button>
     </div>
+
+    <label style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--teal);font-weight:600;cursor:pointer" title="Tambahkan kebutuhan NPD ke Requirement forecast">
+      <input type="checkbox" id="f-fc-npd" onchange="_toggleInclNPD(this.checked)"> 🆕 Sertakan NPD
+    </label>
 
     <!-- ABC filter (Detail only) -->
     <select id="f-fc-abc" onchange="renderForecast()" style="font-size:12px;padding:5px 10px" title="Filter Class ABC">
@@ -4278,6 +4283,56 @@ function _npdMatReq(row, plan) {
 }
 
 // Peta kebutuhan NPD AKTIF per kode RM (KG). Hanya FG !inBom, formula active.
+function _npdNormCode(c){ return String(c==null?'':c).trim().replace(/\.0+$/,''); }
+
+// Total kebutuhan EXISTING per RM (dari forecast/MRP reguler yg sedang tampil).
+// Jumlah requirement semua bulan aktif dari STATE.mrpData[code].months.
+function _existingReqByCode(code) {
+  var c = _npdNormCode(code);
+  var md = (STATE.mrpData||{})[c];
+  if(!md || !md.months) return 0;
+  var tot = 0;
+  Object.keys(md.months).forEach(function(m){ tot += (md.months[m]||0); });
+  return tot;
+}
+
+// Popup detail 1 RM NPD: kebutuhan NPD (per formula) + existing + total
+function _npdShowDetail(code) {
+  var c = _npdNormCode(code);
+  var npdDetail = _npdDetailByCode(c);       // [{fg,formula,kg}]
+  var npdTot = npdDetail.reduce(function(s,d){return s+d.kg;},0);
+  var existing = _existingReqByCode(c);
+  var m = (STATE.masterData||{})[c]||{};
+  var nm = m.desc || '';
+  var fmt = function(v){ return n_id(Math.round(v*100)/100); };
+  var rowsHtml = npdDetail.length ? npdDetail.map(function(d){
+    return '<tr style="border-bottom:.5px solid var(--border)"><td style="padding:5px 10px;font-size:11.5px">'+d.fg+'</td><td style="padding:5px 10px;font-size:11px;color:var(--muted)">'+d.formula+'</td><td style="padding:5px 10px;text-align:right;font-family:var(--mono);font-size:11.5px">'+fmt(d.kg)+'</td></tr>';
+  }).join('') : '<tr><td colspan="3" style="padding:10px;text-align:center;color:var(--muted);font-size:12px">Tidak ada kebutuhan NPD aktif</td></tr>';
+
+  var ov = document.getElementById('npd-detail-overlay');
+  if(!ov){
+    ov = document.createElement('div'); ov.id='npd-detail-overlay';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:900;display:flex;align-items:center;justify-content:center;padding:24px';
+    ov.onclick=function(e){ if(e.target===ov) ov.style.display='none'; };
+    document.body.appendChild(ov);
+  }
+  ov.innerHTML = '<div style="background:var(--bg2);border-radius:12px;max-width:560px;width:100%;box-shadow:0 8px 40px rgba(0,0,0,.3)">'
+    + '<div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">'
+    +   '<div><div style="font-weight:700;font-size:14px">'+c+'</div><div style="font-size:11px;color:var(--muted)">'+nm+'</div></div>'
+    +   '<button onclick="document.getElementById(\'npd-detail-overlay\').style.display=\'none\'" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">✕</button>'
+    + '</div>'
+    + '<div style="padding:16px 18px">'
+    +   '<div style="font-size:12px;font-weight:700;margin-bottom:6px;color:var(--teal)">🆕 Kebutuhan NPD (per formula aktif)</div>'
+    +   '<div style="border:1px solid var(--border2);border-radius:6px;overflow:hidden;margin-bottom:14px"><table style="width:100%;border-collapse:collapse"><thead><tr style="background:var(--bg3)"><th style="padding:5px 10px;text-align:left;font-size:9.5px;text-transform:uppercase;color:var(--muted)">FG NPD</th><th style="padding:5px 10px;text-align:left;font-size:9.5px;text-transform:uppercase;color:var(--muted)">Formula</th><th style="padding:5px 10px;text-align:right;font-size:9.5px;text-transform:uppercase;color:var(--muted)">KG</th></tr></thead><tbody>'+rowsHtml+'</tbody></table></div>'
+    +   '<div style="display:flex;flex-direction:column;gap:8px;font-size:13px">'
+    +     '<div style="display:flex;justify-content:space-between;padding:6px 0"><span>Total kebutuhan <b>NPD</b></span><b style="color:var(--teal);font-family:var(--mono)">'+fmt(npdTot)+' KG</b></div>'
+    +     '<div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--border)"><span>Kebutuhan <b>Existing</b> (forecast)</span><b style="font-family:var(--mono)">'+fmt(existing)+' KG</b></div>'
+    +     '<div style="display:flex;justify-content:space-between;padding:8px 0;border-top:2px solid var(--border2)"><span style="font-weight:700">TOTAL (NPD + Existing)</span><b style="font-size:15px;color:var(--accent);font-family:var(--mono)">'+fmt(npdTot+existing)+' KG</b></div>'
+    +   '</div>'
+    + '</div></div>';
+  ov.style.display='flex';
+}
+
 function _npdActiveByCode() {
   var map = {};
   var data = _npdNormalize();
@@ -4288,7 +4343,8 @@ function _npdActiveByCode() {
       (fm.rows||[]).forEach(function(r){
         if(!r.code) return;
         var kg = _npdMatReq(r, fm.plan);
-        if(kg>0) map[String(r.code).trim()] = (map[String(r.code).trim()]||0) + kg;
+        var c = _npdNormCode(r.code);
+        if(kg>0 && c) map[c] = (map[c]||0) + kg;
       });
     });
   });
@@ -4408,6 +4464,7 @@ function _npdRenderGrid(el) {
   var thCols = _NPD_COLS.map(function(c){ return '<th style="padding:6px 8px;text-align:'+(c.num?'right':'left')+';font-size:10px;text-transform:uppercase;color:var(--muted);min-width:'+c.w+';border-bottom:2px solid var(--border2);position:relative"><div style="display:flex;align-items:center;gap:4px;justify-content:'+(c.num?'flex-end':'flex-start')+'">'+c.label+'<button onclick="_npdPasteCol(\''+c.key+'\')" title="Paste 1 kolom dari Excel" style="background:none;border:1px solid var(--border2);border-radius:3px;cursor:pointer;font-size:9px;padding:1px 4px;color:var(--teal)">📋</button></div></th>'; }).join('');
   thCols += '<th style="padding:6px 8px;text-align:right;font-size:10px;text-transform:uppercase;color:var(--teal);min-width:100px;border-bottom:2px solid var(--border2);background:var(--bg4)">Mat req (KG)</th>';
   thCols += '<th style="border-bottom:2px solid var(--border2)"></th>';
+  thCols += '<th style="border-bottom:2px solid var(--border2)"></th>';
 
   // Baris grid
   var gridRows = fm.rows.map(function(r, ri){
@@ -4420,6 +4477,7 @@ function _npdRenderGrid(el) {
     }).join('');
     var kg = _npdMatReq(r, fm.plan);
     cells += '<td style="padding:3px 8px;text-align:right;font-family:var(--mono);font-size:11px;font-weight:600;color:var(--teal);background:var(--bg4)">'+(kg>0?n_id(Math.round(kg*100)/100):'—')+'</td>';
+    cells += '<td style="padding:3px 4px;text-align:center"><button onclick="_npdShowDetail(\''+_npdNormCode(r.code)+'\')" title="Lihat kebutuhan Existing + NPD (all)" style="background:none;border:none;cursor:pointer;color:var(--teal);font-size:12px"'+(r.code?'':' disabled')+'>🔍</button></td>';
     cells += '<td style="padding:3px 6px;text-align:center"><button onclick="_npdDeleteRow('+ri+')" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:12px">✕</button></td>';
     return '<tr>'+cells+'</tr>';
   }).join('');
@@ -7702,6 +7760,7 @@ function renderProjection() {
       td('<span class="mono">' + p.doiFC + '</span>','doifc','text-align:right') +
       td('<span class="mono">' + n_id(p.estUsageMRP||0) + '</span>','estusg','text-align:right') +
       td('<span class="mono">' + n_id(p.actualMRP||0) + '</span>','actualmrp','text-align:right') +
+      td('<span class="mono" style="'+((p.npdNeed||0)>0?'color:var(--teal);font-weight:600':'color:var(--muted)')+'">' + ((p.npdNeed||0)>0?n_id(p.npdNeed):'—') + '</span>','npdneed','text-align:right') +
 
       td('<span class="mono">' + n_id(p.totalIncoming||0) + '</span>','grpo','text-align:right') +
       td('<span class="mono" style="color:var(--amber)">' + n_id(p.actualUsageDaily||0) + '</span>','actualusg','text-align:right') +
@@ -7780,6 +7839,7 @@ function renderProjection() {
     thP('DOI','doifc') +
     thP('Est Usg/day','estusg') +
     thP('Actual MRP','actualmrp') +
+    thP('Keb. NPD','npdneed') +
 
     thP('GRPO Bln Ini','grpo') +
     thP('Actual Usg','actualusg') +
@@ -12441,12 +12501,15 @@ function _calcForecast(code, ospoIdx) {
   // Konversi gram → kg untuk matcom jika UOM item adalah gram
   var _matcomUom = ((STATE.masterData||{})[code]||{}).uom || '';
   var _matcomFactor = (/^(g|gr|gram)$/i.test(_matcomUom.trim())) ? 0.001 : 1;
+  // Kebutuhan NPD untuk item ini (kalau switch "Sertakan NPD" aktif) — masuk bulan pertama
+  var _npdKg = window._inclNPD ? (_npdActiveByCode()[_npdNormCode(code)] || 0) : 0;
   var forecast = FC_MONTHS.map(function(m, i) {
     var mrpVal = (mrp.months && mrp.months[m] != null) ? (mrp.months[m] || 0) : 0;
     var moNum  = FC_MONTH_NUMS[i];
     // Hanya kurangi matcom untuk bulan berjalan saja
     var consumed = (moNum === snapMon) ? ((matcomM[moNum] || 0) * _matcomFactor) : 0;
-    return Math.max(0, mrpVal - consumed);
+    var npdAdd = (i === 0) ? _npdKg : 0; // NPD masuk bulan pertama forecast
+    return Math.max(0, mrpVal - consumed) + npdAdd;
   });
 
   // forecastRaw: MRP asli tanpa pengurangan matcom — dipakai calcDOI supaya rate konsisten
@@ -12832,6 +12895,7 @@ function _fcValArr(arr, code) {
 
 function renderForecast(isGenerate) {
   var isRealtime = true;
+  var _fcNpdCb = document.getElementById('f-fc-npd'); if(_fcNpdCb) _fcNpdCb.checked = !!window._inclNPD;
   // Build supplier cache untuk DOI2
   _fcSupplierByItemCache = _buildSupplierByItem();
   // Sync DOI2 input & badge
