@@ -372,6 +372,7 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
   <div class="nav-divider"></div>
   <div class="nav-section">Data</div>
   <div class="ni" data-label="Where Used" onclick="showPage('where-used',this)"><span class="ni-ico">🔍</span><span class="nav-label">Where Used</span><span id="lock-where-used" style="font-size:10px">🔒</span></div>
+  <div class="ni" data-label="NPD" onclick="showPage('npd',this)"><span class="ni-ico">🆕</span><span class="nav-label">NPD</span></div>
   <div class="ni" data-label="GRPO" onclick="showPage('grpo',this)"><span class="ni-ico">✅</span><span class="nav-label">GRPO</span></div>
     <div class="ni" data-label="OSPR" onclick="showPage('ospr',this)"><span class="ni-ico">📝</span><span class="nav-label">OSPR</span></div>
   <div class="ni" data-label="Stock Daily" onclick="showPage('stock-daily',this)"><span class="ni-ico">📅</span><span class="nav-label">Stock Daily</span></div>
@@ -655,6 +656,9 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
       <input type="checkbox" id="f-proj-col-filter" onchange="_projColFilterToggle(this)"> Filter kolom
       &nbsp;<button id="btn-proj-freeze" onclick="_toggleProjFreeze()" class="btn btn-sm" style="font-size:10.5px;padding:2px 8px" title="Freeze kolom kiri">&nbsp;❄ Freeze Kolom</button>
     </label>
+    <label style="display:flex;align-items:center;gap:6px;color:var(--teal);font-size:12px;cursor:pointer;margin:0;font-weight:600" title="Tambahkan kebutuhan RM NPD (dari menu NPD) ke perhitungan">
+      <input type="checkbox" id="f-proj-npd" onchange="_toggleInclNPD(this.checked)"> 🆕 Sertakan NPD
+    </label>
   </div>
   <div id="proj-table"><div class="loading"><div class="spin"></div>Upload Master Data lalu klik Build Projection...</div></div>
 </div>
@@ -747,6 +751,25 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
   </div>
 
   <div id="wu-result" style="font-size:12px;color:var(--muted);padding:8px 0">Upload BOM terlebih dahulu untuk menggunakan fitur ini.</div>
+</div>
+
+<!-- NPD -->
+<div class="page" id="pg-npd">
+<div class="page-inner">
+  <div class="page-hdr">
+    <div class="ph-l"><h2>🆕 NPD — Kebutuhan Material Produk Baru</h2><p>FG NPD → Formula → Grid RM. Kebutuhan dihitung otomatis (% × Netto × Plan ÷ 1000 = KG). Sync semua laptop.</p></div>
+    <div class="ph-r"><button class="btn btn-sm" onclick="_npdExport()" style="font-size:11px">↓ Export</button></div>
+  </div>
+  <datalist id="npd-code-list"></datalist>
+  <div id="npd-table" style="max-width:1200px"></div>
+
+  <div style="margin-top:14px;padding:10px 14px;background:var(--bg3);border-radius:var(--r);max-width:1200px;font-size:11px;color:var(--muted);line-height:1.6">
+    <strong style="color:var(--text)">Cara pakai:</strong>
+    1. Tambah <b>FG NPD</b> (folder). 2. Di dalamnya tambah <b>Formula</b> (bisa banyak — formula terbaru otomatis jadi yang aktif, lama nonaktif). 3. Di formula, isi <b>Plan produksi</b> lalu isi grid RM (bisa paste per kolom dari Excel via tombol 📋). <b>Mat req</b> dihitung otomatis dalam KG.<br>
+    4. Kebutuhan RM NPD masuk ke kolom <b>"Keb. NPD"</b> di Projection & Forecast (aktifkan switch "Sertakan NPD" di sana).<br>
+    5. Kalau FG sudah masuk BOM sistem → centang <b>"Sudah masuk BOM"</b> di FG itu → kebutuhannya berhenti dihitung (biar tidak dobel).
+  </div>
+</div>
 </div>
 
 
@@ -3094,6 +3117,7 @@ var CLOUD_KEYS = [
   'sheet_url_master','sheet_url_mrp','sheet_url_realname','sheet_url_pallet_pm','sheet_url_pallet_rm','sheet_url_bom_sheet','sheet_url_cogm',
   'sheet_tab_master','sheet_tab_mrp','sheet_tab_realname','sheet_tab_pallet_pm','sheet_tab_pallet_rm','sheet_tab_bom_sheet','sheet_tab_cogm',
   'cogm_data',
+  'npd_data',
   'sap_url','sap_user','sap_pass','fonnte','wn','workdays','last_sync','proj_highlighted',
   'sap_cache_stock','sap_cache_po','sap_cache_grpo','sap_cache_ospr',
   'admin_user','admin_pass',
@@ -3563,6 +3587,12 @@ function _applyRealtimeChanges(keys) {
           try {
             STATE.cogmData = JSON.parse(val || '{}');
             if(document.getElementById('fc-table')) { setTimeout(renderForecast, 100); }
+          } catch(e) {} break;
+        case 'npd_data':
+          try {
+            STATE.npdData = JSON.parse(val || '[]');
+            if(document.getElementById('npd-table')) _npdRender();
+            if(window._inclNPD && STATE.projectionData && STATE.projectionData.length){ buildProjection(); if(document.getElementById('proj-table')) renderProjection(); }
           } catch(e) {} break;
         case 'realname_data':
           try {
@@ -4056,6 +4086,7 @@ var _projFreezeCol = localStorage.getItem('proj_freeze_col') === '1';
 var STATE = {
   mrpData: JSON.parse(localStorage.getItem('mrp_data') || 'null'),
   cogmData: JSON.parse(localStorage.getItem('cogm_data') || '{}'),
+  npdData: JSON.parse(localStorage.getItem('npd_data') || '[]'),
   grpoHistori: [],
   matcomData: JSON.parse(localStorage.getItem('matcom_data') || 'null'),
   matcomMonthly: JSON.parse(localStorage.getItem('matcom_monthly') || 'null'),
@@ -4145,6 +4176,7 @@ function showPage(name, el) {
     ospr: function(){if(!STATE.osprData.length)loadOSPR().then(renderOSPR);else renderOSPR()},
     'stock-daily': function(){initStockDaily()},
     'where-used':  function(){_whereUsedRender()},
+    'npd':         function(){_npdRender()},
     settings: loadSettingsForm,
     upload: function(){ _restoreSheetUrls(); }
   };
@@ -4196,6 +4228,305 @@ function _wuGlobalRmUsage() {
   window._wuRmUsageStamp = (_bomData||[]).length;
   return out;
 }
+
+// ═══ NPD — Kebutuhan Material Produk Baru (hierarki FG → Formula → Grid RM) ═══
+// Model: STATE.npdData = {
+//   fgs: [ { id, name, inBom:false,
+//            formulas: [ { id, name, plan, active:true, ts,
+//                          rows: [ {code, sapName, realName, pct, supplier, uom, netto} ] } ] } ]
+// }
+// Mat req (KG) per row = pct × netto × plan ÷ 1000 (SELALU ÷1000, netto dlm gram → KG)
+// Formula "active" terbaru menang; formula lama otomatis non-aktif.
+// inBom per FG → kalau true, seluruh FG stop dihitung (anti-dobel dengan MRP reguler).
+
+var _NPD_COLS = [
+  {key:'code',     label:'Kode Item', w:'120px'},
+  {key:'sapName',  label:'SAP Name',  w:'110px'},
+  {key:'realName', label:'Real Name', w:'160px'},
+  {key:'pct',      label:'% ',        w:'80px',  num:true},
+  {key:'supplier', label:'Supplier',  w:'160px'},
+  {key:'uom',      label:'UoM',       w:'60px'},
+  {key:'netto',    label:'Netto (gr)',w:'80px',  num:true}
+];
+
+function _npdLoad() {
+  try { var d = JSON.parse(localStorage.getItem('npd_data') || 'null'); return (d && d.fgs) ? d : {fgs:[]}; }
+  catch(e){ return {fgs:[]}; }
+}
+function _npdSave(data) {
+  STATE.npdData = data;
+  try { localStorage.setItem('npd_data', JSON.stringify(data)); cloudSave('npd_data', JSON.stringify(data)); } catch(e){}
+  if(window._inclNPD){
+    if(STATE.projectionData && STATE.projectionData.length){ buildProjection(); if(document.getElementById('proj-table')) renderProjection(); }
+    if(document.getElementById('fc-table')) renderForecast();
+  }
+}
+function _npdNormalize() {
+  // pastikan STATE.npdData bentuk {fgs:[]}
+  if(!STATE.npdData || !STATE.npdData.fgs) STATE.npdData = _npdLoad();
+  return STATE.npdData;
+}
+function _npdUID(){ return 'n'+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
+
+// Mat req KG untuk 1 row (butuh plan dari formula)
+function _npdMatReq(row, plan) {
+  var pct = parseFloat(row.pct)||0;      // 0.7691 (fraksi) atau 76.91 (persen)?
+  // pct disimpan sebagai FRAKSI (0.7691). Kalau user paste "76,91%" → di-normalisasi saat input.
+  var netto = parseFloat(row.netto)||0;
+  var pl = parseFloat(plan)||0;
+  return (pct * netto * pl) / 1000; // selalu ÷1000 → KG
+}
+
+// Peta kebutuhan NPD AKTIF per kode RM (KG). Hanya FG !inBom, formula active.
+function _npdActiveByCode() {
+  var map = {};
+  var data = _npdNormalize();
+  (data.fgs||[]).forEach(function(fg){
+    if(fg.inBom) return; // FG sudah masuk BOM → skip
+    (fg.formulas||[]).forEach(function(fm){
+      if(!fm.active) return; // formula non-aktif → skip
+      (fm.rows||[]).forEach(function(r){
+        if(!r.code) return;
+        var kg = _npdMatReq(r, fm.plan);
+        if(kg>0) map[String(r.code).trim()] = (map[String(r.code).trim()]||0) + kg;
+      });
+    });
+  });
+  return map;
+}
+// Rincian NPD per kode (untuk trace): [{fg, formula, kg}]
+function _npdDetailByCode(code) {
+  var out=[]; var data=_npdNormalize();
+  (data.fgs||[]).forEach(function(fg){
+    if(fg.inBom) return;
+    (fg.formulas||[]).forEach(function(fm){
+      if(!fm.active) return;
+      (fm.rows||[]).forEach(function(r){
+        if(String(r.code).trim()===String(code).trim()){ var kg=_npdMatReq(r,fm.plan); if(kg>0) out.push({fg:fg.name,formula:fm.name,kg:kg}); }
+      });
+    });
+  });
+  return out;
+}
+
+// ── Navigasi state (FG mana yg dibuka, formula mana) ──
+window._npdOpenFg = window._npdOpenFg || null;
+window._npdOpenFormula = window._npdOpenFormula || null;
+
+function _npdRender() {
+  _npdNormalize();
+  var el = document.getElementById('npd-table');
+  if(!el) return;
+  // datalist kode RM dari master
+  var dl = document.getElementById('npd-code-list');
+  if(dl && !dl._filled){
+    var opts=''; Object.keys(STATE.masterData||{}).filter(function(c){return /^[34]/.test(c);}).slice(0,3000).forEach(function(c){
+      var m=STATE.masterData[c]||{}; opts+='<option value="'+c+'">'+c+' — '+((m.desc||'').slice(0,35))+'</option>';
+    });
+    dl.innerHTML=opts; dl._filled=true;
+  }
+  if(window._npdOpenFg && window._npdOpenFormula) return _npdRenderGrid(el);
+  if(window._npdOpenFg) return _npdRenderFormulaList(el);
+  return _npdRenderFgList(el);
+}
+
+// LEVEL 1: daftar FG NPD
+function _npdRenderFgList(el) {
+  var data = _npdNormalize();
+  var rows = (data.fgs||[]).map(function(fg, i){
+    var nForm = (fg.formulas||[]).length;
+    var nActive = (fg.formulas||[]).filter(function(f){return f.active;}).length;
+    // total kebutuhan FG ini
+    var totKg = 0;
+    if(!fg.inBom) (fg.formulas||[]).forEach(function(fm){ if(fm.active) (fm.rows||[]).forEach(function(r){ totKg += _npdMatReq(r, fm.plan); }); });
+    return '<tr style="border-bottom:1px solid var(--border);'+(fg.inBom?'opacity:.55':'')+'">'
+      + '<td style="padding:10px 12px;cursor:pointer" onclick="_npdOpenFolder(\''+fg.id+'\')">'
+      +   '<span style="font-size:16px">📁</span> <b style="font-size:13px">'+(fg.name||'(tanpa nama)')+'</b>'
+      +   '<div style="font-size:10.5px;color:var(--muted);margin-top:2px">'+nForm+' formula ('+nActive+' aktif) · '+n_id(Math.round(totKg))+' KG total</div>'
+      + '</td>'
+      + '<td style="padding:10px 12px;text-align:center;white-space:nowrap">'
+      +   '<label style="display:inline-flex;align-items:center;gap:5px;font-size:11px;cursor:pointer" title="Kalau sudah masuk BOM sistem, kebutuhan FG ini berhenti dihitung (anti-dobel)"><input type="checkbox" '+(fg.inBom?'checked':'')+' onchange="_npdToggleFgBom(\''+fg.id+'\',this.checked)"> Sudah masuk BOM</label>'
+      + '</td>'
+      + '<td style="padding:10px 12px;text-align:center;white-space:nowrap">'
+      +   '<button class="btn btn-sm" onclick="_npdOpenFolder(\''+fg.id+'\')" style="font-size:11px">Buka →</button> '
+      +   '<button onclick="_npdRenameFg(\''+fg.id+'\')" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:13px" title="Rename">✏️</button> '
+      +   '<button onclick="_npdDeleteFg(\''+fg.id+'\')" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:14px" title="Hapus FG">✕</button>'
+      + '</td></tr>';
+  }).join('');
+  el.innerHTML = '<div style="margin-bottom:12px"><button class="btn btn-sm btn-primary" onclick="_npdAddFg()" style="font-size:12px">+ Tambah FG NPD</button></div>'
+    + (data.fgs.length ? '<div style="border:1px solid var(--border2);border-radius:var(--r);overflow:hidden"><table style="width:100%;border-collapse:collapse">'
+       + '<thead><tr style="background:var(--bg3)"><th style="padding:8px 12px;text-align:left;font-size:10px;text-transform:uppercase;color:var(--muted)">FG NPD</th><th style="padding:8px 12px;text-align:center;font-size:10px;text-transform:uppercase;color:var(--muted)">Status</th><th style="padding:8px 12px;text-align:center;font-size:10px;text-transform:uppercase;color:var(--muted)">Aksi</th></tr></thead>'
+       + '<tbody>'+rows+'</tbody></table></div>'
+       : '<div style="padding:32px;text-align:center;color:var(--muted);border:1px dashed var(--border2);border-radius:var(--r)">Belum ada FG NPD. Klik "+ Tambah FG NPD" untuk mulai.</div>');
+}
+
+// LEVEL 2: daftar formula dalam 1 FG
+function _npdRenderFormulaList(el) {
+  var data = _npdNormalize();
+  var fg = (data.fgs||[]).filter(function(f){return f.id===window._npdOpenFg;})[0];
+  if(!fg){ window._npdOpenFg=null; return _npdRender(); }
+  var rows = (fg.formulas||[]).map(function(fm){
+    var totKg=0; (fm.rows||[]).forEach(function(r){ totKg+=_npdMatReq(r,fm.plan); });
+    return '<tr style="border-bottom:1px solid var(--border);'+(!fm.active?'opacity:.5':'')+'">'
+      + '<td style="padding:10px 12px;cursor:pointer" onclick="_npdOpenFormula(\''+fm.id+'\')">'
+      +   '<span style="font-size:15px">🧪</span> <b style="font-size:12.5px">'+(fm.name||'(formula)')+'</b>'
+      +   (fm.active?'<span style="font-size:9px;background:var(--green);color:#fff;padding:1px 6px;border-radius:3px;margin-left:8px">AKTIF</span>':'<span style="font-size:9px;background:var(--muted);color:#fff;padding:1px 6px;border-radius:3px;margin-left:8px">nonaktif</span>')
+      +   '<div style="font-size:10.5px;color:var(--muted);margin-top:2px">Plan: '+n_id(fm.plan||0)+' pcs · '+(fm.rows||[]).length+' RM · '+n_id(Math.round(totKg))+' KG</div>'
+      + '</td>'
+      + '<td style="padding:10px 12px;text-align:center;white-space:nowrap">'
+      +   '<label style="display:inline-flex;align-items:center;gap:5px;font-size:11px;cursor:pointer"><input type="radio" name="npd-active-'+fg.id+'" '+(fm.active?'checked':'')+' onchange="_npdSetActiveFormula(\''+fm.id+'\')"> Aktif</label>'
+      + '</td>'
+      + '<td style="padding:10px 12px;text-align:center;white-space:nowrap">'
+      +   '<button class="btn btn-sm" onclick="_npdOpenFormula(\''+fm.id+'\')" style="font-size:11px">Buka →</button> '
+      +   '<button onclick="_npdRenameFormula(\''+fm.id+'\')" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:13px">✏️</button> '
+      +   '<button onclick="_npdDeleteFormula(\''+fm.id+'\')" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:14px">✕</button>'
+      + '</td></tr>';
+  }).join('');
+  el.innerHTML = '<div style="margin-bottom:12px;display:flex;gap:8px;align-items:center">'
+    + '<button class="btn btn-sm" onclick="_npdBackToFg()" style="font-size:12px">← Semua FG</button>'
+    + '<span style="font-size:13px;font-weight:700">📁 '+fg.name+'</span>'
+    + '<button class="btn btn-sm btn-primary" onclick="_npdAddFormula()" style="font-size:12px;margin-left:auto">+ Tambah Formula</button>'
+    + '</div>'
+    + (fg.formulas.length ? '<div style="border:1px solid var(--border2);border-radius:var(--r);overflow:hidden"><table style="width:100%;border-collapse:collapse">'
+       + '<thead><tr style="background:var(--bg3)"><th style="padding:8px 12px;text-align:left;font-size:10px;text-transform:uppercase;color:var(--muted)">Formula</th><th style="padding:8px 12px;text-align:center;font-size:10px;text-transform:uppercase;color:var(--muted)">Pilih Aktif</th><th style="padding:8px 12px;text-align:center;font-size:10px;text-transform:uppercase;color:var(--muted)">Aksi</th></tr></thead>'
+       + '<tbody>'+rows+'</tbody></table></div>'
+       : '<div style="padding:32px;text-align:center;color:var(--muted);border:1px dashed var(--border2);border-radius:var(--r)">Belum ada formula. Klik "+ Tambah Formula".</div>');
+}
+
+// LEVEL 3: grid RM dalam 1 formula
+function _npdRenderGrid(el) {
+  var data = _npdNormalize();
+  var fg = (data.fgs||[]).filter(function(f){return f.id===window._npdOpenFg;})[0];
+  if(!fg){ window._npdOpenFg=null; window._npdOpenFormula=null; return _npdRender(); }
+  var fm = (fg.formulas||[]).filter(function(f){return f.id===window._npdOpenFormula;})[0];
+  if(!fm){ window._npdOpenFormula=null; return _npdRender(); }
+  if(!fm.rows) fm.rows=[];
+
+  // Header grid
+  var thCols = _NPD_COLS.map(function(c){ return '<th style="padding:6px 8px;text-align:'+(c.num?'right':'left')+';font-size:10px;text-transform:uppercase;color:var(--muted);min-width:'+c.w+';border-bottom:2px solid var(--border2);position:relative"><div style="display:flex;align-items:center;gap:4px;justify-content:'+(c.num?'flex-end':'flex-start')+'">'+c.label+'<button onclick="_npdPasteCol(\''+c.key+'\')" title="Paste 1 kolom dari Excel" style="background:none;border:1px solid var(--border2);border-radius:3px;cursor:pointer;font-size:9px;padding:1px 4px;color:var(--teal)">📋</button></div></th>'; }).join('');
+  thCols += '<th style="padding:6px 8px;text-align:right;font-size:10px;text-transform:uppercase;color:var(--teal);min-width:100px;border-bottom:2px solid var(--border2);background:var(--bg4)">Mat req (KG)</th>';
+  thCols += '<th style="border-bottom:2px solid var(--border2)"></th>';
+
+  // Baris grid
+  var gridRows = fm.rows.map(function(r, ri){
+    var cells = _NPD_COLS.map(function(c){
+      var v = r[c.key]!=null ? r[c.key] : '';
+      // % ditampilkan sebagai persen (0.7691 → 76,91%)
+      var disp = v;
+      if(c.key==='pct' && v!=='') disp = (parseFloat(v)*100).toString().replace('.',',');
+      return '<td style="padding:2px"><input value="'+String(disp).replace(/"/g,'&quot;')+'" data-ri="'+ri+'" data-key="'+c.key+'" onchange="_npdCellEdit(this)" onpaste="_npdCellPaste(event,this)" style="width:100%;box-sizing:border-box;font-size:11px;padding:3px 5px;border:1px solid transparent;background:transparent;text-align:'+(c.num?'right':'left')+'" onfocus="this.style.border=\'1px solid var(--border2)\';this.style.background=\'var(--bg3)\'" onblur="this.style.border=\'1px solid transparent\';this.style.background=\'transparent\'"></td>';
+    }).join('');
+    var kg = _npdMatReq(r, fm.plan);
+    cells += '<td style="padding:3px 8px;text-align:right;font-family:var(--mono);font-size:11px;font-weight:600;color:var(--teal);background:var(--bg4)">'+(kg>0?n_id(Math.round(kg*100)/100):'—')+'</td>';
+    cells += '<td style="padding:3px 6px;text-align:center"><button onclick="_npdDeleteRow('+ri+')" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:12px">✕</button></td>';
+    return '<tr>'+cells+'</tr>';
+  }).join('');
+
+  var totKg=0; fm.rows.forEach(function(r){ totKg+=_npdMatReq(r,fm.plan); });
+
+  el.innerHTML = '<div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+    + '<button class="btn btn-sm" onclick="_npdBackToFg()" style="font-size:12px">← Semua FG</button>'
+    + '<button class="btn btn-sm" onclick="_npdBackToFormula()" style="font-size:12px">← '+fg.name+'</button>'
+    + '<span style="font-size:13px;font-weight:700">🧪 '+fm.name+'</span>'
+    + '</div>'
+    + '<div style="display:flex;gap:16px;align-items:center;margin-bottom:12px;flex-wrap:wrap">'
+    +   '<label style="font-size:12px;display:flex;align-items:center;gap:6px">Plan produksi (pcs): <input type="text" inputmode="numeric" value="'+n_id(fm.plan||0)+'" onchange="_npdSetPlan(this.value)" style="width:130px;font-size:13px;font-weight:700;padding:5px 8px;border:1px solid var(--border2);border-radius:5px;text-align:right"></label>'
+    +   '<span style="font-size:12px;color:var(--muted)">Total kebutuhan: <b style="color:var(--teal)">'+n_id(Math.round(totKg))+' KG</b></span>'
+    +   '<label style="font-size:12px;display:flex;align-items:center;gap:5px;margin-left:auto"><input type="radio" '+(fm.active?'checked':'')+' onchange="_npdSetActiveFormula(\''+fm.id+'\')"> Formula aktif (dipakai perhitungan)</label>'
+    + '</div>'
+    + '<div style="font-size:11px;color:var(--muted);margin-bottom:8px">Klik 📋 di header kolom untuk paste 1 kolom dari Excel sekaligus. Mat req = % × Netto × Plan ÷ 1000 (auto, dalam KG).</div>'
+    + '<div style="overflow-x:auto;border:1px solid var(--border2);border-radius:var(--r)"><table style="width:100%;border-collapse:collapse"><thead><tr style="background:var(--bg3)">'+thCols+'</tr></thead><tbody>'+gridRows+'</tbody></table></div>'
+    + '<div style="margin-top:10px"><button class="btn btn-sm" onclick="_npdAddRow()" style="font-size:12px">+ Tambah Baris</button></div>';
+}
+
+// ── Aksi FG ──
+function _npdAddFg(){ var nm=prompt('Nama FG NPD (mis. FYNE Extrait Leather):'); if(!nm) return; var d=_npdNormalize(); d.fgs.push({id:_npdUID(),name:nm.trim(),inBom:false,formulas:[]}); _npdSave(d); _npdRender(); }
+function _npdRenameFg(id){ var d=_npdNormalize(); var fg=d.fgs.filter(function(f){return f.id===id;})[0]; if(!fg)return; var nm=prompt('Rename FG:',fg.name); if(nm){fg.name=nm.trim(); _npdSave(d); _npdRender();} }
+function _npdDeleteFg(id){ var d=_npdNormalize(); var fg=d.fgs.filter(function(f){return f.id===id;})[0]; if(!fg)return; if(!confirm('Hapus FG "'+fg.name+'" beserta semua formula & RM-nya?'))return; d.fgs=d.fgs.filter(function(f){return f.id!==id;}); _npdSave(d); _npdRender(); }
+function _npdToggleFgBom(id,on){ var d=_npdNormalize(); var fg=d.fgs.filter(function(f){return f.id===id;})[0]; if(fg){fg.inBom=on; _npdSave(d); _npdRender();} }
+function _npdOpenFolder(id){ window._npdOpenFg=id; window._npdOpenFormula=null; _npdRender(); }
+function _npdBackToFg(){ window._npdOpenFg=null; window._npdOpenFormula=null; _npdRender(); }
+
+// ── Aksi Formula ──
+function _npdAddFormula(){ var nm=prompt('Nama/No Formula (mis. EDP01-200726H-SS):'); if(!nm)return; var d=_npdNormalize(); var fg=d.fgs.filter(function(f){return f.id===window._npdOpenFg;})[0]; if(!fg)return;
+  // formula baru → jadi aktif, yg lama non-aktif
+  (fg.formulas||[]).forEach(function(f){f.active=false;});
+  fg.formulas.push({id:_npdUID(),name:nm.trim(),plan:0,active:true,ts:new Date().toISOString(),rows:[]}); _npdSave(d); _npdRender(); }
+function _npdRenameFormula(id){ var fm=_npdFindFormula(id); if(!fm)return; var nm=prompt('Rename formula:',fm.name); if(nm){fm.name=nm.trim(); _npdSave(STATE.npdData); _npdRender();} }
+function _npdDeleteFormula(id){ var d=_npdNormalize(); var fg=d.fgs.filter(function(f){return f.id===window._npdOpenFg;})[0]; if(!fg)return; var fm=(fg.formulas||[]).filter(function(f){return f.id===id;})[0]; if(!fm)return; if(!confirm('Hapus formula "'+fm.name+'"?'))return; fg.formulas=fg.formulas.filter(function(f){return f.id!==id;});
+  // kalau yg dihapus aktif & masih ada formula lain, aktifkan yg terbaru
+  if(fm.active && fg.formulas.length){ fg.formulas.forEach(function(f){f.active=false;}); fg.formulas[fg.formulas.length-1].active=true; }
+  _npdSave(d); _npdRender(); }
+function _npdSetActiveFormula(id){ var d=_npdNormalize(); var fg=d.fgs.filter(function(f){return f.id===window._npdOpenFg;})[0]; if(!fg)return; (fg.formulas||[]).forEach(function(f){f.active=(f.id===id);}); _npdSave(d); _npdRender(); }
+function _npdOpenFormula(id){ window._npdOpenFormula=id; _npdRender(); }
+function _npdBackToFormula(){ window._npdOpenFormula=null; _npdRender(); }
+function _npdFindFormula(id){ var d=_npdNormalize(); var fg=d.fgs.filter(function(f){return f.id===window._npdOpenFg;})[0]; if(!fg)return null; return (fg.formulas||[]).filter(function(f){return f.id===id;})[0]||null; }
+function _npdCurFormula(){ return _npdFindFormula(window._npdOpenFormula); }
+
+// ── Aksi Grid ──
+function _npdSetPlan(val){ var fm=_npdCurFormula(); if(fm){ fm.plan=_parseNumID(val)||0; _npdSave(STATE.npdData); _npdRender(); } }
+function _npdAddRow(){ var fm=_npdCurFormula(); if(fm){ if(!fm.rows)fm.rows=[]; fm.rows.push({code:'',sapName:'',realName:'',pct:'',supplier:'',uom:'',netto:''}); _npdSave(STATE.npdData); _npdRender(); } }
+function _npdDeleteRow(ri){ var fm=_npdCurFormula(); if(fm&&fm.rows[ri]){ fm.rows.splice(ri,1); _npdSave(STATE.npdData); _npdRender(); } }
+function _npdCellEdit(input){
+  var fm=_npdCurFormula(); if(!fm)return;
+  var ri=parseInt(input.getAttribute('data-ri')), key=input.getAttribute('data-key');
+  if(!fm.rows[ri])return;
+  var val=input.value.trim();
+  if(key==='pct'){ // input "76,91%" atau "0.7691" → simpan fraksi
+    val=val.replace('%','').trim();
+    var num=_parseNumID(val);
+    // kalau user ketik >1 (mis. 76.91) anggap persen → /100; kalau ≤1 anggap sudah fraksi
+    if(!isNaN(num)){ fm.rows[ri].pct = num>1 ? num/100 : num; }
+  } else if(key==='netto'){ fm.rows[ri].netto=_parseNumID(val)||0; }
+  else { fm.rows[ri][key]=val; }
+  _npdSave(STATE.npdData); _npdRender();
+}
+// Paste multi-baris ke 1 sel (Excel paste ke bawah)
+function _npdCellPaste(ev, input){
+  var txt=(ev.clipboardData||window.clipboardData).getData('text');
+  if(!txt||txt.indexOf('\n')<0 && txt.indexOf('\t')<0) return; // biarkan paste normal 1 sel
+  ev.preventDefault();
+  var fm=_npdCurFormula(); if(!fm)return;
+  var startRi=parseInt(input.getAttribute('data-ri')), key=input.getAttribute('data-key');
+  var lines=txt.split(/\r?\n/).filter(function(l){return l!=='';});
+  lines.forEach(function(line, k){
+    var ri=startRi+k;
+    while(fm.rows.length<=ri) fm.rows.push({code:'',sapName:'',realName:'',pct:'',supplier:'',uom:'',netto:''});
+    var val=line.split('\t')[0].trim(); // ambil kolom pertama saja (1 kolom)
+    _npdSetCellVal(fm.rows[ri], key, val);
+  });
+  _npdSave(STATE.npdData); _npdRender();
+}
+// Paste 1 kolom via tombol header (prompt)
+function _npdPasteCol(key){
+  var fm=_npdCurFormula(); if(!fm)return;
+  var txt=prompt('Paste kolom "'+(_NPD_COLS.filter(function(c){return c.key===key;})[0]||{}).label+'" dari Excel (1 kolom, banyak baris):');
+  if(!txt)return;
+  var lines=txt.split(/\r?\n/).filter(function(l){return l.trim()!=='';});
+  lines.forEach(function(line,k){
+    while(fm.rows.length<=k) fm.rows.push({code:'',sapName:'',realName:'',pct:'',supplier:'',uom:'',netto:''});
+    _npdSetCellVal(fm.rows[k], key, line.split('\t')[0].trim());
+  });
+  _npdSave(STATE.npdData); _npdRender();
+}
+function _npdSetCellVal(row, key, val){
+  if(key==='pct'){ val=val.replace('%','').trim(); var num=_parseNumID(val); if(!isNaN(num)) row.pct = num>1 ? num/100 : num; }
+  else if(key==='netto'){ row.netto=_parseNumID(val)||0; }
+  else { row[key]=val; }
+}
+
+function _npdExport() {
+  var data=_npdNormalize();
+  if(typeof XLSX==='undefined'){ toast('SheetJS belum siap','err'); return; }
+  var aoa=[['FG NPD','Formula','Aktif','Plan','Kode RM','SAP Name','Real Name','%','Supplier','UoM','Netto(gr)','Mat req (KG)','FG sudah masuk BOM']];
+  (data.fgs||[]).forEach(function(fg){ (fg.formulas||[]).forEach(function(fm){ (fm.rows||[]).forEach(function(r){
+    aoa.push([fg.name, fm.name, fm.active?'Ya':'Tidak', fm.plan, r.code, r.sapName, r.realName, (parseFloat(r.pct)||0)*100+'%', r.supplier, r.uom, r.netto, Math.round(_npdMatReq(r,fm.plan)*100)/100, fg.inBom?'Ya':'Tidak']);
+  }); }); });
+  var wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa),'NPD');
+  XLSX.writeFile(wb,'npd_kebutuhan_'+new Date().toISOString().slice(0,10)+'.xlsx');
+  toast('NPD di-export ✓','ok');
+}
+
 
 function _whereUsedRender() {
   var el = document.getElementById('wu-result');
@@ -6665,6 +6996,7 @@ function _doBuildProjection() {
 
   // Supplier per item: OSPO docNum tertinggi → GRPO terbaru → master → matcom
   var supplierByItem = _buildSupplierByItem();
+  var npdMap = _npdActiveByCode(); // kebutuhan NPD aktif per item (belum masuk BOM)
 
   // GRPO qty by item this month — full bulan
   var grpoByItem = {};
@@ -6878,6 +7210,7 @@ function _doBuildProjection() {
       moq: master.moq || 0, supplier: supplier,
       site: [stockBTG>0?'BTG':null,stockSNG>0?'SNG':null,stockJTK>0?'JTK':null,stockPJT>0?'PJT':null].filter(Boolean).join('&')||'',
       stockBTG: Math.round(stockBTG), stockSNG: Math.round(stockSNG), stockJTK: Math.round(stockJTK), stockPJT: Math.round(stockPJT),
+      npdNeed: Math.round(npdMap[code] || 0),
       doiFC: doiFC >= 999 ? '\u221e' : Math.floor(doiFC),
       doiMatcom: doiMatcom >= 999 ? '\u221e' : Math.floor(doiMatcom),
       doiFCNum: doiFC >= 999 ? 999 : doiFC,
@@ -7051,6 +7384,7 @@ var _PROJ_COL_DEFS = [
   {id:'doifc',       label:'DOI',             get:function(p){ return String(p.doiFC!=null?p.doiFC:''); }, numeric:true},
   {id:'estusg',      label:'Est Usg/day',     get:function(p){ return String(Math.round(p.estUsageMRP||0)); }, numeric:true},
   {id:'actualmrp',   label:'Actual MRP',      get:function(p){ return String(Math.round(p.actualMRP||0)); }, numeric:true},
+  {id:'npdneed',     label:'Keb. NPD',        get:function(p){ return String(Math.round(p.npdNeed||0)); }, numeric:true},
   {id:'grpo',        label:'GRPO Bln Ini',    get:function(p){ return String(Math.round(p.totalIncoming||0)); }, numeric:true},
   {id:'actualusg',   label:'Actual Usg',      get:function(p){ return String(Math.round(p.actualUsageDaily||0)); }, numeric:true},
   {id:'pctusage',    label:'% Usg vs FC',     get:function(p){ return String(Math.round((p.pctUsageVsForecast||0)*1000)/10); }, numeric:true},
@@ -7225,8 +7559,21 @@ document.addEventListener('click', function(e) {
   }
 });
 
+// Switch "Sertakan NPD": kalau ON, kebutuhan NPD ikut di perhitungan Projection & Forecast
+window._inclNPD = (localStorage.getItem('incl_npd')==='1');
+function _toggleInclNPD(on){
+  window._inclNPD = !!on;
+  try{ localStorage.setItem('incl_npd', on?'1':'0'); }catch(e){}
+  // sinkron checkbox di kedua tempat (projection + forecast)
+  var c1=document.getElementById('f-proj-npd'); if(c1)c1.checked=on;
+  var c2=document.getElementById('f-fc-npd'); if(c2)c2.checked=on;
+  if(STATE.projectionData && STATE.projectionData.length){ buildProjection(); if(document.getElementById('proj-table')) renderProjection(); }
+  if(document.getElementById('fc-table')) renderForecast();
+}
+
 function renderProjection() {
   var srch = (document.getElementById('srch-proj')||{value:''}).value.toLowerCase();
+  var _npdCb = document.getElementById('f-proj-npd'); if(_npdCb) _npdCb.checked = !!window._inclNPD;
   var ftype = (document.getElementById('f-proj-type')||{value:''}).value;
   var fsite = (document.getElementById('f-proj-site')||{value:''}).value;
   var fcat = (document.getElementById('f-proj-cat')||{value:''}).value;
