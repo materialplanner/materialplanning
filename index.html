@@ -4289,7 +4289,12 @@ function _npdNormalize() {
 function _npdUID(){ return 'n'+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
 
 // Mat req KG untuk 1 row (butuh plan dari formula)
+// Kode RO Water (air) — hanya dihitung utk penggenap % 100%, semua perhitungan material diabaikan
+var _NPD_WATER_CODE = '3000010009';
+function _npdIsWater(code){ return _npdNormCode(code) === _NPD_WATER_CODE; }
+
 function _npdMatReq(row, plan) {
+  if(row && _npdIsWater(row.code)) return 0; // RO Water = air, abaikan perhitungan material
   var pct = parseFloat(row.pct)||0;      // 0.7691 (fraksi) atau 76.91 (persen)?
   // pct disimpan sebagai FRAKSI (0.7691). Kalau user paste "76,91%" → di-normalisasi saat input.
   var netto = parseFloat(row.netto)||0;
@@ -4299,6 +4304,18 @@ function _npdMatReq(row, plan) {
 
 // Peta kebutuhan NPD AKTIF per kode RM (KG). Hanya FG !inBom, formula active.
 function _npdNormCode(c){ return String(c==null?'':c).trim().replace(/\.0+$/,''); }
+
+// Isi SAP Name & UoM otomatis dari master saat kode diisi (hanya kolom yg masih kosong)
+function _npdFillRowFromMaster(row){
+  if(!row || !row.code) return false;
+  var m = (STATE.masterData||{})[_npdNormCode(row.code)];
+  if(!m) return false;
+  var changed=false;
+  if((!row.sapName || String(row.sapName).trim()==='') && m.desc){ row.sapName=m.desc; changed=true; }
+  if((!row.uom || String(row.uom).trim()==='') && m.uom){ row.uom=m.uom; changed=true; }
+  return changed;
+}
+function _npdFillAllFromMaster(fm){ if(fm && fm.rows) fm.rows.forEach(_npdFillRowFromMaster); }
 
 // Total kebutuhan EXISTING per RM (dari forecast/MRP reguler yg sedang tampil).
 // nMonths: batasi ke X bulan pertama (chronological FC_MONTHS). Kosong/0 = semua bulan.
@@ -4382,6 +4399,7 @@ function _renderDashNpdOverview() {
     var needPR=[], needDatang=[];
     (fm.rows||[]).forEach(function(r){
       if(!r.code) return;
+      if(_npdIsWater(r.code)) return; // RO Water = air, abaikan
       var kg=_npdMatReq(r,fm.plan); totKg+=kg;
       if(r.isNew) nNew++;
       var ex = _existingReqByCode(r.code, exM);
@@ -4667,11 +4685,12 @@ function _npdRenderGrid(el) {
   thCols += '<th style="padding:5px 6px;text-align:center;font-size:9.5px;text-transform:uppercase;color:var(--accent);border-bottom:2px solid var(--border2)">New</th>';
   if(analysis){
     var _thA = function(l,clr){ return '<th style="padding:6px 8px;text-align:right;font-size:9.5px;text-transform:uppercase;color:'+(clr||'var(--muted)')+';white-space:nowrap;border-bottom:2px solid var(--border2);background:var(--bg3)">'+l+'</th>'; };
+    var _thPR = function(l){ return '<th style="padding:6px 8px;text-align:right;font-size:9.5px;text-transform:uppercase;color:var(--amber);white-space:nowrap;border-bottom:2px solid var(--amber);background:var(--amber-bg)">'+l+'</th>'; };
     thCols += _thA('MOQ')+_thA('Mult')+_thA('LT')+_thA('Stock')+_thA('PO')+_thA('PR')
       + _thA('NPD<br>Lain','var(--purple)')+_thA('Total<br>NPD','var(--teal)')
       + _thA('Perlu Datang<br>NPD','var(--red)')
-      + _thA('Kurang<br>NPD','var(--amber)')+_thA('PR<br>NPD','var(--amber)')
-      + (exM>0 ? _thA('Exist<br>'+exM+'bln','var(--muted)')+_thA('Perlu Datang<br>+Exist','var(--red)')+_thA('Kurang<br>+Exist','var(--accent)')+_thA('PR<br>+Exist','var(--accent)') : '');
+      + _thA('Kurang<br>NPD','var(--amber)')+_thPR('PR<br>NPD')
+      + (exM>0 ? _thA('Exist<br>'+exM+'bln','var(--muted)')+_thA('Perlu Datang<br>+Exist','var(--red)')+_thA('Kurang<br>+Exist','var(--accent)')+_thPR('PR<br>+Exist') : '');
   }
   thCols += '<th style="border-bottom:2px solid var(--border2)"></th>';
   thCols += '<th style="border-bottom:2px solid var(--border2)"></th>';
@@ -4687,18 +4706,20 @@ function _npdRenderGrid(el) {
     var kg = _npdMatReq(r, fm.plan);
     cells += '<td style="padding:3px 8px;text-align:right;font-family:var(--mono);font-size:11px;font-weight:600;color:var(--teal);background:var(--bg4)">'+(kg>0?n_id(Math.round(kg*100)/100):'—')+'</td>';
     cells += '<td style="padding:3px 6px;text-align:center"><input type="checkbox" '+(r.isNew?'checked':'')+' onchange="_npdToggleNew('+ri+',this.checked)" title="Tandai RM baru (belum ada di sistem)"></td>';
-    if(analysis && r.code){
+    if(analysis && r.code && !_npdIsWater(r.code)){
       var ex = _existingReqByCode(r.code, exM);
       var other = _npdOtherNpdForCode(r.code, fm.id);   // kebutuhan project NPD lain untuk RM ini
       var totalNpd = kg + other.total;                   // total semua project NPD
       var a = _npdRmAnalysis(r.code, totalNpd, ex);       // shortfall dihitung dari total semua project + existing
       var num=function(v,clr,bold){ return '<td style="padding:3px 8px;text-align:right;font-family:var(--mono);font-size:10.5px;color:'+(clr||'var(--text)')+';'+(bold?'font-weight:700':'')+';white-space:nowrap">'+(v===0?'—':n_id(Math.round(v*100)/100))+'</td>'; };
+      // Kolom saran PR → highlight kuning biar jelas ini angka usulan PR
+      var numPR=function(v){ return '<td style="padding:3px 8px;text-align:right;font-family:var(--mono);font-size:10.5px;color:var(--amber);font-weight:700;white-space:nowrap;background:var(--amber-bg)">'+(v===0?'—':n_id(Math.round(v*100)/100))+'</td>'; };
       cells += num(a.moq)+num(a.mult)+'<td style="padding:3px 8px;text-align:right;font-family:var(--mono);font-size:10.5px;white-space:nowrap">'+(a.lt!==''?a.lt+'d':'—')+'</td>'
         + num(a.stock)+num(a.po,'var(--teal)')+num(a.pr,'var(--accent)')
         + num(other.total,'var(--purple)',true)+num(totalNpd,'var(--teal)',true)
         + num(a.perluDatangNpd,'var(--red)',true)
-        + num(a.shortNpd,'var(--amber)')+num(a.prNpd,'var(--amber)',true)
-        + (exM>0 ? num(ex,'var(--muted)')+num(a.perluDatangBoth,'var(--red)',true)+num(a.shortBoth,'var(--accent)')+num(a.prBoth,'var(--accent)',true) : '');
+        + num(a.shortNpd,'var(--amber)')+numPR(a.prNpd)
+        + (exM>0 ? num(ex,'var(--muted)')+num(a.perluDatangBoth,'var(--red)',true)+num(a.shortBoth,'var(--accent)')+numPR(a.prBoth) : '');
     } else if(analysis){
       cells += '<td colspan="'+(exM>0?15:11)+'" style="background:var(--bg3)"></td>';
     }
@@ -4708,6 +4729,15 @@ function _npdRenderGrid(el) {
   }).join('');
 
   var totKg=0; fm.rows.forEach(function(r){ totKg+=_npdMatReq(r,fm.plan); });
+  // Total persentase formula — harusnya 100% (RO Water ikut sebagai penggenap)
+  var totPct=0, nPctRow=0; fm.rows.forEach(function(r){ if(r.code||r.pct!==''&&r.pct!=null){ totPct+=(parseFloat(r.pct)||0)*100; nPctRow++; } });
+  var pctStr=(Math.round(totPct*100)/100).toFixed(2).replace('.',',');
+  var pctOff=(Math.round((totPct-100)*100)/100); var pctOffStr=(pctOff>0?'+':'')+pctOff.toFixed(2).replace('.',',');
+  var pctBanner = nPctRow ? (
+    Math.abs(totPct-100) <= 0.5
+     ? '<div style="font-size:11.5px;color:var(--green);margin-bottom:8px;font-weight:600">✓ Total persentase formula: '+pctStr+'% — OK (≈100%)</div>'
+     : '<div style="font-size:12px;color:#fff;background:var(--red);padding:7px 11px;border-radius:6px;margin-bottom:8px;font-weight:600">⚠ Total persentase formula = '+pctStr+'% — seharusnya 100% (selisih '+pctOffStr+'%). Cek komposisi; RO Water (3000010009) dipakai sebagai penggenap agar total 100%.</div>'
+  ) : '';
 
   el.innerHTML = '<div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
     + '<button class="btn btn-sm" onclick="_npdBackToFg()" style="font-size:12px">← Semua FG</button>'
@@ -4727,6 +4757,7 @@ function _npdRenderGrid(el) {
     +   '<span style="font-size:12px;color:var(--muted)">Total kebutuhan: <b style="color:var(--teal)">'+n_id(Math.round(totKg))+' KG</b></span>'
     +   '<label style="font-size:12px;display:flex;align-items:center;gap:5px;margin-left:auto"><input type="radio" '+(fm.active?'checked':'')+' onchange="_npdSetActiveFormula(\''+fm.id+'\')"> Formula aktif (dipakai perhitungan)</label>'
     + '</div>'
+    + pctBanner
     + '<div style="display:flex;gap:14px;align-items:center;margin-bottom:10px;flex-wrap:wrap;padding:8px 12px;background:var(--bg3);border-radius:var(--r)">'
     +   '<label style="font-size:12px;font-weight:600;display:flex;align-items:center;gap:6px;cursor:pointer;color:var(--accent)"><input type="checkbox" '+(analysis?'checked':'')+' onchange="_npdToggleAnalysis(this.checked)"> 📊 Mode Analisis PR (stock/PO/PR → kurang)</label>'
     +   (analysis ? '<label style="font-size:12px;display:flex;align-items:center;gap:6px">Existing forecast: <select onchange="_npdSetExMonths(this.value)" style="font-size:12px;padding:4px 8px;border:1px solid var(--border2);border-radius:5px">'
@@ -4784,6 +4815,7 @@ function _npdCellEdit(input){
   if(key==='pct'){ var p=_npdParsePct(val); if(!isNaN(p)) fm.rows[ri].pct=p; }
   else if(key==='netto'){ fm.rows[ri].netto=_parseNumID(val)||0; }
   else { fm.rows[ri][key]=val; }
+  if(key==='code') _npdFillRowFromMaster(fm.rows[ri]); // auto-tarik SAP Name & UoM dari master
   _npdSave(STATE.npdData); _npdRender();
 }
 // Paste ke sel: dukung multi-baris DAN multi-kolom (paste area Excel). Auto-nambah baris.
@@ -4806,6 +4838,7 @@ function _npdCellPaste(ev, input){
       if(colIdx<_NPD_COLS.length) _npdSetCellVal(fm.rows[ri], _NPD_COLS[colIdx].key, String(val).trim());
     });
   });
+  _npdFillAllFromMaster(fm); // auto-tarik SAP Name & UoM dari master
   _npdSave(STATE.npdData); _npdRender();
 }
 // Paste 1 kolom via tombol header (prompt)
@@ -4846,6 +4879,7 @@ function _npdPasteAllApply(){
       if(colIdx<_NPD_COLS.length) _npdSetCellVal(fm.rows[ri], _NPD_COLS[colIdx].key, String(val).trim());
     });
   });
+  _npdFillAllFromMaster(fm); // auto-tarik SAP Name & UoM dari master
   _npdSave(STATE.npdData);
   document.getElementById('npd-paste-overlay').style.display='none';
   _npdRender();
@@ -4860,6 +4894,7 @@ function _npdPasteCol(key){
     while(fm.rows.length<=k) fm.rows.push({code:'',sapName:'',realName:'',pct:'',supplier:'',uom:'',netto:''});
     _npdSetCellVal(fm.rows[k], key, line.split('\t')[0].trim());
   });
+  _npdFillAllFromMaster(fm); // auto-tarik SAP Name & UoM dari master
   _npdSave(STATE.npdData); _npdRender();
 }
 // Parse nilai % ke FRAKSI. Aturan:
@@ -4899,12 +4934,14 @@ function _npdExportFormula(fmId){
     [],
     ['Kode RM','SAP Name','Real Name','%','UoM','Supplier','Netto(gr)','New','Mat req NPD (KG)','NPD Lain (KG)','Total NPD (KG)','MOQ','Multiple','LT','Stock','PO','PR','Perlu Datang NPD','Kurang NPD','PR NPD','Existing '+exM+'bln','Perlu Datang +Exist','Kurang +Exist','PR +Exist']
   ];
+  var _blank={moq:'',mult:'',lt:'',stock:'',po:'',pr:'',shortNpd:'',prNpd:'',shortBoth:'',prBoth:'',perluDatangNpd:'',perluDatangBoth:''};
   (fm.rows||[]).forEach(function(r){
-    var kg=_npdMatReq(r,fm.plan); var c=_npdNormCode(r.code);
-    var ex=c?_existingReqByCode(c,exM):0;
-    var otherKg=c?_npdOtherNpdForCode(c,fm.id).total:0;
-    var totalNpd=kg+otherKg;
-    var a=c?_npdRmAnalysis(c,totalNpd,ex):{moq:'',mult:'',lt:'',stock:'',po:'',pr:'',shortNpd:'',prNpd:'',shortBoth:'',prBoth:'',perluDatangNpd:'',perluDatangBoth:''};
+    var c=_npdNormCode(r.code); var isW=_npdIsWater(r.code);
+    var kg=isW?'':_npdMatReq(r,fm.plan);
+    var ex=(c&&!isW)?_existingReqByCode(c,exM):'';
+    var otherKg=(c&&!isW)?_npdOtherNpdForCode(c,fm.id).total:'';
+    var totalNpd=isW?'':((kg||0)+(otherKg||0));
+    var a=(c&&!isW)?_npdRmAnalysis(c,totalNpd,ex||0):_blank;
     var rnd=function(v){return typeof v==='number'?Math.round(v*100)/100:v;};
     aoa.push([r.code,r.sapName,r.realName,(parseFloat(r.pct)||0)*100+'%',r.uom,r.supplier,r.netto,r.isNew?'NEW':'',rnd(kg),rnd(otherKg),rnd(totalNpd),
       a.moq,a.mult,a.lt,rnd(a.stock),rnd(a.po),rnd(a.pr),rnd(a.perluDatangNpd),rnd(a.shortNpd),rnd(a.prNpd),rnd(ex),rnd(a.perluDatangBoth),rnd(a.shortBoth),rnd(a.prBoth)]);
@@ -4923,21 +4960,21 @@ function _npdPrintFormula(fmId){
   var _prodI=(fm.prodMonthIdx!=null)?fm.prodMonthIdx:0; var _prodM=(FC_MONTHS||[])[_prodI]||''; var _prodYr=typeof _fcYearForMonthIdx==='function'?_fcYearForMonthIdx(_prodI):'';
   var fmt=function(v){return (v===0||v==null||v==='')?'—':n_id(Math.round(v*100)/100);};
   var rowsHtml=(fm.rows||[]).map(function(r){
-    var kg=_npdMatReq(r,fm.plan); var c=_npdNormCode(r.code);
-    var ex=c?_existingReqByCode(c,exM):0;
-    var otherKg=c?_npdOtherNpdForCode(c,fm.id).total:0;
-    var totalNpd=kg+otherKg;
-    var a=c?_npdRmAnalysis(c,totalNpd,ex):{moq:'',mult:'',lt:'',stock:0,po:0,pr:0,shortNpd:0,prNpd:0,shortBoth:0,prBoth:0};
+    var c=_npdNormCode(r.code); var isW=_npdIsWater(r.code);
+    var kg=isW?'':_npdMatReq(r,fm.plan);
+    var ex=(c&&!isW)?_existingReqByCode(c,exM):'';
+    var otherKg=(c&&!isW)?_npdOtherNpdForCode(c,fm.id).total:'';
+    var totalNpd=isW?'':((kg||0)+(otherKg||0));
+    var a=(c&&!isW)?_npdRmAnalysis(c,totalNpd,ex||0):{moq:'',mult:'',lt:'',stock:'',po:'',pr:'',shortNpd:'',prNpd:'',shortBoth:'',prBoth:''};
     return '<tr>'
-      +'<td>'+(r.code||'')+(r.isNew?' <b style="color:#c0392b">[NEW]</b>':'')+'</td>'
+      +'<td>'+(r.code||'')+(r.isNew?' <b style="color:#c0392b">[NEW]</b>':'')+(isW?' <span style="color:#888;font-size:8px">[AIR]</span>':'')+'</td>'
       +'<td>'+(r.sapName||'')+'</td><td>'+(r.realName||'')+'</td>'
       +'<td class="r">'+fmt(kg)+'</td>'
       +'<td class="r" style="color:#7c3aed">'+fmt(otherKg)+'</td><td class="r"><b>'+fmt(totalNpd)+'</b></td>'
-      +'<td class="r">'+(a.moq||'—')+'</td><td class="r">'+(a.mult||'—')+'</td><td class="r">'+(a.lt!==''?a.lt+'d':'—')+'</td>'
+      +'<td class="r">'+(a.moq||'—')+'</td><td class="r">'+(a.mult||'—')+'</td><td class="r">'+(a.lt!==''&&a.lt!=null?a.lt+'d':'—')+'</td>'
       +'<td class="r">'+fmt(a.stock)+'</td><td class="r">'+fmt(a.po)+'</td><td class="r">'+fmt(a.pr)+'</td>'
-      +'<td class="r" style="color:#c0392b">'+fmt(a.perluDatangNpd)+'</td>'
-      +'<td class="r"><b>'+fmt(a.prNpd)+'</b></td>'
-      +'<td class="r">'+fmt(ex)+'</td><td class="r" style="color:#c0392b">'+fmt(a.perluDatangBoth)+'</td><td class="r"><b>'+fmt(a.prBoth)+'</b></td>'
+      +'<td class="r">'+fmt(a.shortNpd)+'</td><td class="r"><b>'+fmt(a.prNpd)+'</b></td>'
+      +'<td class="r">'+fmt(ex)+'</td><td class="r">'+fmt(a.shortBoth)+'</td><td class="r"><b>'+fmt(a.prBoth)+'</b></td>'
       +'</tr>';
   }).join('');
   var doc='<!DOCTYPE html><html><head><meta charset="utf-8"><title>Lampiran PR NPD</title>'
@@ -4947,10 +4984,9 @@ function _npdPrintFormula(fmId){
     +'.r{text-align:right;font-family:monospace}.meta{font-size:10px;color:#666;margin:4px 0}</style></head><body>'
     +'<h2>Lampiran Permintaan Material — NPD</h2>'
     +'<div class="meta"><b>FG:</b> '+fg.name+' &nbsp;·&nbsp; <b>Formula:</b> '+fm.name+' &nbsp;·&nbsp; <b>Plan:</b> '+n_id(fm.plan||0)+' pcs &nbsp;·&nbsp; <b>Bulan produksi:</b> '+(_prodM?_prodM+" '"+_prodYr:'-')+'</div>'
-    +'<div class="meta">Data stock/PO/PR per Sync SAP: '+_syncTs+' &nbsp;·&nbsp; Existing forecast: '+exM+' bulan ke depan &nbsp;·&nbsp; Semua angka dalam KG</div>'
-    +'<table><thead><tr><th>Kode RM</th><th>SAP Name</th><th>Real Name</th><th>Mat req NPD</th><th>NPD Lain</th><th>Total NPD</th><th>MOQ</th><th>Mult</th><th>LT</th><th>Stock</th><th>PO</th><th>PR</th><th>Perlu Datang</th><th>PR (NPD saja)</th><th>Exist '+exM+'bln</th><th>Perlu Datang +Ex</th><th>PR (NPD+Exist)</th></tr></thead>'
+    +'<div class="meta">Data stock/PO/PR per Sync SAP: '+_syncTs+' &nbsp;·&nbsp; Existing forecast: '+exM+' bulan ke depan &nbsp;·&nbsp; Kurang = kebutuhan − (Stock+PO+PR), PR dibulatkan ke MOQ/kelipatan &nbsp;·&nbsp; Semua angka dalam KG</div>'
+    +'<table><thead><tr><th>Kode RM</th><th>SAP Name</th><th>Real Name</th><th>Mat req NPD</th><th>NPD Lain</th><th>Total NPD</th><th>MOQ</th><th>Mult</th><th>LT</th><th>Stock</th><th>PO</th><th>PR</th><th>Kurang (NPD)</th><th>PR (NPD saja)</th><th>Exist '+exM+'bln</th><th>Kurang (+Exist)</th><th>PR (NPD+Exist)</th></tr></thead>'
     +'<tbody>'+rowsHtml+'</tbody></table>'
-    +'<div style="margin-top:40px;display:flex;justify-content:space-between;font-size:10px"><div>Dibuat oleh,<br><br><br>_______________</div><div>Diperiksa,<br><br><br>_______________</div><div>Disetujui,<br><br><br>_______________</div></div>'
     +'</body></html>';
   var w=window.open('','_blank'); if(!w){toast('Popup diblokir — izinkan popup','err');return;}
   w.document.write(doc); w.document.close(); w.focus(); setTimeout(function(){w.print();},300);
@@ -4971,13 +5007,14 @@ function _npdExport() {
     [],
     ['FG NPD','Formula','Aktif','FG masuk BOM','Plan (pcs)','Bulan Produksi','Kode RM','SAP Name','Real Name','%','UoM','Supplier','Netto(gr)','New','Mat req NPD (KG)','NPD Lain (KG)','Total NPD (KG)',
     'MOQ','Multiple','LT (hari)','Stock','PO','PR','Perlu Datang NPD','Kurang NPD','PR NPD','Existing '+exM+'bln','Perlu Datang +Exist','Kurang +Exist','PR +Exist']];
+  var _blankG={moq:'',mult:'',lt:'',stock:'',po:'',pr:'',shortNpd:'',prNpd:'',shortBoth:'',prBoth:'',perluDatangNpd:'',perluDatangBoth:''};
   (data.fgs||[]).forEach(function(fg){ (fg.formulas||[]).forEach(function(fm){ (fm.rows||[]).forEach(function(r){
-    var kg = _npdMatReq(r,fm.plan);
-    var c = _npdNormCode(r.code);
-    var ex = c ? _existingReqByCode(c, exM) : 0;
-    var otherKg = c ? _npdOtherNpdForCode(c, fm.id).total : 0;
-    var totalNpd = kg + otherKg;
-    var a = c ? _npdRmAnalysis(c, totalNpd, ex) : {moq:'',mult:'',lt:'',stock:'',po:'',pr:'',shortNpd:'',prNpd:'',shortBoth:'',prBoth:'',perluDatangNpd:'',perluDatangBoth:''};
+    var c = _npdNormCode(r.code); var isW=_npdIsWater(r.code);
+    var kg = isW?'':_npdMatReq(r,fm.plan);
+    var ex = (c&&!isW) ? _existingReqByCode(c, exM) : '';
+    var otherKg = (c&&!isW) ? _npdOtherNpdForCode(c, fm.id).total : '';
+    var totalNpd = isW?'':((kg||0) + (otherKg||0));
+    var a = (c&&!isW) ? _npdRmAnalysis(c, totalNpd, ex||0) : _blankG;
     var rnd = function(v){ return typeof v==='number'? Math.round(v*100)/100 : v; };
     aoa.push([fg.name, fm.name, fm.active?'Ya':'Tidak', fg.inBom?'Ya':'Tidak', fm.plan, _prodMonLabel(fm),
       r.code, r.sapName, r.realName, (parseFloat(r.pct)||0)*100+'%', r.uom, r.supplier, r.netto, r.isNew?'NEW':'', rnd(kg), rnd(otherKg), rnd(totalNpd),
@@ -12898,6 +12935,8 @@ function _calcForecast(code, ospoIdx) {
     var npdAdd = _npdByMonth[i] || 0; // NPD masuk di bulan produksi yg dipilih planner
     return Math.max(0, mrpVal - consumed) + npdAdd;
   });
+  // Kebutuhan NPD per bulan (utk highlight kolom Requirement yg ada tambahan NPD)
+  var npdAddArr = FC_MONTHS.map(function(_, i){ return _npdByMonth[i] || 0; });
 
   // forecastRaw: MRP asli tanpa pengurangan matcom — dipakai calcDOI supaya rate konsisten
   // forecast[i] bulan berjalan = MRP - matcom (sudah dikurangi) → tidak bisa dipakai sebagai "forecast asli"
@@ -13229,7 +13268,7 @@ function _calcForecast(code, ospoIdx) {
     forecastOspo: forecastOspo, stockFc: stockFc, doiFc: doiFc,
     propose: totalProp, pullNotifs: pullNotifs,
     lt_days: lt_days, moq: moq, multiple: multiple, maxDOI: maxDOI,
-    soh: soh, suggestions: suggestions
+    soh: soh, suggestions: suggestions, npdAdd: npdAddArr
   };
 }
 
@@ -13441,7 +13480,9 @@ function _fcRenderDetail(el, items, fcData, fRows) {
     // Per-month cells — show propose by default
     var mCells = FC_MONTHS.map(function(_, i) {
       if(fRows==='forecast') {
-        var v=fc.forecast[i]; return '<td style="text-align:right;padding:6px 5px;font-family:var(--mono);font-size:11px;color:var(--muted)">'+(v?n_id(v):'—')+'</td>';
+        var v=fc.forecast[i];
+        var _hasNpd = window._inclNPD && fc.npdAdd && fc.npdAdd[i]>0;
+        return '<td style="text-align:right;padding:6px 5px;font-family:var(--mono);font-size:11px;'+(_hasNpd?'background:var(--teal-bg);color:var(--teal);font-weight:700;border-radius:3px':'color:var(--muted)')+'"'+(_hasNpd?' title="Termasuk tambahan NPD +'+n_id(Math.round(fc.npdAdd[i]))+'"':'')+'>'+(v?n_id(v):'—')+'</td>';
       } else if(fRows==='stock') {
         var v2=fc.stock[i]; var _doi_i=fc.doi[i]; var _tgt_i=_fcGetDOIForItem(code);
         var cl=v2<0?'var(--red)':(_doi_i>=0&&_doi_i<_tgt_i)?'var(--amber)':'var(--text)';
@@ -13735,7 +13776,7 @@ function _fcDetailRow(code, fc, master) {
           + '</td>'
           + cells + '<td style="background:var(--bg3);border-left:2px solid var(--border2)"></td></tr>';
       })() : '')
-    + gRow('Requirement', _fcValArr(fc.forecast, code), function(){ return 'color:var(--text)'; })
+    + gRow('Requirement', _fcValArr(fc.forecast, code), function(v,i){ return (window._inclNPD && fc.npdAdd && fc.npdAdd[i]>0) ? 'background:var(--teal-bg);color:var(--teal);font-weight:700' : 'color:var(--text)'; })
     + (isFcView
         ? gRow('Adjusted OSPO', _fcValArr(fc.forecastOspo, code), function(v){ return v>0?'color:var(--teal);font-weight:600':'color:var(--hint)'; })
         : gRowOspo('OSPO', _fcValArr(fc.ospo, code), _fcValArr(fc.ospoBase, code), code, 'ospo')
