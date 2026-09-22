@@ -14389,6 +14389,7 @@ function _fcRenderGrafikTable(months, datasets, isValue, ctx) {
   var el = document.getElementById('fc-grafik-table');
   if(!el) return;
   window._grafikTableCtx = ctx; // { supItems, fcData, isValue }
+  window._grafikTableData = { months:months, datasets:datasets, isValue:isValue, ctx:ctx };
   var mHdr = months.map(function(m){ return '<th style="text-align:right;padding:5px 8px;font-size:10px;font-weight:700;color:var(--muted);white-space:nowrap">'+m.label+'</th>'; }).join('');
   var body = datasets.map(function(ds){
     var isDOI = ds.yAxisID==='yDOI';
@@ -14412,28 +14413,22 @@ function _fcRenderGrafikTable(months, datasets, isValue, ctx) {
     return mainRow + breakRows;
   }).join('');
   el.innerHTML = '<div style="border:1px solid var(--border2);border-radius:var(--r);overflow:hidden">'
-    + '<div style="padding:7px 10px;background:var(--bg3);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text)">📋 Data '+(isValue?'Value (Rp)':'Qty')+' <span style="font-weight:400;text-transform:none;color:var(--muted)">— klik ▶ untuk rincian per item</span></div>'
+    + '<div style="padding:7px 10px;background:var(--bg3);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text);display:flex;align-items:center;justify-content:space-between;gap:8px"><span>📋 Data '+(isValue?'Value (Rp)':'Qty')+' <span style="font-weight:400;text-transform:none;color:var(--muted)">— klik ▶ untuk rincian per item</span></span><button class="btn btn-sm" onclick="_grafikExportExcel()" title="Export tabel grafik (ringkasan + rincian per item) ke Excel" style="font-size:10.5px;text-transform:none">↓ Export Excel</button></div>'
     + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'
     + '<thead><tr style="background:var(--bg3)"><th style="text-align:left;padding:5px 8px;font-size:10px;font-weight:700;color:var(--muted)">Baris</th>'+mHdr+'<th style="text-align:right;padding:5px 10px;font-size:10px;font-weight:700;color:var(--muted);background:var(--bg4);border-left:2px solid var(--border2)">TOTAL</th></tr></thead>'
     + '<tbody>'+body+'</tbody></table></div></div>';
 }
 
-// Baris breakdown per item untuk 1 dataset (row)
-function _grafikBreakdownRows(ds, months, ctx) {
+// Data breakdown per item untuk 1 dataset (dipakai render tabel & export)
+function _grafikBreakdownData(ds, months, ctx) {
   var isValue = ctx.isValue;
   var rowDef = _GRAFIK_ROWS.filter(function(r){ return r.key===ds._rowKey; })[0];
-  if(!rowDef) return '';
-  // Hitung nilai per item per bulan
+  if(!rowDef) return [];
   var perItem = []; // {code, name, arr, total}
-  var cfg = window._grafikCfg;
-
-  // Tentukan daftar item yang diproses:
-  // - GRPO: dari data GRPO langsung (item yg punya GRPO sesuai filter supplier+rmpm)
-  // - Forecast: dari supItems
   var codesToScan;
   if(rowDef.isGRPO) {
     var _codeSet = {};
-    var _src = (STATE.grpoHistori&&STATE.grpoHistori.length)?STATE.grpoHistori:(STATE.grpoData||[]);
+    var _src = ((STATE.grpoHistori&&STATE.grpoHistori.length)?STATE.grpoHistori:[]).concat(STATE.grpoData||[]);
     _src.forEach(function(g){
       if(!g.itemCode || !g.supplierName) return;
       if(ctx.pickedItem && String(g.itemCode)!==ctx.pickedItem) return;
@@ -14446,7 +14441,6 @@ function _grafikBreakdownRows(ds, months, ctx) {
   } else {
     codesToScan = ctx.supItems;
   }
-
   codesToScan.forEach(function(code){
     var arr = months.map(function(m){ return 0; });
     var any = false;
@@ -14465,12 +14459,16 @@ function _grafikBreakdownRows(ds, months, ctx) {
     if(any){
       var tot=arr.reduce(function(a,b){return a+(b||0);},0);
       var m=(STATE.masterData||{})[code]||{}; var nm=(_isAdmin&&(STATE.realNameData||{})[code])?STATE.realNameData[code]:(m.desc||'');
-      // fallback nama dari GRPO kalau master kosong
-      if(!nm && rowDef.isGRPO){ var _gg=((STATE.grpoHistori&&STATE.grpoHistori.length)?STATE.grpoHistori:(STATE.grpoData||[])).filter(function(g){return g.itemCode===code;})[0]; if(_gg) nm=_gg.itemName||''; }
+      if(!nm && rowDef.isGRPO){ var _gg=(((STATE.grpoHistori&&STATE.grpoHistori.length)?STATE.grpoHistori:[]).concat(STATE.grpoData||[])).filter(function(g){return g.itemCode===code;})[0]; if(_gg) nm=_gg.itemName||''; }
       perItem.push({code:code, name:nm, arr:arr, total:tot});
     }
   });
   perItem.sort(function(a,b){ return b.total-a.total; }); // terbesar dulu
+  return perItem;
+}
+// Baris breakdown per item untuk 1 dataset (row)
+function _grafikBreakdownRows(ds, months, ctx) {
+  var perItem = _grafikBreakdownData(ds, months, ctx);
   if(!perItem.length) return '<tr style="background:var(--bg)"><td colspan="'+(months.length+2)+'" style="padding:6px 8px 6px 28px;font-size:10px;color:var(--muted)">(tidak ada kontribusi)</td></tr>';
   return perItem.map(function(it){
     var cells = it.arr.map(function(v){ return '<td style="text-align:right;padding:3px 8px;font-family:var(--mono);font-size:10px;color:var(--muted)">'+(Math.abs(v)<0.005?'<span style=\"color:var(--hint)\">–</span>':n_id(Math.round(v*100)/100))+'</td>'; }).join('');
@@ -14481,6 +14479,54 @@ function _grafikBreakdownRows(ds, months, ctx) {
   }).join('');
 }
 function _grafikToggleBreak(key){ window._grafikExpanded[key] = !window._grafikExpanded[key]; renderForecast(); }
+
+// Export tabel grafik (ringkasan per baris + rincian per item) ke Excel
+function _grafikExportExcel(){
+  if(typeof XLSX==='undefined'){ toast('SheetJS belum siap','err'); return; }
+  var td = window._grafikTableData;
+  if(!td || !td.datasets || !td.datasets.length){ toast('Belum ada data grafik','err'); return; }
+  var months=td.months, datasets=td.datasets, isValue=td.isValue, ctx=td.ctx;
+  var mLabels=months.map(function(m){ return m.label; });
+  var rnd=function(v){ return (v==null)?'' : Math.round(v*100)/100; };
+  var unit=isValue?'Value (Rp)':'Qty';
+  var cfg=window._grafikCfg||{};
+  var _typeLbl=(typeof _fcTypeLabel==='function')?_fcTypeLabel():'';
+
+  // Sheet 1 — Ringkasan per baris
+  var aoa=[
+    ['Grafik Forecast — '+unit],
+    ['Di-export: '+new Date().toLocaleString('id-ID')+'  ·  Tipe: '+_typeLbl+(cfg.supplier?('  ·  Supplier: '+cfg.supplier):'')],
+    [],
+    ['Baris'].concat(mLabels).concat(['TOTAL'])
+  ];
+  datasets.forEach(function(ds){
+    var tot=ds.data.reduce(function(a,b){return a+(b||0);},0);
+    aoa.push([ds.label].concat(ds.data.map(rnd)).concat([rnd(tot)]));
+  });
+  var wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Ringkasan');
+
+  // Sheet 2 — Rincian per item (untuk baris yg bisa di-breakdown)
+  var det=[
+    ['Rincian per item — '+unit],
+    ['Tipe: '+_typeLbl+(cfg.supplier?('  ·  Supplier: '+cfg.supplier):'')],
+    [],
+    ['Baris','Kode Item','Nama'].concat(mLabels).concat(['TOTAL'])
+  ];
+  var anyDet=false;
+  datasets.forEach(function(ds){
+    if(ds.yAxisID==='yDOI') return; // DOI tak dijumlah
+    var per=_grafikBreakdownData(ds, months, ctx);
+    per.forEach(function(it){
+      anyDet=true;
+      det.push([ds.label, it.code, it.name].concat(it.arr.map(rnd)).concat([rnd(it.total)]));
+    });
+  });
+  if(anyDet) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(det), 'Rincian per item');
+
+  XLSX.writeFile(wb, 'grafik_forecast_'+(isValue?'value':'qty')+'_'+new Date().toISOString().slice(0,10)+'.xlsx');
+  toast('Tabel grafik di-export ✓','ok');
+}
 
 function _fcGrafikFmt(v){ try{ return (Math.round(v*100)/100).toLocaleString('id-ID'); }catch(e){ return v; } }
 function _grafikSet(key, val){ window._grafikCfg[key] = val; renderForecast(); }
