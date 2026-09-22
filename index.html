@@ -4265,8 +4265,7 @@ var _NPD_COLS = [
   {key:'realName', label:'Real Name', w:'150px'},
   {key:'pct',      label:'%',         w:'62px',  num:true},
   {key:'uom',      label:'UoM',       w:'48px'},
-  {key:'supplier', label:'Supplier',  w:'150px'},
-  {key:'netto',    label:'Netto',     w:'60px',  num:true}
+  {key:'supplier', label:'Supplier',  w:'150px'}
 ];
 
 function _npdLoad() {
@@ -4293,13 +4292,15 @@ function _npdUID(){ return 'n'+Date.now().toString(36)+Math.random().toString(36
 var _NPD_WATER_CODE = '3000010009';
 function _npdIsWater(code){ return _npdNormCode(code) === _NPD_WATER_CODE; }
 
-function _npdMatReq(row, plan) {
+function _npdMatReq(row, plan, netto) {
   if(row && _npdIsWater(row.code)) return 0; // RO Water = air, abaikan perhitungan material
   var pct = parseFloat(row.pct)||0;      // 0.7691 (fraksi) atau 76.91 (persen)?
   // pct disimpan sebagai FRAKSI (0.7691). Kalau user paste "76,91%" → di-normalisasi saat input.
-  var netto = parseFloat(row.netto)||0;
+  // Netto = berat bersih produk per pcs (gram), 1 angka per formula. Fallback ke row.netto (data lama).
+  var nt = (netto!=null && netto!=='') ? parseFloat(netto) : parseFloat(row.netto);
+  nt = nt||0;
   var pl = parseFloat(plan)||0;
-  return (pct * netto * pl) / 1000; // selalu ÷1000 → KG
+  return (pct * nt * pl) / 1000; // selalu ÷1000 → KG
 }
 
 // Peta kebutuhan NPD AKTIF per kode RM (KG). Hanya FG !inBom, formula active.
@@ -4400,7 +4401,7 @@ function _renderDashNpdOverview() {
     (fm.rows||[]).forEach(function(r){
       if(!r.code) return;
       if(_npdIsWater(r.code)) return; // RO Water = air, abaikan
-      var kg=_npdMatReq(r,fm.plan); totKg+=kg;
+      var kg=_npdMatReq(r,fm.plan,fm.netto); totKg+=kg;
       if(r.isNew) nNew++;
       var ex = _existingReqByCode(r.code, exM);
       var otherKg = _npdOtherNpdForCode(r.code, fm.id).total;  // project NPD lain pakai RM sama
@@ -4527,7 +4528,7 @@ function _npdActiveByCode() {
       if(!fm.active) return; // formula non-aktif → skip
       (fm.rows||[]).forEach(function(r){
         if(!r.code) return;
-        var kg = _npdMatReq(r, fm.plan);
+        var kg = _npdMatReq(r, fm.plan, fm.netto);
         var c = _npdNormCode(r.code);
         if(kg>0 && c) map[c] = (map[c]||0) + kg;
       });
@@ -4546,7 +4547,7 @@ function _npdActiveByCodeMonth() {
       var mi = (fm.prodMonthIdx!=null) ? fm.prodMonthIdx : 0; // default bulan pertama
       (fm.rows||[]).forEach(function(r){
         if(!r.code) return;
-        var kg = _npdMatReq(r, fm.plan);
+        var kg = _npdMatReq(r, fm.plan, fm.netto);
         var c = _npdNormCode(r.code);
         if(kg>0 && c){ if(!map[c]) map[c]={}; map[c][mi] = (map[c][mi]||0) + kg; }
       });
@@ -4563,7 +4564,7 @@ function _npdDetailByCode(code) {
       if(!fm.active) return;
       var sum=0;
       (fm.rows||[]).forEach(function(r){
-        if(_npdNormCode(r.code)===cc){ var kg=_npdMatReq(r,fm.plan); if(kg>0) sum+=kg; }
+        if(_npdNormCode(r.code)===cc){ var kg=_npdMatReq(r,fm.plan,fm.netto); if(kg>0) sum+=kg; }
       });
       if(sum>0) out.push({fgId:fg.id, fmId:fm.id, fg:fg.name, formula:fm.name, kg:sum, prodMonthIdx:(fm.prodMonthIdx!=null?fm.prodMonthIdx:0)});
     });
@@ -4606,7 +4607,7 @@ function _npdRenderFgList(el) {
     var nActive = (fg.formulas||[]).filter(function(f){return f.active;}).length;
     // total kebutuhan FG ini
     var totKg = 0;
-    if(!fg.inBom) (fg.formulas||[]).forEach(function(fm){ if(fm.active) (fm.rows||[]).forEach(function(r){ totKg += _npdMatReq(r, fm.plan); }); });
+    if(!fg.inBom) (fg.formulas||[]).forEach(function(fm){ if(fm.active) (fm.rows||[]).forEach(function(r){ totKg += _npdMatReq(r, fm.plan, fm.netto); }); });
     return '<tr style="border-bottom:1px solid var(--border);'+(fg.inBom?'opacity:.55':'')+'">'
       + '<td style="padding:10px 12px;cursor:pointer" onclick="_npdOpenFolder(\''+fg.id+'\')">'
       +   '<span style="font-size:16px">📁</span> <b style="font-size:13px">'+(fg.name||'(tanpa nama)')+'</b>'
@@ -4635,7 +4636,7 @@ function _npdRenderFormulaList(el) {
   if(!fg){ window._npdVFg=null; return _npdRender(); }
   var _fmSorted = (fg.formulas||[]).slice().sort(function(a,b){ return (b.ts||'').localeCompare(a.ts||''); });
   var rows = _fmSorted.map(function(fm){
-    var totKg=0; (fm.rows||[]).forEach(function(r){ totKg+=_npdMatReq(r,fm.plan); });
+    var totKg=0; (fm.rows||[]).forEach(function(r){ totKg+=_npdMatReq(r,fm.plan,fm.netto); });
     return '<tr style="border-bottom:1px solid var(--border);'+(!fm.active?'opacity:.5':'')+'">'
       + '<td style="padding:10px 12px;cursor:pointer" onclick="_npdOpenFormula(\''+fm.id+'\')">'
       +   '<span style="font-size:15px">🧪</span> <b style="font-size:12.5px">'+(fm.name||'(formula)')+'</b>'
@@ -4703,7 +4704,7 @@ function _npdRenderGrid(el) {
       if(c.key==='pct' && v!=='') disp = (parseFloat(v)*100).toString().replace('.',',');
       return '<td style="padding:2px"><input value="'+String(disp).replace(/"/g,'&quot;')+'" data-ri="'+ri+'" data-key="'+c.key+'" onchange="_npdCellEdit(this)" onpaste="_npdCellPaste(event,this)" style="width:100%;box-sizing:border-box;font-size:11px;padding:3px 5px;border:1px solid transparent;background:transparent;text-align:'+(c.num?'right':'left')+'" onfocus="this.style.border=\'1px solid var(--border2)\';this.style.background=\'var(--bg3)\'" onblur="this.style.border=\'1px solid transparent\';this.style.background=\'transparent\'"></td>';
     }).join('');
-    var kg = _npdMatReq(r, fm.plan);
+    var kg = _npdMatReq(r, fm.plan, fm.netto);
     cells += '<td style="padding:3px 8px;text-align:right;font-family:var(--mono);font-size:11px;font-weight:600;color:var(--teal);background:var(--bg4)">'+(kg>0?n_id(Math.round(kg*100)/100):'—')+'</td>';
     cells += '<td style="padding:3px 6px;text-align:center"><input type="checkbox" '+(r.isNew?'checked':'')+' onchange="_npdToggleNew('+ri+',this.checked)" title="Tandai RM baru (belum ada di sistem)"></td>';
     if(analysis && r.code && !_npdIsWater(r.code)){
@@ -4728,7 +4729,7 @@ function _npdRenderGrid(el) {
     return '<tr>'+cells+'</tr>';
   }).join('');
 
-  var totKg=0; fm.rows.forEach(function(r){ totKg+=_npdMatReq(r,fm.plan); });
+  var totKg=0; fm.rows.forEach(function(r){ totKg+=_npdMatReq(r,fm.plan,fm.netto); });
   // Total persentase formula — harusnya 100% (RO Water ikut sebagai penggenap)
   var totPct=0, nPctRow=0; fm.rows.forEach(function(r){ if(r.code||r.pct!==''&&r.pct!=null){ totPct+=(parseFloat(r.pct)||0)*100; nPctRow++; } });
   var pctStr=(Math.round(totPct*100)/100).toFixed(2).replace('.',',');
@@ -4738,6 +4739,8 @@ function _npdRenderGrid(el) {
      ? '<div style="font-size:11.5px;color:var(--green);margin-bottom:8px;font-weight:600">✓ Total persentase formula: '+pctStr+'% — OK (≈100%)</div>'
      : '<div style="font-size:12px;color:#fff;background:var(--red);padding:7px 11px;border-radius:6px;margin-bottom:8px;font-weight:600">⚠ Total persentase formula = '+pctStr+'% — seharusnya 100% (selisih '+pctOffStr+'%). Cek komposisi; RO Water (3000010009) dipakai sebagai penggenap agar total 100%.</div>'
   ) : '';
+  // Netto formula (gram/pcs) — 1 angka per formula (seperti Plan). Migrasi data lama: ambil netto baris pertama bila fm.netto kosong.
+  var _fmNetto = (fm.netto!=null && fm.netto!=='') ? fm.netto : (function(){ var rn=(fm.rows||[]).map(function(x){return parseFloat(x.netto)||0;}).filter(function(x){return x>0;}); return rn.length?rn[0]:''; })();
 
   el.innerHTML = '<div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
     + '<button class="btn btn-sm" onclick="_npdBackToFg()" style="font-size:12px">← Semua FG</button>'
@@ -4751,6 +4754,7 @@ function _npdRenderGrid(el) {
     + '</div>'
     + '<div style="display:flex;gap:16px;align-items:center;margin-bottom:12px;flex-wrap:wrap">'
     +   '<label style="font-size:12px;display:flex;align-items:center;gap:6px">Plan produksi (pcs): <input type="text" inputmode="numeric" value="'+n_id(fm.plan||0)+'" onchange="_npdSetPlan(this.value)" style="width:130px;font-size:13px;font-weight:700;padding:5px 8px;border:1px solid var(--border2);border-radius:5px;text-align:right"></label>'
+    +   '<label style="font-size:12px;display:flex;align-items:center;gap:6px" title="Berat bersih produk per pcs (gram) — 1 angka utk semua RM. Mat req = % × Netto × Plan ÷ 1000">Netto (gr/pcs): <input type="text" inputmode="decimal" value="'+(_fmNetto!==''?n_id(_fmNetto):'')+'" placeholder="mis. 100" onchange="_npdSetNetto(this.value)" style="width:110px;font-size:13px;font-weight:700;padding:5px 8px;border:1px solid var(--border2);border-radius:5px;text-align:right;color:var(--accent)"></label>'
     +   '<label style="font-size:12px;display:flex;align-items:center;gap:6px" title="Kebutuhan NPD masuk ke Requirement forecast di bulan ini saat \'Sertakan NPD\' aktif">Bulan produksi: <select onchange="_npdSetProdMonth(this.value)" style="font-size:12px;padding:5px 8px;border:1px solid var(--border2);border-radius:5px;font-weight:600">'
         + (FC_MONTHS||[]).map(function(m,i){ return '<option value="'+i+'"'+((fm.prodMonthIdx!=null?fm.prodMonthIdx:0)===i?' selected':'')+'>'+m+" '"+(typeof _fcYearForMonthIdx==='function'?_fcYearForMonthIdx(i):'')+'</option>'; }).join('')
         + '</select></label>'
@@ -4803,6 +4807,7 @@ function _npdCurFormula(){ return _npdFindFormula(window._npdVFm); }
 
 // ── Aksi Grid ──
 function _npdSetPlan(val){ var fm=_npdCurFormula(); if(fm){ fm.plan=_parseNumID(val)||0; _npdSave(STATE.npdData); _npdRender(); } }
+function _npdSetNetto(val){ var fm=_npdCurFormula(); if(fm){ var v=_parseNumID(val); fm.netto=(isNaN(v)?0:v); _npdSave(STATE.npdData); _npdRender(); } }
 function _npdSetProdMonth(idx){ var fm=_npdCurFormula(); if(fm){ fm.prodMonthIdx=parseInt(idx)||0; _npdSave(STATE.npdData); _npdRender(); } }
 function _npdAddRow(){ var fm=_npdCurFormula(); if(fm){ if(!fm.rows)fm.rows=[]; fm.rows.push({code:'',sapName:'',realName:'',pct:'',supplier:'',uom:'',netto:''}); _npdSave(STATE.npdData); _npdRender(); } }
 function _npdDeleteRow(ri){ var fm=_npdCurFormula(); if(fm&&fm.rows[ri]){ fm.rows.splice(ri,1); _npdSave(STATE.npdData); _npdRender(); } }
@@ -4937,13 +4942,13 @@ function _npdExportFormula(fmId){
   var _blank={moq:'',mult:'',lt:'',stock:'',po:'',pr:'',shortNpd:'',prNpd:'',shortBoth:'',prBoth:'',perluDatangNpd:'',perluDatangBoth:''};
   (fm.rows||[]).forEach(function(r){
     var c=_npdNormCode(r.code); var isW=_npdIsWater(r.code);
-    var kg=isW?'':_npdMatReq(r,fm.plan);
+    var kg=isW?'':_npdMatReq(r,fm.plan,fm.netto);
     var ex=(c&&!isW)?_existingReqByCode(c,exM):'';
     var otherKg=(c&&!isW)?_npdOtherNpdForCode(c,fm.id).total:'';
     var totalNpd=isW?'':((kg||0)+(otherKg||0));
     var a=(c&&!isW)?_npdRmAnalysis(c,totalNpd,ex||0):_blank;
     var rnd=function(v){return typeof v==='number'?Math.round(v*100)/100:v;};
-    aoa.push([r.code,r.sapName,r.realName,(parseFloat(r.pct)||0)*100+'%',r.uom,r.supplier,r.netto,r.isNew?'NEW':'',rnd(kg),rnd(otherKg),rnd(totalNpd),
+    aoa.push([r.code,r.sapName,r.realName,(parseFloat(r.pct)||0)*100+'%',r.uom,r.supplier,((fm.netto!=null&&fm.netto!=='')?fm.netto:r.netto),r.isNew?'NEW':'',rnd(kg),rnd(otherKg),rnd(totalNpd),
       a.moq,a.mult,a.lt,rnd(a.stock),rnd(a.po),rnd(a.pr),rnd(a.perluDatangNpd),rnd(a.shortNpd),rnd(a.prNpd),rnd(ex),rnd(a.perluDatangBoth),rnd(a.shortBoth),rnd(a.prBoth)]);
   });
   var wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(aoa),'NPD '+fm.name.slice(0,25));
@@ -4961,7 +4966,7 @@ function _npdPrintFormula(fmId){
   var fmt=function(v){return (v===0||v==null||v==='')?'—':n_id(Math.round(v*100)/100);};
   var rowsHtml=(fm.rows||[]).map(function(r){
     var c=_npdNormCode(r.code); var isW=_npdIsWater(r.code);
-    var kg=isW?'':_npdMatReq(r,fm.plan);
+    var kg=isW?'':_npdMatReq(r,fm.plan,fm.netto);
     var ex=(c&&!isW)?_existingReqByCode(c,exM):'';
     var otherKg=(c&&!isW)?_npdOtherNpdForCode(c,fm.id).total:'';
     var totalNpd=isW?'':((kg||0)+(otherKg||0));
@@ -5010,14 +5015,14 @@ function _npdExport() {
   var _blankG={moq:'',mult:'',lt:'',stock:'',po:'',pr:'',shortNpd:'',prNpd:'',shortBoth:'',prBoth:'',perluDatangNpd:'',perluDatangBoth:''};
   (data.fgs||[]).forEach(function(fg){ (fg.formulas||[]).forEach(function(fm){ (fm.rows||[]).forEach(function(r){
     var c = _npdNormCode(r.code); var isW=_npdIsWater(r.code);
-    var kg = isW?'':_npdMatReq(r,fm.plan);
+    var kg = isW?'':_npdMatReq(r,fm.plan,fm.netto);
     var ex = (c&&!isW) ? _existingReqByCode(c, exM) : '';
     var otherKg = (c&&!isW) ? _npdOtherNpdForCode(c, fm.id).total : '';
     var totalNpd = isW?'':((kg||0) + (otherKg||0));
     var a = (c&&!isW) ? _npdRmAnalysis(c, totalNpd, ex||0) : _blankG;
     var rnd = function(v){ return typeof v==='number'? Math.round(v*100)/100 : v; };
     aoa.push([fg.name, fm.name, fm.active?'Ya':'Tidak', fg.inBom?'Ya':'Tidak', fm.plan, _prodMonLabel(fm),
-      r.code, r.sapName, r.realName, (parseFloat(r.pct)||0)*100+'%', r.uom, r.supplier, r.netto, r.isNew?'NEW':'', rnd(kg), rnd(otherKg), rnd(totalNpd),
+      r.code, r.sapName, r.realName, (parseFloat(r.pct)||0)*100+'%', r.uom, r.supplier, ((fm.netto!=null&&fm.netto!=='')?fm.netto:r.netto), r.isNew?'NEW':'', rnd(kg), rnd(otherKg), rnd(totalNpd),
       a.moq, a.mult, a.lt, rnd(a.stock), rnd(a.po), rnd(a.pr), rnd(a.perluDatangNpd), rnd(a.shortNpd), rnd(a.prNpd), rnd(ex), rnd(a.perluDatangBoth), rnd(a.shortBoth), rnd(a.prBoth)]);
   }); }); });
   var ws = XLSX.utils.aoa_to_sheet(aoa);
