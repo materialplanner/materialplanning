@@ -897,10 +897,8 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
         style="padding:5px 14px;font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;background:transparent;color:var(--muted);border:none;cursor:pointer;font-family:var(--font)">📊 Grafik</button>
     </div>
 
-    <!-- Type (global: Detail, Rekap, Grafik) -->
-    <select id="f-fc-type" onchange="renderForecast()" style="font-size:12px;padding:5px 10px">
-      <option value="">RM + PM</option><option value="RM">RM</option><option value="PM">PM</option><option value="FG">FG</option><option value="WIP">WIP</option>
-    </select>
+    <!-- Type (global: Detail, Rekap, Grafik) — multi-select -->
+    <button id="f-fc-type-btn" onclick="_fcTypeMenu(this);event.stopPropagation()" title="Pilih tipe item (bisa lebih dari satu)" style="font-size:12px;padding:5px 10px;border:1px solid var(--border2);border-radius:6px;background:var(--bg2);color:var(--text);cursor:pointer;white-space:nowrap">RM + PM ▾</button>
 
     <!-- Kontrol grafik (muncul hanya di tab Grafik) -->
     <span id="fc-grafik-toolbar" style="display:none;align-items:center;gap:8px">
@@ -4735,12 +4733,12 @@ function _npdRenderGrid(el) {
   var exM = window._npdExMonths;
 
   // Header grid — kolom input
-  var thCols = _NPD_COLS.map(function(c){ return '<th style="padding:5px 6px;text-align:'+(c.num?'right':'left')+';font-size:9.5px;text-transform:uppercase;color:var(--muted);width:'+c.w+';border-bottom:2px solid var(--border2)"><div style="display:flex;align-items:center;gap:3px;justify-content:'+(c.num?'flex-end':'flex-start')+'">'+c.label+'<button onclick="_npdPasteCol(\''+c.key+'\')" title="Paste 1 kolom dari Excel" style="background:none;border:1px solid var(--border2);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;color:var(--teal)">📋</button></div></th>'; }).join('');
+  var thCols = _NPD_COLS.map(function(c){ var fbtn=c.num?'':'<span class="npd-colbtn" data-k="'+c.key+'" onclick="_npdColMenu(\''+c.key+'\',\''+String(c.label).replace(/'/g,'')+'\',this);event.stopPropagation()" title="Filter kolom" style="cursor:pointer;font-size:9px;color:var(--muted);user-select:none">▽</span>'; return '<th style="padding:5px 6px;text-align:'+(c.num?'right':'left')+';font-size:9.5px;text-transform:uppercase;color:var(--muted);width:'+c.w+';border-bottom:2px solid var(--border2)"><div style="display:flex;align-items:center;gap:3px;justify-content:'+(c.num?'flex-end':'flex-start')+'">'+c.label+'<button onclick="_npdPasteCol(\''+c.key+'\')" title="Paste 1 kolom dari Excel" style="background:none;border:1px solid var(--border2);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 3px;color:var(--teal)">📋</button>'+fbtn+'</div></th>'; }).join('');
   thCols += '<th style="padding:6px 8px;text-align:right;font-size:10px;text-transform:uppercase;color:var(--teal);min-width:90px;border-bottom:2px solid var(--border2);background:var(--bg4)">Mat req (KG)</th>';
   thCols += '<th style="padding:5px 6px;text-align:center;font-size:9.5px;text-transform:uppercase;color:var(--accent);border-bottom:2px solid var(--border2)">New</th>';
   if(analysis){
     var _thA = function(l,clr){ return '<th style="padding:6px 8px;text-align:right;font-size:9.5px;text-transform:uppercase;color:'+(clr||'var(--muted)')+';white-space:nowrap;border-bottom:2px solid var(--border2);background:var(--bg3)">'+l+'</th>'; };
-    var _thPR = function(l){ return '<th style="padding:6px 8px;text-align:right;font-size:9.5px;text-transform:uppercase;color:var(--amber);white-space:nowrap;border-bottom:2px solid var(--amber);background:var(--amber-bg)">'+l+'</th>'; };
+    var _thPR = function(l){ return '<th style="padding:6px 8px;text-align:right;font-size:9.5px;text-transform:uppercase;color:var(--amber);white-space:nowrap;border-bottom:2px solid var(--amber);background:linear-gradient(var(--amber-bg),var(--amber-bg)),var(--bg2)">'+l+'</th>'; };
     thCols += _thA('MOQ')+_thA('Mult')+_thA('LT')+_thA('Stock')+_thA('PO')+_thA('PR')
       + _thA('NPD<br>Lain','var(--purple)')+_thA('Total<br>NPD','var(--teal)')
       + _thA('Perlu Datang<br>NPD','var(--red)')
@@ -4757,7 +4755,8 @@ function _npdRenderGrid(el) {
       var v = r[c.key]!=null ? r[c.key] : '';
       var disp = v;
       if(c.key==='pct' && v!=='') disp = (parseFloat(v)*100).toString().replace('.',',');
-      return '<td style="padding:2px"><input value="'+String(disp).replace(/"/g,'&quot;')+'" data-ri="'+ri+'" data-key="'+c.key+'" onchange="_npdCellEdit(this)" onpaste="_npdCellPaste(event,this)" style="width:100%;box-sizing:border-box;font-size:11px;padding:3px 5px;border:1px solid transparent;background:transparent;text-align:'+(c.num?'right':'left')+'" onfocus="this.style.border=\'1px solid var(--border2)\';this.style.background=\'var(--bg3)\'" onblur="this.style.border=\'1px solid transparent\';this.style.background=\'transparent\'"></td>';
+      var fattr = c.num ? '' : (' data-col="'+c.key+'" data-val="'+String(v).toLowerCase().replace(/"/g,'&quot;')+'" data-disp="'+String(v).replace(/"/g,'&quot;')+'"');
+      return '<td style="padding:2px"'+fattr+'><input value="'+String(disp).replace(/"/g,'&quot;')+'" data-ri="'+ri+'" data-key="'+c.key+'" onchange="_npdCellEdit(this)" onpaste="_npdCellPaste(event,this)" style="width:100%;box-sizing:border-box;font-size:11px;padding:3px 5px;border:1px solid transparent;background:transparent;text-align:'+(c.num?'right':'left')+'" onfocus="this.style.border=\'1px solid var(--border2)\';this.style.background=\'var(--bg3)\'" onblur="this.style.border=\'1px solid transparent\';this.style.background=\'transparent\'"></td>';
     }).join('');
     var kg = _npdMatReq(r, fm.plan, fm.netto);
     cells += '<td style="padding:3px 8px;text-align:right;font-family:var(--mono);font-size:11px;font-weight:600;color:var(--teal);background:var(--bg4)">'+(kg>0?n_id(Math.round(kg*100)/100):'—')+'</td>';
@@ -4807,8 +4806,8 @@ function _npdRenderGrid(el) {
   if(analysis){
     var _tdN=function(v,clr,bold){ return '<td style="padding:4px 8px;text-align:right;font-family:var(--mono);font-size:10.5px;color:'+(clr||'var(--text)')+';'+(bold?'font-weight:700':'')+';white-space:nowrap">'+(v===0?'—':n_id(Math.round(v*100)/100))+'</td>'; };
     var _tdPR=function(v){ return '<td style="padding:4px 8px;text-align:right;font-family:var(--mono);font-size:10.5px;color:var(--amber);font-weight:700;white-space:nowrap;background:var(--amber-bg)">'+(v===0?'—':n_id(Math.round(v*100)/100))+'</td>'; };
-    var pHead = '<th style="padding:6px 8px;text-align:left;font-size:9.5px;text-transform:uppercase;color:var(--muted);border-bottom:2px solid var(--border2);white-space:nowrap;width:120px">Kode</th>'
-      + '<th style="padding:6px 8px;text-align:left;font-size:9.5px;text-transform:uppercase;color:var(--muted);border-bottom:2px solid var(--border2)">Nama</th>'
+    var pHead = '<th style="padding:6px 8px;text-align:left;font-size:9.5px;text-transform:uppercase;color:var(--muted);border-bottom:2px solid var(--border2);white-space:nowrap;width:120px">Kode <span class="npd-colbtn" data-k="code" onclick="_npdColMenu(\'code\',\'Kode\',this);event.stopPropagation()" title="Filter kolom" style="cursor:pointer;font-size:9px;color:var(--muted);user-select:none">▽</span></th>'
+      + '<th style="padding:6px 8px;text-align:left;font-size:9.5px;text-transform:uppercase;color:var(--muted);border-bottom:2px solid var(--border2)">Nama <span class="npd-colbtn" data-k="name" onclick="_npdColMenu(\'name\',\'Nama\',this);event.stopPropagation()" title="Filter kolom" style="cursor:pointer;font-size:9px;color:var(--muted);user-select:none">▽</span></th>'
       + '<th style="padding:6px 8px;text-align:right;font-size:9.5px;text-transform:uppercase;color:var(--muted);border-bottom:2px solid var(--border2)">%</th>'
       + '<th style="padding:6px 8px;text-align:right;font-size:10px;text-transform:uppercase;color:var(--teal);border-bottom:2px solid var(--border2);background:var(--bg4);min-width:80px">Mat req<br>(KG)</th>'
       + _thA('MOQ')+_thA('Mult')+_thA('LT')+_thA('Stock')+_thA('PO')+_thA('PR')
@@ -4823,11 +4822,12 @@ function _npdRenderGrid(el) {
     var pBody=groups.map(function(g){
       var isW=_npdIsWater(g.code);
       var pctDisp=g.pct? ((Math.round(g.pct*100*10000)/10000).toString().replace('.',',')+'%') : '—';
-      var idc = '<td style="padding:4px 8px;font-family:var(--mono);font-size:11px;white-space:nowrap">'+g.rawCode
+      var _pnm=(_npdDisplayName(g.code,g)||'');
+      var idc = '<td data-col="code" data-val="'+String(g.code).toLowerCase().replace(/"/g,'&quot;')+'" data-disp="'+String(g.rawCode).replace(/"/g,'&quot;')+'" style="padding:4px 8px;font-family:var(--mono);font-size:11px;white-space:nowrap">'+g.rawCode
         + (g.count>1?' <span title="Muncul '+g.count+'× di formula ini — digabung" style="font-size:8px;background:var(--purple);color:#fff;padding:1px 4px;border-radius:3px;font-family:var(--font)">×'+g.count+'</span>':'')
         + (isW?' <span style="color:#888;font-size:8px">[AIR]</span>':'')
         + (g.isNew?' <b style="color:var(--red);font-size:8px">NEW</b>':'') + '</td>'
-        + '<td style="padding:4px 8px;font-size:11px;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)">'+(_npdDisplayName(g.code,g)||'').slice(0,42)+'</td>'
+        + '<td data-col="name" data-val="'+_pnm.toLowerCase().replace(/"/g,'&quot;')+'" data-disp="'+_pnm.replace(/"/g,'&quot;')+'" style="padding:4px 8px;font-size:11px;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)">'+_pnm.slice(0,42)+'</td>'
         + '<td style="padding:4px 8px;text-align:right;font-family:var(--mono);font-size:10.5px;color:var(--muted)">'+pctDisp+'</td>'
         + '<td style="padding:4px 8px;text-align:right;font-family:var(--mono);font-size:11px;font-weight:600;color:var(--teal);background:var(--bg4)">'+(g.kg>0?n_id(Math.round(g.kg*100)/100):'—')+'</td>';
       var anc;
@@ -4905,14 +4905,73 @@ function _npdRenderGrid(el) {
 }
 // Filter baris grid NPD berdasarkan kode/nama (tanpa re-render)
 window._npdGridQ = window._npdGridQ || '';
+window._npdColF = window._npdColF || {};   // { colKey: [nilai terpilih...] }
 function _npdGridApplyFilter(){
   var q=String(window._npdGridQ||'').toLowerCase().trim();
   var host=document.getElementById('npd-table'); if(!host) return;
+  var colF=window._npdColF||{}; var fkeys=Object.keys(colF);
   var rows=host.querySelectorAll('tbody tr');
   Array.prototype.forEach.call(rows, function(tr){
-    var s=(tr.getAttribute('data-search')||'');
-    tr.style.display = (!q || s.indexOf(q)>=0) ? '' : 'none';
+    var show = !q || (tr.getAttribute('data-search')||'').indexOf(q)>=0;
+    if(show){
+      for(var i=0;i<fkeys.length;i++){
+        var k=fkeys[i], td=tr.querySelector('td[data-col="'+k+'"]');
+        if(!td) continue; // kolom tak ada di mode ini → abaikan filter
+        if(colF[k].indexOf(td.getAttribute('data-val')||'')<0){ show=false; break; }
+      }
+    }
+    tr.style.display = show ? '' : 'none';
   });
+  _npdUpdateColBtns();
+}
+function _npdUpdateColBtns(){
+  var colF=window._npdColF||{};
+  Array.prototype.forEach.call(document.querySelectorAll('.npd-colbtn'), function(b){
+    var k=b.getAttribute('data-k'); var on=!!colF[k];
+    b.textContent = on ? '▼' : '▽';
+    b.style.color = on ? 'var(--teal)' : 'var(--muted)';
+    b.style.fontWeight = on ? '700' : '400';
+  });
+}
+// Popup filter 1 kolom — kumpulkan nilai distinct dari DOM
+function _npdColMenu(key, label, btn){
+  var ex=document.getElementById('npd-col-pop'); if(ex){ ex.remove(); document.removeEventListener('mousedown',_npdColOutside); if(ex.getAttribute('data-k')===key) return; }
+  var host=document.getElementById('npd-table'); if(!host) return;
+  var cells=host.querySelectorAll('td[data-col="'+key+'"]');
+  var vals={};
+  Array.prototype.forEach.call(cells, function(td){ var v=td.getAttribute('data-val')||''; if(!(v in vals)) vals[v]=td.getAttribute('data-disp')||v; });
+  var keys=Object.keys(vals).sort();
+  var sel=window._npdColF[key];
+  var listHtml=keys.map(function(v){
+    var checked=(!sel || sel.indexOf(v)>=0);
+    var disp=vals[v]; if(disp==null||disp==='') disp='(kosong)';
+    return '<label style="display:flex;align-items:center;gap:6px;font-size:11px;padding:2px 1px;cursor:pointer"><input type="checkbox" data-v="'+String(v).replace(/"/g,'&quot;')+'" '+(checked?'checked':'')+' onchange="_npdColTick(\''+String(key).replace(/'/g,"\\'")+'\')"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+String(disp).slice(0,30)+'</span></label>';
+  }).join('');
+  var pop=document.createElement('div'); pop.id='npd-col-pop'; pop.setAttribute('data-k',key);
+  pop.style.cssText='position:fixed;z-index:1200;background:var(--bg2);border:1px solid var(--border2);border-radius:8px;box-shadow:0 8px 30px rgba(0,0,0,.3);padding:9px;width:230px;max-height:340px;display:flex;flex-direction:column';
+  pop.innerHTML='<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);margin-bottom:6px">Filter '+label+'</div>'
+    +'<input type="text" placeholder="Cari nilai…" oninput="_npdColSearchList(this.value)" style="width:100%;font-size:11px;padding:4px 6px;margin-bottom:6px;border:1px solid var(--border2);border-radius:4px;background:var(--bg3);color:var(--text);box-sizing:border-box">'
+    +'<div style="display:flex;gap:6px;margin-bottom:6px"><button onclick="_npdColAll(\''+key+'\',true)" style="flex:1;font-size:10px;padding:3px;border:1px solid var(--border2);border-radius:4px;background:var(--bg3);color:var(--text);cursor:pointer">Semua</button><button onclick="_npdColAll(\''+key+'\',false)" style="flex:1;font-size:10px;padding:3px;border:1px solid var(--border2);border-radius:4px;background:var(--bg3);color:var(--text);cursor:pointer">Kosongkan</button></div>'
+    +'<div id="npd-col-list" style="overflow:auto;flex:1">'+listHtml+'</div>';
+  document.body.appendChild(pop);
+  var r=btn.getBoundingClientRect();
+  pop.style.left=Math.max(6, Math.min(r.left, window.innerWidth-238))+'px';
+  pop.style.top=Math.min(r.bottom+4, window.innerHeight-350)+'px';
+  setTimeout(function(){ document.addEventListener('mousedown', _npdColOutside); }, 0);
+}
+function _npdColOutside(e){ var pop=document.getElementById('npd-col-pop'); if(pop && !pop.contains(e.target) && !(e.target.classList && e.target.classList.contains('npd-colbtn'))){ pop.remove(); document.removeEventListener('mousedown',_npdColOutside); } }
+function _npdColSearchList(q){ q=(q||'').toLowerCase(); var list=document.getElementById('npd-col-list'); if(!list)return; Array.prototype.forEach.call(list.querySelectorAll('label'), function(l){ l.style.display=l.textContent.toLowerCase().indexOf(q)>=0?'':'none'; }); }
+function _npdColTick(key){
+  var list=document.getElementById('npd-col-list'); if(!list)return;
+  var boxes=list.querySelectorAll('input[type=checkbox]');
+  var sel=[]; Array.prototype.forEach.call(boxes, function(cb){ if(cb.checked) sel.push(cb.getAttribute('data-v')); });
+  if(sel.length>=boxes.length) delete window._npdColF[key]; else window._npdColF[key]=sel;
+  _npdGridApplyFilter();
+}
+function _npdColAll(key,on){
+  var list=document.getElementById('npd-col-list'); if(!list)return;
+  Array.prototype.forEach.call(list.querySelectorAll('label'), function(l){ if(l.style.display!=='none'){ var cb=l.querySelector('input'); if(cb) cb.checked=on; } });
+  _npdColTick(key);
 }
 
 // ── Aksi FG ──
@@ -13464,6 +13523,7 @@ function _fcValArr(arr, code) {
 
 function renderForecast(isGenerate) {
   var isRealtime = true;
+  if(typeof _fcTypeUpdateBtn==='function') _fcTypeUpdateBtn();
   var _fcNpdCb = document.getElementById('f-fc-npd'); if(_fcNpdCb) _fcNpdCb.checked = !!window._inclNPD;
   // Build supplier cache untuk DOI2
   _fcSupplierByItemCache = _buildSupplierByItem();
@@ -13510,9 +13570,7 @@ function renderForecast(isGenerate) {
   var allItems = Object.keys(STATE.masterData).filter(function(code) {
     var iType = /^1/.test(code)?'FG':(/^2/.test(code)?'WIP':(/^3/.test(code)?'RM':(/^4/.test(code)?'PM':'OTHER')));
     if(iType==='OTHER') return false;
-    // FG/WIP hanya muncul kalau dipilih eksplisit (fType FG/WIP), else default RM/PM saja
-    if(!fType) { if(iType==='FG'||iType==='WIP') return false; }
-    else if(iType!==fType) return false;
+    if(!_fcTypeMatch(iType)) return false; // multi-select tipe item
     if(fABC && (STATE.masterData[code].abc||'') !== fABC) return false;
     if(isMultiCodeSearch) {
       if(!srchCodeSet[code.toLowerCase()]) return false;
@@ -14001,20 +14059,48 @@ var _GRAFIK_ROWS = [
   {key:'doi',         label:'DOI (hari)',  color:'#ef4444', get:function(fc){ return fc.doiFc || fc.doi; }, isDOI:true}
 ];
 
-// GRPO qty per bulan absolut (YYYY-MM), difilter supplier/item/rmpm opsional.
+// ── Filter Tipe Item (multi-select): RM/PM/FG/WIP ──
+window._fcTypeSel = (function(){ try{ var s=JSON.parse(localStorage.getItem('fc_type_sel')||'null'); return (s&&s.length)?s:['RM','PM']; }catch(e){ return ['RM','PM']; } })();
+function _fcCodeType(code){ return /^1/.test(code)?'FG':(/^2/.test(code)?'WIP':(/^3/.test(code)?'RM':(/^4/.test(code)?'PM':'OTHER'))); }
+function _fcTypeMatch(t){ var s=window._fcTypeSel||['RM','PM']; return s.indexOf(t)>=0; }
+function _fcCodeMatch(code){ var t=_fcCodeType(code); return t!=='OTHER' && _fcTypeMatch(t); }
+function _fcTypeLabel(){ var s=window._fcTypeSel||[]; if(s.length>=4) return 'Semua tipe'; if(!s.length) return '(pilih tipe)'; return ['RM','PM','FG','WIP'].filter(function(t){return s.indexOf(t)>=0;}).join(' + '); }
+function _fcTypeUpdateBtn(){ var b=document.getElementById('f-fc-type-btn'); if(b) b.textContent=_fcTypeLabel()+' ▾'; }
+function _fcTypeSave(){ try{ localStorage.setItem('fc_type_sel', JSON.stringify(window._fcTypeSel||[])); }catch(e){} }
+function _fcTypeMenu(btn){
+  var ex=document.getElementById('fc-type-pop'); if(ex){ ex.remove(); document.removeEventListener('mousedown',_fcTypeOutside); return; }
+  var order=[['RM','RM (3xxx)'],['PM','PM (4xxx)'],['FG','FG (1xxx)'],['WIP','WIP (2xxx)']];
+  var sel=window._fcTypeSel||[]; var allOn=sel.length>=4;
+  var rows=order.map(function(o){ var on=sel.indexOf(o[0])>=0; return '<label style="display:flex;align-items:center;gap:7px;font-size:12px;padding:4px 2px;cursor:pointer"><input type="checkbox" data-t="'+o[0]+'" '+(on?'checked':'')+' onchange="_fcTypeToggle(\''+o[0]+'\',this.checked)"> '+o[1]+'</label>'; }).join('');
+  var pop=document.createElement('div'); pop.id='fc-type-pop';
+  pop.style.cssText='position:fixed;z-index:1200;background:var(--bg2);border:1px solid var(--border2);border-radius:8px;box-shadow:0 8px 30px rgba(0,0,0,.3);padding:9px;width:190px';
+  pop.innerHTML='<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);margin-bottom:5px">Tipe Item</div>'
+    +'<label style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:700;padding:4px 2px;cursor:pointer;border-bottom:1px solid var(--border);margin-bottom:3px"><input type="checkbox" id="fc-type-all" '+(allOn?'checked':'')+' onchange="_fcTypeAll(this.checked)"> Semua (RM+PM+FG+WIP)</label>'
+    +rows;
+  document.body.appendChild(pop);
+  var r=btn.getBoundingClientRect();
+  pop.style.left=Math.max(6,Math.min(r.left,window.innerWidth-198))+'px';
+  pop.style.top=(r.bottom+4)+'px';
+  setTimeout(function(){ document.addEventListener('mousedown',_fcTypeOutside); },0);
+}
+function _fcTypeOutside(e){ var pop=document.getElementById('fc-type-pop'); var btn=document.getElementById('f-fc-type-btn'); if(pop && !pop.contains(e.target) && e.target!==btn){ pop.remove(); document.removeEventListener('mousedown',_fcTypeOutside); } }
+function _fcTypeToggle(t,on){ var s=(window._fcTypeSel||[]).slice(); var i=s.indexOf(t); if(on&&i<0)s.push(t); else if(!on&&i>=0)s.splice(i,1); window._fcTypeSel=s; _fcTypeSave(); var allc=document.getElementById('fc-type-all'); if(allc) allc.checked=(s.length>=4); _fcTypeUpdateBtn(); renderForecast(); }
+function _fcTypeAll(on){ window._fcTypeSel = on?['RM','PM','FG','WIP']:[]; _fcTypeSave(); var pop=document.getElementById('fc-type-pop'); if(pop) Array.prototype.forEach.call(pop.querySelectorAll('input[data-t]'),function(cb){cb.checked=on;}); _fcTypeUpdateBtn(); renderForecast(); }
+
+// GRPO qty per bulan absolut (YYYY-MM), difilter supplier/item + tipe item global.
 // Return { 'YYYY-MM': { qty, value } }.
 function _grafikGrpoByMonth(supplierFilter, itemFilter, rmpmFilter) {
   var out = {};
-  var src = (STATE.grpoHistori && STATE.grpoHistori.length) ? STATE.grpoHistori : (STATE.grpoData||[]);
+  // Histori (s/d bulan lalu) + grpoData (bulan berjalan) — digabung spt logika utama, dedupe biar tak dobel
+  var src = ((STATE.grpoHistori && STATE.grpoHistori.length) ? STATE.grpoHistori : []).concat(STATE.grpoData||[]);
+  var seen = {};
   src.forEach(function(g){
     if(!g.grpoDate || !g.itemCode) return;
     if(itemFilter && g.itemCode !== itemFilter) return;
     if(supplierFilter && (g.supplierName||'') !== supplierFilter) return;
-    if(rmpmFilter==='rm' && !/^3/.test(g.itemCode)) return;
-    else if(rmpmFilter==='pm' && !/^4/.test(g.itemCode)) return;
-    else if(rmpmFilter==='fg' && !/^1/.test(g.itemCode)) return;
-    else if(rmpmFilter==='wip' && !/^2/.test(g.itemCode)) return;
-    else if(!rmpmFilter && !/^[1234]/.test(g.itemCode)) return; // ALL = FG/WIP/RM/PM
+    if(!_fcCodeMatch(g.itemCode)) return; // ikut pilihan tipe item multi-select
+    var key=(g.grpoDocNum||'')+'|'+g.itemCode+'|'+g.grpoDate+'|'+g.qty;
+    if(seen[key]) return; seen[key]=1;
     var p = g.grpoDate.split('/'); if(p.length!==3) return;
     var ym = p[2]+'-'+String(p[1]).padStart(2,'0');
     var qty = parseFloat(g.qty)||0;
@@ -14353,11 +14439,7 @@ function _grafikBreakdownRows(ds, months, ctx) {
       if(ctx.pickedItem && String(g.itemCode)!==ctx.pickedItem) return;
       if(ctx.supplier && (g.supplierName||'')!==ctx.supplier) return;
       var ic=String(g.itemCode);
-      if(ctx.rmpm==='rm' && !/^3/.test(ic)) return;
-      else if(ctx.rmpm==='pm' && !/^4/.test(ic)) return;
-      else if(ctx.rmpm==='fg' && !/^1/.test(ic)) return;
-      else if(ctx.rmpm==='wip' && !/^2/.test(ic)) return;
-      else if(!ctx.rmpm && !/^[1234]/.test(ic)) return;
+      if(!_fcCodeMatch(ic)) return; // ikut pilihan tipe item multi-select
       _codeSet[ic]=1;
     });
     codesToScan = Object.keys(_codeSet);
@@ -15089,7 +15171,7 @@ function _fcApplyRekapFilters(rows) {
   var terms = srchRaw ? srchRaw.split(/[\s,]+/).filter(Boolean) : [];
 
   return rows.filter(function(r){
-    if(fType && r.iType !== fType) return false;
+    if(!_fcTypeMatch(r.iType)) return false;
     if(fAbc  && (r.abc||'') !== fAbc) return false;
     if(fStatus === 'overdue' && !r.isOverdue) return false;
     if(fStatus === 'urgent'  && !(r.isUrgent && !r.isOverdue)) return false;
