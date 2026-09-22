@@ -4419,26 +4419,26 @@ function _renderDashNpdOverview() {
       var a = _npdRmAnalysis(r.code, kg + otherKg, ex);          // shortfall dari total semua project + existing
       var aThis = _npdRmAnalysis(r.code, kg, ex);                // shortfall kalau HANYA project ini
       var shared  = otherKg>0;              // RM dipakai project NPD lain juga
-      // ── Perlu PR ──
-      var prMain  = exM>0 ? a.prBoth : a.prNpd;   // saran PR utama (NPD total + existing bila exM>0)
-      var prNpdOnly = a.prNpd;                    // saran PR NPD saja (tanpa existing), total project
-      var prThis  = exM>0 ? aThis.prBoth : aThis.prNpd; // saran PR project ini saja (skop existing sama dgn main)
+      // ── Perlu PR ── main = NPD(semua project) + existing; sub selalu basis NPD murni (tanpa existing)
+      var prMain    = exM>0 ? a.prBoth : a.prNpd; // saran PR utama (yg benar2 di-PR)
+      var prNpdAll  = a.prNpd;                    // PR utk NPD saja (semua project, tanpa existing)
+      var prNpdThis = aThis.prNpd;                // PR utk NPD project ini saja (tanpa existing)
       var shortMain = exM>0 ? a.shortBoth : a.shortNpd;
-      // ── Perlu Datang ──
-      var datang  = a.perluDatangNpd;       // perlu datang total (kebutuhan NPD semua project − stock)
-      var datangThis = aThis.perluDatangNpd; // perlu datang NPD project ini saja − stock
+      // ── Perlu Datang ── main = NPD(semua project) − stock; sub = NPD project ini − stock
+      var datang  = a.perluDatangNpd;
+      var datangThis = aThis.perluDatangNpd;
       var nm = _npdDisplayName(r.code, r);
       if(shortMain>0){
-        nPR++; totPR+=prMain; totPRnpd+=prNpdOnly;
+        nPR++; totPR+=prMain; totPRnpd+=prNpdAll;
         var subs=[];
-        if(exM>0 && Math.abs(prNpdOnly-prMain)>0.005) subs.push({label:'NPD saja', val:prNpdOnly});
-        if(shared && Math.abs(prThis-prMain)>0.005) subs.push({label:'NPD ini', val:prThis});
+        if(exM>0 && Math.abs(prNpdAll-prMain)>0.005) subs.push({label:'NPD saja', val:prNpdAll});
+        if(shared && Math.abs(prNpdThis-prNpdAll)>0.005) subs.push({label:'NPD project ini', val:prNpdThis});
         needPR.push({code:r.code,nm:nm,qty:prMain,subs:subs,isNew:r.isNew,stock:a.stock});
       }
       if(datang>0){
         nDatang++; totDatang+=datang; totDatangThis+=datangThis;
         var subsD=[];
-        if(shared && Math.abs(datangThis-datang)>0.005) subsD.push({label:'NPD ini', val:datangThis});
+        if(shared && Math.abs(datangThis-datang)>0.005) subsD.push({label:'NPD project ini', val:datangThis});
         needDatang.push({code:r.code,nm:nm,qty:datang,subs:subsD,isNew:r.isNew,stock:a.stock});
       }
     });
@@ -4488,7 +4488,10 @@ function _renderDashNpdOverview() {
       + '</div></div>';
   }).join('');
 
-  el.innerHTML = '<div style="font-size:10.5px;color:var(--muted);margin-bottom:8px">Perlu PR = kebutuhan − (Stock+PO+PR), butuh PR baru; kebutuhan = NPD'+(exM>0?' + existing '+exM+' bln':'')+'. Perlu Datang = <b>kebutuhan NPD saja</b> − Stock (belum ada fisiknya, termasuk sudah di-PO). Badge <span style="background:var(--red);color:#fff;font-size:8px;padding:1px 4px;border-radius:2px">STOK 0</span> = belum ada stok sama sekali, <span style="background:var(--amber-bg);color:var(--amber);font-size:8px;padding:1px 4px;border-radius:2px">KURANG</span> = sudah ada stok tapi belum cukup.</div>'
+  el.innerHTML = '<div style="font-size:10.5px;color:var(--muted);margin-bottom:8px;line-height:1.5">'
+    + '<b>Angka besar</b> = yang benar-benar perlu di-PR. Untuk <b>Perlu PR</b> = kebutuhan NPD (semua project) '+(exM>0?'+ existing '+exM+' bln ':'')+'− (Stock+PO+PR), dibulatkan ke MOQ. Untuk <b>Perlu Datang</b> = kebutuhan NPD (semua project) − Stock.<br>'
+    + 'Sub-angka (teal): <b style="color:var(--teal)">NPD saja</b> = kalau existing forecast diabaikan (murni NPD); <b style="color:var(--teal)">NPD project ini</b> = kalau hanya kebutuhan project ini (untuk RM yang dipakai beberapa project). Kedua sub selalu tanpa existing — kalau angka besarnya jauh lebih besar dari "NPD saja", berarti PR itu terdorong oleh existing, bukan NPD.<br>'
+    + 'Badge <span style="background:var(--red);color:#fff;font-size:8px;padding:1px 4px;border-radius:2px">STOK 0</span> = belum ada stok sama sekali · <span style="background:var(--amber-bg);color:var(--amber);font-size:8px;padding:1px 4px;border-radius:2px">KURANG</span> = ada stok tapi belum cukup.</div>'
     + '<div style="display:flex;flex-direction:column;gap:10px">'+cards+'</div>';
 }
 
