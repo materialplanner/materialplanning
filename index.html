@@ -500,7 +500,7 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
       <span style="font-size:12px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:flex;align-items:center;gap:6px">🆕 NPD Overview</span>
       <div style="display:flex;align-items:center;gap:8px">
-        <label style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:5px">Existing: <select id="dash-npd-exm" onchange="_renderDashNpdOverview()" style="font-size:11px;padding:3px 6px;border:1px solid var(--border2);border-radius:5px"><option value="0">Tanpa</option><option value="1">1 bln</option><option value="2">2 bln</option><option value="3" selected>3 bln</option><option value="6">6 bln</option></select></label>
+        <span style="font-size:10px;color:var(--muted)">kebutuhan NPD saja</span>
         <button class="btn btn-xs" onclick="showPage('npd',document.querySelector('.ni[data-label=&quot;NPD&quot;]'))" style="font-size:10.5px">Buka NPD →</button>
       </div>
     </div>
@@ -4396,8 +4396,6 @@ function _renderDashNpdOverview() {
   var el = document.getElementById('dash-npd-overview');
   if(!el) return;
   var data = _npdNormalize();
-  var exM = parseInt((document.getElementById('dash-npd-exm')||{value:'3'}).value);
-  if(isNaN(exM)) exM = 3;
   var fgs = (data.fgs||[]).filter(function(fg){ return !fg.inBom && (fg.formulas||[]).some(function(f){return f.active && (f.rows||[]).length;}); });
   if(!fgs.length){ el.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:8px 0">Belum ada project NPD aktif. Buka menu NPD untuk menambah.</div>'; return; }
   var fmt = function(v){ return n_id(Math.round(v*100)/100); };
@@ -4407,40 +4405,20 @@ function _renderDashNpdOverview() {
     if(!fm) return '';
     var prodI = (fm.prodMonthIdx!=null)?fm.prodMonthIdx:0;
     var prodM = (FC_MONTHS||[])[prodI]||''; var prodYr = typeof _fcYearForMonthIdx==='function'?_fcYearForMonthIdx(prodI):'';
-    var totKg=0, totPR=0, totPRnpd=0, totDatang=0, totDatangThis=0, nPR=0, nDatang=0, nNew=0;
+    var totKg=0, totPR=0, totDatang=0, nPR=0, nDatang=0, nNew=0;
     var needPR=[], needDatang=[];
     (fm.rows||[]).forEach(function(r){
       if(!r.code) return;
       if(_npdIsWater(r.code)) return; // RO Water = air, abaikan
       var kg=_npdMatReq(r,fm.plan,fm.netto); totKg+=kg;
       if(r.isNew) nNew++;
-      var ex = _existingReqByCode(r.code, exM);
       var otherKg = _npdOtherNpdForCode(r.code, fm.id).total;  // project NPD lain pakai RM sama
-      var a = _npdRmAnalysis(r.code, kg + otherKg, ex);          // shortfall dari total semua project + existing
-      var aThis = _npdRmAnalysis(r.code, kg, ex);                // shortfall kalau HANYA project ini
-      var shared  = otherKg>0;              // RM dipakai project NPD lain juga
-      // ── Perlu PR ── main = NPD(semua project) + existing; sub selalu basis NPD murni (tanpa existing)
-      var prMain    = exM>0 ? a.prBoth : a.prNpd; // saran PR utama (yg benar2 di-PR)
-      var prNpdAll  = a.prNpd;                    // PR utk NPD saja (semua project, tanpa existing)
-      var prNpdThis = aThis.prNpd;                // PR utk NPD project ini saja (tanpa existing)
-      var shortMain = exM>0 ? a.shortBoth : a.shortNpd;
-      // ── Perlu Datang ── main = NPD(semua project) − stock; sub = NPD project ini − stock
-      var datang  = a.perluDatangNpd;
-      var datangThis = aThis.perluDatangNpd;
+      var a = _npdRmAnalysis(r.code, kg + otherKg, 0);          // NPD SAJA (semua project), tanpa existing
+      var prNpd  = a.prNpd;             // saran PR utk kebutuhan NPD saja
+      var datang = a.perluDatangNpd;    // perlu datang = kebutuhan NPD − stock
       var nm = _npdDisplayName(r.code, r);
-      if(shortMain>0){
-        nPR++; totPR+=prMain; totPRnpd+=prNpdAll;
-        var subs=[];
-        if(exM>0 && Math.abs(prNpdAll-prMain)>0.005) subs.push({label:'NPD saja', val:prNpdAll});
-        if(shared && Math.abs(prNpdThis-prNpdAll)>0.005) subs.push({label:'NPD project ini', val:prNpdThis});
-        needPR.push({code:r.code,nm:nm,qty:prMain,subs:subs,isNew:r.isNew,stock:a.stock});
-      }
-      if(datang>0){
-        nDatang++; totDatang+=datang; totDatangThis+=datangThis;
-        var subsD=[];
-        if(shared && Math.abs(datangThis-datang)>0.005) subsD.push({label:'NPD project ini', val:datangThis});
-        needDatang.push({code:r.code,nm:nm,qty:datang,subs:subsD,isNew:r.isNew,stock:a.stock});
-      }
+      if(a.shortNpd>0){ nPR++; totPR+=prNpd; needPR.push({code:r.code,nm:nm,qty:prNpd,isNew:r.isNew,stock:a.stock}); }
+      if(datang>0){ nDatang++; totDatang+=datang; needDatang.push({code:r.code,nm:nm,qty:datang,isNew:r.isNew,stock:a.stock}); }
     });
     needPR.sort(function(x,y){return y.qty-x.qty;});
     // Perlu Datang: urutkan yg stok 0 dulu (paling kritis), lalu qty terbesar
@@ -4458,9 +4436,7 @@ function _renderDashNpdOverview() {
             ? ' <span style="background:var(--red);color:#fff;font-size:7.5px;padding:1px 4px;border-radius:2px;font-weight:700" title="Stok 0 — belum ada fisiknya">STOK 0</span>'
             : ' <span style="background:var(--amber-bg);color:var(--amber);font-size:7.5px;padding:1px 4px;border-radius:2px;font-weight:600" title="Stok '+fmt(st)+' KG, tapi masih kurang">KURANG</span>';
         }
-        var right = '<span style="font-family:var(--mono);font-weight:600">'+fmt(it.qty)+'</span>';
-        (it.subs||[]).forEach(function(s){ right += '<br><span style="font-size:8px;color:var(--teal);font-weight:600" title="Kurang '+s.label+'">'+s.label+': '+fmt(s.val)+'</span>'; });
-        return '<div style="font-size:10.5px;display:flex;justify-content:space-between;gap:8px;padding:2px 0;align-items:flex-start"><span style="color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:210px">'+(it.isNew?'<b style="color:var(--red);font-size:8px">NEW </b>':'')+it.code+' <span style="color:var(--muted)">'+(it.nm||'').slice(0,20)+'</span>'+badge+'</span><span style="white-space:nowrap;text-align:right;line-height:1.25">'+right+'</span></div>';
+        return '<div style="font-size:10.5px;display:flex;justify-content:space-between;gap:8px;padding:2px 0;align-items:center"><span style="color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:210px">'+(it.isNew?'<b style="color:var(--red);font-size:8px">NEW </b>':'')+it.code+' <span style="color:var(--muted)">'+(it.nm||'').slice(0,20)+'</span>'+badge+'</span><span style="font-family:var(--mono);font-weight:600;white-space:nowrap">'+fmt(it.qty)+'</span></div>';
       };
       var head = arr.slice(0,4).map(rowHtml).join('');
       if(arr.length<=4) return head;
@@ -4477,11 +4453,11 @@ function _renderDashNpdOverview() {
       + '</div>'
       + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">'
       +   '<div style="border-left:3px solid var(--amber);padding-left:8px">'
-      +     '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--amber);font-weight:700;margin-bottom:3px">⚠ Perlu PR ('+nPR+' RM · '+fmt(totPR)+' KG'+(exM>0 && Math.abs(totPR-totPRnpd)>0.005?' <span style="color:var(--teal)">· NPD saja '+fmt(totPRnpd)+'</span>':'')+')</div>'
+      +     '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--amber);font-weight:700;margin-bottom:3px">⚠ Perlu PR ('+nPR+' RM · '+fmt(totPR)+' KG)</div>'
       +     mini(needPR, fg.id+'-pr', false)
       +   '</div>'
       +   '<div style="border-left:3px solid var(--red);padding-left:8px">'
-      +     '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--red);font-weight:700;margin-bottom:2px">📥 Perlu Datang ('+nDatang+' RM · '+fmt(totDatang)+' KG'+(Math.abs(totDatang-totDatangThis)>0.005?' <span style="color:var(--teal)">· NPD ini '+fmt(totDatangThis)+'</span>':'')+')</div>'
+      +     '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--red);font-weight:700;margin-bottom:2px">📥 Perlu Datang ('+nDatang+' RM · '+fmt(totDatang)+' KG)</div>'
       +     (nDatang ? '<div style="font-size:9px;margin-bottom:3px"><span style="color:var(--red);font-weight:700">🔴 '+nDZero+' stok 0</span>'+(nDNewZero?' <span style="color:var(--red)">('+nDNewZero+' RM baru)</span>':'')+' <span style="color:var(--muted)">·</span> <span style="color:var(--amber);font-weight:700">🟠 '+nDHas+' ada stok, kurang</span></div>' : '')
       +     mini(needDatang, fg.id+'-dt', true)
       +   '</div>'
@@ -4489,9 +4465,9 @@ function _renderDashNpdOverview() {
   }).join('');
 
   el.innerHTML = '<div style="font-size:10.5px;color:var(--muted);margin-bottom:8px;line-height:1.5">'
-    + '<b>Angka besar</b> = yang benar-benar perlu di-PR. Untuk <b>Perlu PR</b> = kebutuhan NPD (semua project) '+(exM>0?'+ existing '+exM+' bln ':'')+'− (Stock+PO+PR), dibulatkan ke MOQ. Untuk <b>Perlu Datang</b> = kebutuhan NPD (semua project) − Stock.<br>'
-    + 'Sub-angka (teal): <b style="color:var(--teal)">NPD saja</b> = kalau existing forecast diabaikan (murni NPD); <b style="color:var(--teal)">NPD project ini</b> = kalau hanya kebutuhan project ini (untuk RM yang dipakai beberapa project). Kedua sub selalu tanpa existing — kalau angka besarnya jauh lebih besar dari "NPD saja", berarti PR itu terdorong oleh existing, bukan NPD.<br>'
-    + 'Badge <span style="background:var(--red);color:#fff;font-size:8px;padding:1px 4px;border-radius:2px">STOK 0</span> = belum ada stok sama sekali · <span style="background:var(--amber-bg);color:var(--amber);font-size:8px;padding:1px 4px;border-radius:2px">KURANG</span> = ada stok tapi belum cukup.</div>'
+    + 'Semua angka = <b>kebutuhan NPD saja</b> (tanpa existing forecast). <b>Perlu PR</b> = kebutuhan NPD − (Stock+PO+PR), dibulatkan ke MOQ. <b>Perlu Datang</b> = kebutuhan NPD − Stock. '
+    + 'Untuk RM yang dipakai beberapa project NPD, kebutuhannya sudah digabung. '
+    + 'Badge <span style="background:var(--red);color:#fff;font-size:8px;padding:1px 4px;border-radius:2px">STOK 0</span> = belum ada stok · <span style="background:var(--amber-bg);color:var(--amber);font-size:8px;padding:1px 4px;border-radius:2px">KURANG</span> = ada stok tapi belum cukup.</div>'
     + '<div style="display:flex;flex-direction:column;gap:10px">'+cards+'</div>';
 }
 
