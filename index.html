@@ -3113,6 +3113,8 @@ function _setRMDisplay(mode) {
     renderSchedule();
   }
   if(STATE.poData && STATE.poData.length) renderPO();
+  try { if(typeof _npdRender==='function' && document.getElementById('npd-table')) _npdRender(); } catch(e){}
+  try { if(typeof _renderDashNpdOverview==='function') _renderDashNpdOverview(); } catch(e){}
   toast('Tampilan RM: ' + (mode === 'realname' ? 'Real Name' : 'Deskripsi SAP'), 'ok');
 }
 
@@ -4318,6 +4320,15 @@ function _npdFillRowFromMaster(row){
 }
 function _npdFillAllFromMaster(fm){ if(fm && fm.rows) fm.rows.forEach(_npdFillRowFromMaster); }
 
+// Nama tampilan RM sesuai Setting "Tampilan Nama RM" (_rmDisplayMode). Real Name hanya utk admin login.
+function _npdDisplayName(code, row){
+  var c=_npdNormCode(code);
+  var real = (STATE.realNameData||{})[c] || (row&&row.realName) || '';
+  var sap  = ((STATE.masterData||{})[c]||{}).desc || (row&&row.sapName) || '';
+  var useReal = (typeof _isAdmin!=='undefined' && _isAdmin) && (typeof _rmDisplayMode!=='undefined' && _rmDisplayMode==='realname');
+  return useReal ? (real||sap||'') : (sap||real||'');
+}
+
 // Total kebutuhan EXISTING per RM (dari forecast/MRP reguler yg sedang tampil).
 // nMonths: batasi ke X bulan pertama (chronological FC_MONTHS). Kosong/0 = semua bulan.
 // Bulan berjalan (i=0) dikurangi matcom — SAMA dengan Requirement yang tampil di Forecast.
@@ -4408,8 +4419,8 @@ function _renderDashNpdOverview() {
       var a = _npdRmAnalysis(r.code, kg + otherKg, ex);          // shortfall dari total semua project + existing
       var shortPR = exM>0 ? a.shortBoth : a.shortNpd;   // kurang (butuh PR baru)
       var prSug   = exM>0 ? a.prBoth : a.prNpd;
-      var datang  = exM>0 ? a.perluDatangBoth : a.perluDatangNpd; // perlu datang (vs stock)
-      var nm = (STATE.masterData||{})[_npdNormCode(r.code)] ? ((STATE.masterData[_npdNormCode(r.code)].desc)||'') : (r.realName||r.sapName||'');
+      var datang  = a.perluDatangNpd; // perlu datang = kebutuhan NPD saja − stock (tanpa existing)
+      var nm = _npdDisplayName(r.code, r);
       if(shortPR>0){ nPR++; totPR+=prSug; needPR.push({code:r.code,nm:nm,qty:prSug,isNew:r.isNew}); }
       if(datang>0){ nDatang++; totDatang+=datang; needDatang.push({code:r.code,nm:nm,qty:datang,isNew:r.isNew}); }
     });
@@ -4438,7 +4449,7 @@ function _renderDashNpdOverview() {
       + '</div></div>';
   }).join('');
 
-  el.innerHTML = '<div style="font-size:10.5px;color:var(--muted);margin-bottom:8px">Perlu PR = kebutuhan − (Stock+PO+PR), butuh PR baru. Perlu Datang = kebutuhan − Stock, yang belum ada fisiknya (termasuk sudah di-PO). Kebutuhan = NPD'+(exM>0?' + existing '+exM+' bln':'')+'.</div>'
+  el.innerHTML = '<div style="font-size:10.5px;color:var(--muted);margin-bottom:8px">Perlu PR = kebutuhan − (Stock+PO+PR), butuh PR baru; kebutuhan = NPD'+(exM>0?' + existing '+exM+' bln':'')+'. Perlu Datang = <b>kebutuhan NPD saja</b> − Stock (belum ada fisiknya, termasuk sudah di-PO).</div>'
     + '<div style="display:flex;flex-direction:column;gap:10px">'+cards+'</div>';
 }
 
@@ -4446,7 +4457,7 @@ function _renderDashNpdOverview() {
 function _npdShowDetail(code) {
   var c = _npdNormCode(code);
   var m = (STATE.masterData||{})[c]||{};
-  var nm = m.desc || '';
+  var nm = _npdDisplayName(c) || m.desc || '';
   var fmt = function(v){ return (v===0||v==null)?'—':n_id(Math.round(v*100)/100); };
 
   // Existing per bulan (dari mrpData.months, bulan berjalan dikurangi matcom)
@@ -4576,6 +4587,23 @@ function _npdOtherNpdForCode(code, excludeFmId) {
   var list = _npdDetailByCode(code).filter(function(d){ return d.fmId !== excludeFmId; });
   var total = list.reduce(function(s,d){ return s+d.kg; }, 0);
   return { total: total, list: list };
+}
+// Pivot 1 formula → gabung baris berkode SAMA (satu RM bisa muncul 2x di formula). Sum %, sum mat req.
+function _npdPivotFormula(fm) {
+  var map={}, order=[];
+  (fm.rows||[]).forEach(function(r){
+    var c=_npdNormCode(r.code); if(!c) return;
+    if(!map[c]){ map[c]={code:c, rawCode:r.code, sapName:r.sapName||'', realName:r.realName||'', uom:r.uom||'', pct:0, kg:0, isNew:false, count:0}; order.push(c); }
+    var g=map[c];
+    g.pct += (parseFloat(r.pct)||0);
+    g.kg  += _npdMatReq(r, fm.plan, fm.netto);
+    if(r.isNew) g.isNew=true;
+    if(!g.sapName && r.sapName) g.sapName=r.sapName;
+    if(!g.realName && r.realName) g.realName=r.realName;
+    if(!g.uom && r.uom) g.uom=r.uom;
+    g.count++;
+  });
+  return order.map(function(c){ return map[c]; });
 }
 
 // ── Navigasi state (FG mana yg dibuka, formula mana) ──
@@ -4742,6 +4770,69 @@ function _npdRenderGrid(el) {
   // Netto formula (gram/pcs) — 1 angka per formula (seperti Plan). Migrasi data lama: ambil netto baris pertama bila fm.netto kosong.
   var _fmNetto = (fm.netto!=null && fm.netto!=='') ? fm.netto : (function(){ var rn=(fm.rows||[]).map(function(x){return parseFloat(x.netto)||0;}).filter(function(x){return x>0;}); return rn.length?rn[0]:''; })();
 
+  // ── Tabel edit (mode normal) ──
+  var editTable = '<div style="overflow-x:auto;border:1px solid var(--border2);border-radius:var(--r)"><table style="width:100%;border-collapse:collapse"><thead><tr style="background:var(--bg3)">'+thCols+'</tr></thead><tbody>'+gridRows+'</tbody></table></div>';
+
+  // ── Tabel pivot (mode analisa) — gabung baris berkode sama ──
+  var pivotTable = '';
+  if(analysis){
+    var _tdN=function(v,clr,bold){ return '<td style="padding:4px 8px;text-align:right;font-family:var(--mono);font-size:10.5px;color:'+(clr||'var(--text)')+';'+(bold?'font-weight:700':'')+';white-space:nowrap">'+(v===0?'—':n_id(Math.round(v*100)/100))+'</td>'; };
+    var _tdPR=function(v){ return '<td style="padding:4px 8px;text-align:right;font-family:var(--mono);font-size:10.5px;color:var(--amber);font-weight:700;white-space:nowrap;background:var(--amber-bg)">'+(v===0?'—':n_id(Math.round(v*100)/100))+'</td>'; };
+    var pHead = '<th style="padding:6px 8px;text-align:left;font-size:9.5px;text-transform:uppercase;color:var(--muted);border-bottom:2px solid var(--border2);white-space:nowrap;width:120px">Kode</th>'
+      + '<th style="padding:6px 8px;text-align:left;font-size:9.5px;text-transform:uppercase;color:var(--muted);border-bottom:2px solid var(--border2)">Nama</th>'
+      + '<th style="padding:6px 8px;text-align:right;font-size:9.5px;text-transform:uppercase;color:var(--muted);border-bottom:2px solid var(--border2)">%</th>'
+      + '<th style="padding:6px 8px;text-align:right;font-size:10px;text-transform:uppercase;color:var(--teal);border-bottom:2px solid var(--border2);background:var(--bg4);min-width:80px">Mat req<br>(KG)</th>'
+      + _thA('MOQ')+_thA('Mult')+_thA('LT')+_thA('Stock')+_thA('PO')+_thA('PR')
+      + _thA('NPD<br>Lain','var(--purple)')+_thA('Total<br>NPD','var(--teal)')
+      + _thA('Perlu Datang<br>NPD','var(--red)')
+      + _thA('Kurang<br>NPD','var(--amber)')+_thPR('PR<br>NPD')
+      + (exM>0 ? _thA('Exist<br>'+exM+'bln','var(--muted)')+_thA('Perlu Datang<br>+Exist','var(--red)')+_thA('Kurang<br>+Exist','var(--accent)')+_thPR('PR<br>+Exist') : '')
+      + '<th style="border-bottom:2px solid var(--border2)"></th>';
+    var groups=_npdPivotFormula(fm);
+    var _sMat=0,_sDN=0,_sPN=0,_sDB=0,_sPB=0;
+    var pBody=groups.map(function(g){
+      var isW=_npdIsWater(g.code);
+      var pctDisp=g.pct? ((Math.round(g.pct*100*10000)/10000).toString().replace('.',',')+'%') : '—';
+      var idc = '<td style="padding:4px 8px;font-family:var(--mono);font-size:11px;white-space:nowrap">'+g.rawCode
+        + (g.count>1?' <span title="Muncul '+g.count+'× di formula ini — digabung" style="font-size:8px;background:var(--purple);color:#fff;padding:1px 4px;border-radius:3px;font-family:var(--font)">×'+g.count+'</span>':'')
+        + (isW?' <span style="color:#888;font-size:8px">[AIR]</span>':'')
+        + (g.isNew?' <b style="color:var(--red);font-size:8px">NEW</b>':'') + '</td>'
+        + '<td style="padding:4px 8px;font-size:11px;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)">'+(_npdDisplayName(g.code,g)||'').slice(0,42)+'</td>'
+        + '<td style="padding:4px 8px;text-align:right;font-family:var(--mono);font-size:10.5px;color:var(--muted)">'+pctDisp+'</td>'
+        + '<td style="padding:4px 8px;text-align:right;font-family:var(--mono);font-size:11px;font-weight:600;color:var(--teal);background:var(--bg4)">'+(g.kg>0?n_id(Math.round(g.kg*100)/100):'—')+'</td>';
+      var anc;
+      if(!isW){
+        var ex=_existingReqByCode(g.code,exM);
+        var other=_npdOtherNpdForCode(g.code,fm.id);
+        var totalNpd=g.kg+other.total;
+        var a=_npdRmAnalysis(g.code,totalNpd,ex);
+        _sMat+=g.kg; _sDN+=a.perluDatangNpd; _sPN+=a.prNpd; _sDB+=a.perluDatangBoth; _sPB+=a.prBoth;
+        anc = _tdN(a.moq)+_tdN(a.mult)+'<td style="padding:4px 8px;text-align:right;font-family:var(--mono);font-size:10.5px;white-space:nowrap">'+(a.lt!==''&&a.lt!=null?a.lt+'d':'—')+'</td>'
+          + _tdN(a.stock)+_tdN(a.po,'var(--teal)')+_tdN(a.pr,'var(--accent)')
+          + _tdN(other.total,'var(--purple)',true)+_tdN(totalNpd,'var(--teal)',true)
+          + _tdN(a.perluDatangNpd,'var(--red)',true)
+          + _tdN(a.shortNpd,'var(--amber)')+_tdPR(a.prNpd)
+          + (exM>0 ? _tdN(ex,'var(--muted)')+_tdN(a.perluDatangBoth,'var(--red)',true)+_tdN(a.shortBoth,'var(--accent)')+_tdPR(a.prBoth) : '');
+      } else {
+        anc = '<td colspan="'+(exM>0?15:11)+'" style="background:var(--bg3)"></td>';
+      }
+      var det='<td style="padding:3px 4px;text-align:center"><button onclick="_npdShowDetail(\''+g.code+'\')" title="Detail Existing + NPD / project lain" style="background:none;border:none;cursor:pointer;color:var(--teal);font-size:12px">🔍</button></td>';
+      return '<tr style="border-bottom:1px solid var(--border)">'+idc+anc+det+'</tr>';
+    }).join('');
+    // Footer total
+    var _spanLeft = 3; // Kode+Nama+%
+    var pFoot = '<tr style="background:var(--bg4);border-top:2px solid var(--border2);font-weight:700">'
+      + '<td colspan="'+_spanLeft+'" style="padding:6px 8px;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em">Total ('+groups.length+' RM unik)</td>'
+      + '<td style="padding:6px 8px;text-align:right;font-family:var(--mono);font-size:11px;color:var(--teal)">'+n_id(Math.round(_sMat*100)/100)+'</td>'
+      + '<td colspan="6"></td>'
+      + '<td colspan="2"></td>'
+      + '<td style="padding:6px 8px;text-align:right;font-family:var(--mono);font-size:11px;color:var(--red)">'+(_sDN?n_id(Math.round(_sDN*100)/100):'—')+'</td>'
+      + '<td></td><td style="padding:6px 8px;text-align:right;font-family:var(--mono);font-size:11px;color:var(--amber);background:var(--amber-bg)">'+(_sPN?n_id(Math.round(_sPN*100)/100):'—')+'</td>'
+      + (exM>0 ? '<td></td><td style="padding:6px 8px;text-align:right;font-family:var(--mono);font-size:11px;color:var(--red)">'+(_sDB?n_id(Math.round(_sDB*100)/100):'—')+'</td><td></td><td style="padding:6px 8px;text-align:right;font-family:var(--mono);font-size:11px;color:var(--amber);background:var(--amber-bg)">'+(_sPB?n_id(Math.round(_sPB*100)/100):'—')+'</td>' : '')
+      + '<td></td></tr>';
+    pivotTable = '<div style="overflow-x:auto;border:1px solid var(--border2);border-radius:var(--r)"><table style="width:100%;border-collapse:collapse"><thead><tr style="background:var(--bg3)">'+pHead+'</tr></thead><tbody>'+pBody+'</tbody><tfoot>'+pFoot+'</tfoot></table></div>';
+  }
+
   el.innerHTML = '<div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
     + '<button class="btn btn-sm" onclick="_npdBackToFg()" style="font-size:12px">← Semua FG</button>'
     + '<button class="btn btn-sm" onclick="_npdBackToFormula()" style="font-size:12px">← '+fg.name+'</button>'
@@ -4771,10 +4862,12 @@ function _npdRenderGrid(el) {
         + '<span style="font-size:10.5px;color:var(--muted)">Kurang = kebutuhan − (Stock+PO+PR), dibulatkan ke MOQ/multiple</span>' : '')
     + '</div>'
     + (analysis ? '<div style="font-size:11px;color:var(--accent);margin-bottom:8px;font-weight:600">→ Scroll tabel ke kanan untuk lihat: Stock · PO · PR · <span style="color:var(--purple)">NPD Lain</span> (project NPD lain pakai RM ini) · <span style="color:var(--teal)">Total NPD</span> · <span style="color:var(--red)">Perlu Datang</span> (total − stock) · Kurang (setelah PO+PR) · PR NPD'+(exM>0?' · Existing · Perlu Datang+Exist · Kurang+Exist':'')+' — klik 🔍 utk lihat project lain yg pakai RM ini</div>' : '<div style="font-size:11px;color:var(--muted);margin-bottom:8px">Klik 📋 di header kolom untuk paste 1 kolom dari Excel. Mat req = % × Netto × Plan ÷ 1000 (auto, KG).</div>')
-    + '<div style="overflow-x:auto;border:1px solid var(--border2);border-radius:var(--r)"><table style="width:100%;border-collapse:collapse"><thead><tr style="background:var(--bg3)">'+thCols+'</tr></thead><tbody>'+gridRows+'</tbody></table></div>'
-    + '<div style="margin-top:10px;display:flex;gap:8px;align-items:center"><button class="btn btn-sm" onclick="_npdAddRow()" style="font-size:12px">+ Tambah Baris</button>'
-    + '<button class="btn btn-sm btn-primary" onclick="_npdPasteAll()" style="font-size:12px" title="Paste seluruh area dari Excel sekaligus (banyak baris & kolom)">📋 Paste Semua (area Excel)</button>'
-    + '<span style="font-size:10.5px;color:var(--muted)">Tip: klik sel lalu Ctrl+V juga bisa paste banyak baris/kolom sekaligus — baris nambah otomatis</span></div>';
+    + (analysis
+        ? pivotTable + '<div style="margin-top:8px;font-size:10.5px;color:var(--muted)">Mode analisa = <b>pivot</b>: baris berkode sama digabung (badge ×N menunjukkan berapa kali muncul di formula). Matikan Mode Analisis untuk edit baris.</div>'
+        : editTable
+          + '<div style="margin-top:10px;display:flex;gap:8px;align-items:center"><button class="btn btn-sm" onclick="_npdAddRow()" style="font-size:12px">+ Tambah Baris</button>'
+          + '<button class="btn btn-sm btn-primary" onclick="_npdPasteAll()" style="font-size:12px" title="Paste seluruh area dari Excel sekaligus (banyak baris & kolom)">📋 Paste Semua (area Excel)</button>'
+          + '<span style="font-size:10.5px;color:var(--muted)">Tip: klik sel lalu Ctrl+V juga bisa paste banyak baris/kolom sekaligus — baris nambah otomatis</span></div>');
 }
 
 // ── Aksi FG ──
