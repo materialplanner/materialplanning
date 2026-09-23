@@ -4541,7 +4541,14 @@ function _renderDashNpdOverview() {
             ? ' <span style="background:var(--red);color:#fff;font-size:7.5px;padding:1px 4px;border-radius:2px;font-weight:700" title="Stok 0 — belum ada fisiknya">STOK 0</span>'
             : ' <span style="background:var(--amber-bg);color:var(--amber);font-size:7.5px;padding:1px 4px;border-radius:2px;font-weight:600" title="Stok '+fmt(st)+' KG, tapi masih kurang">KURANG</span>';
         }
-        return '<div style="font-size:10.5px;display:flex;justify-content:space-between;gap:8px;padding:2px 0;align-items:center"><span style="color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:210px">'+(it.isNew?'<b style="color:var(--red);font-size:8px">NEW </b>':'')+it.code+' <span style="color:var(--muted)">'+(it.nm||'').slice(0,20)+'</span>'+badge+'</span><span style="font-family:var(--mono);font-weight:600;white-space:nowrap">'+fmt(it.qty)+'</span></div>';
+        return '<div style="font-size:10.5px;display:flex;justify-content:space-between;gap:8px;padding:2px 0;align-items:center">'
+          + '<span style="display:flex;align-items:center;gap:4px;min-width:0;flex:1">'
+          +   (it.isNew?'<b style="color:var(--red);font-size:8px;flex-shrink:0">NEW</b>':'')
+          +   '<span style="color:var(--text);flex-shrink:0;font-family:var(--mono)">'+it.code+'</span>'
+          +   '<span style="color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">'+(it.nm||'')+'</span>'
+          +   (badge?'<span style="flex-shrink:0">'+badge+'</span>':'')
+          + '</span>'
+          + '<span style="font-family:var(--mono);font-weight:600;white-space:nowrap;flex-shrink:0">'+fmt(it.qty)+'</span></div>';
       };
       var head = arr.slice(0,4).map(rowHtml).join('');
       if(arr.length<=4) return head;
@@ -4960,7 +4967,14 @@ function _npdRenderGroupPivot(el){
     + '</div>'
     + '<div style="margin-bottom:8px"><input type="text" value="'+String(window._npdGridQ||'').replace(/"/g,'&quot;')+'" oninput="window._npdGridQ=this.value;_npdGridApplyFilter()" placeholder="🔎 Filter kode / nama RM…" style="width:100%;max-width:340px;font-size:12px;padding:6px 10px;border:1px solid var(--border2);border-radius:6px"></div>'
     + '<div id="npd-grid-scroll" style="overflow:auto;max-height:62vh;border:1px solid var(--border2);border-radius:var(--r)"><table style="width:100%;border-collapse:collapse"><thead><tr style="background:var(--bg3)">'+pHead+'</tr></thead><tbody>'+body+'</tbody><tfoot>'+pFoot+'</tfoot></table></div>';
-  _npdGridApplyFilter();
+  var gcols=[
+    {k:'code',label:'Kode'},{k:'name',label:'Nama'},{k:'matreq',label:'Mat req Grup'},
+    {k:'moq',label:'MOQ'},{k:'mult',label:'Mult'},{k:'lt',label:'LT'},{k:'stock',label:'Stock'},
+    {k:'po',label:'PO'},{k:'pr',label:'PR'},{k:'npdluar',label:'NPD Luar Grup'},{k:'totalnpd',label:'Total NPD'},
+    {k:'perludatang',label:'Perlu Datang NPD'},{k:'kurang',label:'Kurang NPD'},{k:'suggestpr',label:'Suggest PR NPD'}
+  ];
+  if(exM>0){ gcols=gcols.concat([{k:'exist',label:'Exist'},{k:'perludatangex',label:'Perlu Datang +Exist'},{k:'kurangex',label:'Kurang +Exist'},{k:'suggestprex',label:'Suggest PR +Exist'}]); }
+  _npdAttachPivotFilters(el, gcols);
 }
 // Export pivot grup ke Excel
 function _npdExportGroup(grp){
@@ -5204,7 +5218,18 @@ function _npdRenderGrid(el) {
           + '<div style="margin-top:10px;display:flex;gap:8px;align-items:center"><button class="btn btn-sm" onclick="_npdAddRow()" style="font-size:12px">+ Tambah Baris</button>'
           + '<button class="btn btn-sm btn-primary" onclick="_npdPasteAll()" style="font-size:12px" title="Paste seluruh area dari Excel sekaligus (banyak baris & kolom)">📋 Paste Semua (area Excel)</button>'
           + '<span style="font-size:10.5px;color:var(--muted)">Tip: klik sel lalu Ctrl+V juga bisa paste banyak baris/kolom sekaligus — baris nambah otomatis</span></div>');
-  _npdGridApplyFilter();
+  if(analysis){
+    var pcols=[
+      {k:'code',label:'Kode'},{k:'name',label:'Nama'},{k:'pct',label:'%'},{k:'matreq',label:'Mat req'},
+      {k:'moq',label:'MOQ'},{k:'mult',label:'Mult'},{k:'lt',label:'LT'},{k:'stock',label:'Stock'},
+      {k:'po',label:'PO'},{k:'pr',label:'PR'},{k:'npdlain',label:'NPD Lain'},{k:'totalnpd',label:'Total NPD'},
+      {k:'perludatang',label:'Perlu Datang NPD'},{k:'kurang',label:'Kurang NPD'},{k:'suggestpr',label:'Suggest PR NPD'}
+    ];
+    if(exM>0){ pcols=pcols.concat([{k:'exist',label:'Exist'},{k:'perludatangex',label:'Perlu Datang +Exist'},{k:'kurangex',label:'Kurang +Exist'},{k:'suggestprex',label:'Suggest PR +Exist'}]); }
+    _npdAttachPivotFilters(el, pcols);
+  } else {
+    _npdGridApplyFilter();
+  }
 }
 // Filter baris grid NPD berdasarkan kode/nama (tanpa re-render)
 window._npdGridQ = window._npdGridQ || '';
@@ -5243,7 +5268,15 @@ function _npdColMenu(key, label, btn){
   var cells=host.querySelectorAll('td[data-col="'+key+'"]');
   var vals={};
   Array.prototype.forEach.call(cells, function(td){ var v=td.getAttribute('data-val')||''; if(!(v in vals)) vals[v]=td.getAttribute('data-disp')||v; });
-  var keys=Object.keys(vals).sort();
+  var keys=Object.keys(vals);
+  // urutkan numerik jika mayoritas nilai berupa angka (mis. kolom Kurang, Stock), else alfabetis
+  var _numCnt=0, _tot=0;
+  keys.forEach(function(v){ if(v!==''){ _tot++; var n=_parseNumID(v); if(!isNaN(n)&&isFinite(n)&&/[0-9]/.test(v)) _numCnt++; } });
+  if(_tot>0 && _numCnt/_tot>=0.6){
+    keys.sort(function(a,b){ if(a==='')return 1; if(b==='')return -1; var na=_parseNumID(a), nb=_parseNumID(b); if(isNaN(na))na=0; if(isNaN(nb))nb=0; return na-nb; });
+  } else {
+    keys.sort();
+  }
   var sel=window._npdColF[key];
   var listHtml=keys.map(function(v){
     var checked=(!sel || sel.indexOf(v)>=0);
@@ -5275,6 +5308,52 @@ function _npdColAll(key,on){
   var list=document.getElementById('npd-col-list'); if(!list)return;
   Array.prototype.forEach.call(list.querySelectorAll('label'), function(l){ if(l.style.display!=='none'){ var cb=l.querySelector('input'); if(cb) cb.checked=on; } });
   _npdColTick(key);
+}
+// Pasang filter kolom otomatis ke pivot (group & per-formula analisa) setelah innerHTML di-set.
+// cols = [{k:'kurang', label:'Kurang'}, ...] urut sesuai kolom header (skip kolom yg sudah punya data-col inline: Kode/Nama).
+function _npdAttachPivotFilters(host, cols){
+  if(!host) return;
+  var thead=host.querySelector('thead'); if(!thead) return;
+  // ambil baris header terakhir (yg berisi judul kolom aktual)
+  var hrows=thead.querySelectorAll('tr'); if(!hrows.length) return;
+  var hr=hrows[hrows.length-1];
+  var ths=hr.children;
+  // Petakan kolom berdasarkan urutan: cols[i] → th ke-i. Tapi Kode/Nama sudah punya tombol → tetap hitung posisinya.
+  // Kita pasang tombol ▽ + data-k utk kolom di cols yg belum punya tombol.
+  for(var i=0;i<cols.length && i<ths.length;i++){
+    var c=cols[i]; if(!c) continue;
+    var th=ths[i];
+    if(th.querySelector('.npd-colbtn')){ continue; } // sudah ada (Kode/Nama)
+    th.setAttribute('data-k', c.k);
+    var btn=document.createElement('span');
+    btn.className='npd-colbtn';
+    btn.setAttribute('data-k', c.k);
+    btn.textContent='▽';
+    btn.style.cssText='cursor:pointer;margin-left:4px;color:var(--muted);font-size:10px;user-select:none';
+    btn.title='Filter '+c.label;
+    (function(kk,lbl,bb){ btn.addEventListener('click', function(e){ e.stopPropagation(); _npdColMenu(kk, lbl, bb); }); })(c.k, c.label, btn);
+    th.appendChild(btn);
+  }
+  // Tag sel body sesuai kolom (skip yg sudah punya data-col inline & skip baris colspan mis. RO Water)
+  var brows=host.querySelectorAll('tbody tr');
+  Array.prototype.forEach.call(brows, function(tr){
+    var tds=tr.children;
+    // baris dgn sel colspan (RO Water / info) → lewati
+    var hasColspan=false;
+    for(var j=0;j<tds.length;j++){ if(tds[j].getAttribute && tds[j].getAttribute('colspan')){ hasColspan=true; break; } }
+    if(hasColspan) return;
+    for(var i2=0;i2<cols.length && i2<tds.length;i2++){
+      var c2=cols[i2]; if(!c2) continue;
+      var td=tds[i2];
+      if(td.getAttribute('data-col')) continue; // Kode/Nama sudah ditag inline
+      var txt=(td.textContent||'').trim();
+      var val = (txt==='' || txt==='—' || txt==='-') ? '' : txt.toLowerCase();
+      td.setAttribute('data-col', c2.k);
+      td.setAttribute('data-val', val);
+      td.setAttribute('data-disp', txt);
+    }
+  });
+  _npdGridApplyFilter();
 }
 
 // ── Aksi FG ──
