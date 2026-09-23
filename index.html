@@ -14089,18 +14089,26 @@ function _fcTypeAll(on){ window._fcTypeSel = on?['RM','PM','FG','WIP']:[]; _fcTy
 
 // GRPO qty per bulan absolut (YYYY-MM), difilter supplier/item + tipe item global.
 // Return { 'YYYY-MM': { qty, value } }.
+// Gabungan record GRPO: bulan LALU dari histori, bulan BERJALAN dst dari grpoData.
+// Dipartisi per bulan supaya tidak dobel (histori & grpoData bisa memuat bulan yg sama),
+// dan TIDAK dedupe baris — 1 item boleh punya beberapa GRPO di tanggal sama (itu sah).
+function _grafikGrpoRecords(){
+  var hist=(STATE.grpoHistori||[]), data=(STATE.grpoData||[]);
+  if(!hist.length) return data.slice();
+  var now=new Date(); var curYM=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+  var ymOf=function(g){ var p=String(g.grpoDate||'').split('/'); return p.length===3? (p[2]+'-'+String(p[1]).padStart(2,'0')) : ''; };
+  var out=[];
+  hist.forEach(function(g){ var y=ymOf(g); if(y && y<curYM) out.push(g); });   // bulan lalu → histori
+  data.forEach(function(g){ var y=ymOf(g); if(y && y>=curYM) out.push(g); });  // bulan berjalan+ → grpoData
+  return out;
+}
 function _grafikGrpoByMonth(supplierFilter, itemFilter, rmpmFilter) {
   var out = {};
-  // Histori (s/d bulan lalu) + grpoData (bulan berjalan) — digabung spt logika utama, dedupe biar tak dobel
-  var src = ((STATE.grpoHistori && STATE.grpoHistori.length) ? STATE.grpoHistori : []).concat(STATE.grpoData||[]);
-  var seen = {};
-  src.forEach(function(g){
+  _grafikGrpoRecords().forEach(function(g){
     if(!g.grpoDate || !g.itemCode) return;
     if(itemFilter && g.itemCode !== itemFilter) return;
     if(supplierFilter && (g.supplierName||'') !== supplierFilter) return;
     if(!_fcCodeMatch(g.itemCode)) return; // ikut pilihan tipe item multi-select
-    var key=(g.grpoDocNum||'')+'|'+g.itemCode+'|'+g.grpoDate+'|'+g.qty;
-    if(seen[key]) return; seen[key]=1;
     var p = g.grpoDate.split('/'); if(p.length!==3) return;
     var ym = p[2]+'-'+String(p[1]).padStart(2,'0');
     var qty = parseFloat(g.qty)||0;
@@ -14428,7 +14436,7 @@ function _grafikBreakdownData(ds, months, ctx) {
   var codesToScan;
   if(rowDef.isGRPO) {
     var _codeSet = {};
-    var _src = ((STATE.grpoHistori&&STATE.grpoHistori.length)?STATE.grpoHistori:[]).concat(STATE.grpoData||[]);
+    var _src = _grafikGrpoRecords();
     _src.forEach(function(g){
       if(!g.itemCode || !g.supplierName) return;
       if(ctx.pickedItem && String(g.itemCode)!==ctx.pickedItem) return;
@@ -14459,26 +14467,59 @@ function _grafikBreakdownData(ds, months, ctx) {
     if(any){
       var tot=arr.reduce(function(a,b){return a+(b||0);},0);
       var m=(STATE.masterData||{})[code]||{}; var nm=(_isAdmin&&(STATE.realNameData||{})[code])?STATE.realNameData[code]:(m.desc||'');
-      if(!nm && rowDef.isGRPO){ var _gg=(((STATE.grpoHistori&&STATE.grpoHistori.length)?STATE.grpoHistori:[]).concat(STATE.grpoData||[])).filter(function(g){return g.itemCode===code;})[0]; if(_gg) nm=_gg.itemName||''; }
+      if(!nm && rowDef.isGRPO){ var _gg=_grafikGrpoRecords().filter(function(g){return g.itemCode===code;})[0]; if(_gg) nm=_gg.itemName||''; }
       perItem.push({code:code, name:nm, arr:arr, total:tot});
     }
   });
   perItem.sort(function(a,b){ return b.total-a.total; }); // terbesar dulu
   return perItem;
 }
-// Baris breakdown per item untuk 1 dataset (row)
+// Baris breakdown per item untuk 1 dataset (row). Utk baris GRPO, item bisa di-expand lagi → per dokumen GRPO.
 function _grafikBreakdownRows(ds, months, ctx) {
   var perItem = _grafikBreakdownData(ds, months, ctx);
   if(!perItem.length) return '<tr style="background:var(--bg)"><td colspan="'+(months.length+2)+'" style="padding:6px 8px 6px 28px;font-size:10px;color:var(--muted)">(tidak ada kontribusi)</td></tr>';
+  var rowDef = _GRAFIK_ROWS.filter(function(r){ return r.key===ds._rowKey; })[0] || {};
+  var isGRPO = !!rowDef.isGRPO;
+  var isValue = ctx.isValue;
   return perItem.map(function(it){
     var cells = it.arr.map(function(v){ return '<td style="text-align:right;padding:3px 8px;font-family:var(--mono);font-size:10px;color:var(--muted)">'+(Math.abs(v)<0.005?'<span style=\"color:var(--hint)\">–</span>':n_id(Math.round(v*100)/100))+'</td>'; }).join('');
-    return '<tr style="background:var(--bg)">'
-      + '<td style="padding:3px 8px 3px 28px;font-size:10px;color:var(--text);white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis">'+it.code+' <span style="color:var(--muted)">'+(it.name||'').slice(0,26)+'</span></td>'
+    var itKey = ds._rowKey+'|'+it.code;
+    var itExp = isGRPO && window._grafikItemExpanded[itKey];
+    var arrow = isGRPO ? '<span style="display:inline-block;width:12px;cursor:pointer;color:var(--muted);transform:'+(itExp?'rotate(90deg)':'none')+';transition:transform .15s" onclick="_grafikToggleItem(\''+ds._rowKey+'\',\''+it.code+'\')">▶</span> ' : '';
+    var row = '<tr style="background:var(--bg)">'
+      + '<td style="padding:3px 8px 3px '+(isGRPO?'20px':'28px')+';font-size:10px;color:var(--text);white-space:nowrap;max-width:240px;overflow:hidden;text-overflow:ellipsis">'+arrow+it.code+' <span style="color:var(--muted)">'+(it.name||'').slice(0,26)+'</span></td>'
       + cells
       + '<td style="text-align:right;padding:3px 10px;font-family:var(--mono);font-size:10px;font-weight:600;background:var(--bg3);border-left:2px solid var(--border2);color:var(--muted)">'+n_id(Math.round(it.total*100)/100)+'</td></tr>';
+    if(itExp) row += _grafikGrpoLineRows(it.code, months, ctx, isValue);
+    return row;
   }).join('');
 }
+// Baris per DOKUMEN GRPO untuk 1 item (level ke-3)
+function _grafikGrpoLineRows(code, months, ctx, isValue){
+  var ymIdx={}; months.forEach(function(m,i){ ymIdx[m.ym]=i; });
+  var recs=_grafikGrpoRecords().filter(function(g){
+    if(String(g.itemCode)!==String(code)) return false;
+    if(ctx.supplier && (g.supplierName||'')!==ctx.supplier) return false;
+    if(!_fcCodeMatch(String(g.itemCode))) return false;
+    return true;
+  });
+  recs.sort(function(a,b){ return _dateToSortISO(a.grpoDate).localeCompare(_dateToSortISO(b.grpoDate)); });
+  var out = recs.map(function(g){
+    var p=String(g.grpoDate||'').split('/'); if(p.length!==3) return '';
+    var ym=p[2]+'-'+String(p[1]).padStart(2,'0');
+    var mi=ymIdx[ym]; if(mi==null) return ''; // di luar range tampil → skip
+    var qty=parseFloat(g.qty)||0; if((g.uom||'').toUpperCase()==='GR') qty/=1000;
+    var val=isValue? qty*_fcCOGM(g.itemCode) : qty;
+    var cells=months.map(function(m,i){ return '<td style="text-align:right;padding:2px 8px;font-family:var(--mono);font-size:9.5px;color:var(--hint)">'+(i===mi?n_id(Math.round(val*100)/100):'')+'</td>'; }).join('');
+    var lbl=(g.grpoDocNum?('#'+g.grpoDocNum+' · '):'')+(g.grpoDate||'')+(g.supplierName?(' · '+String(g.supplierName).slice(0,20)):'');
+    return '<tr style="background:var(--bg2)"><td style="padding:2px 8px 2px 44px;font-size:9.5px;color:var(--muted);white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis">'+lbl+'</td>'+cells+'<td style="text-align:right;padding:2px 10px;font-family:var(--mono);font-size:9.5px;background:var(--bg3);border-left:2px solid var(--border2);color:var(--muted)">'+n_id(Math.round(val*100)/100)+'</td></tr>';
+  }).join('');
+  if(!out) out = '<tr style="background:var(--bg2)"><td colspan="'+(months.length+2)+'" style="padding:3px 8px 3px 44px;font-size:9.5px;color:var(--hint)">(tidak ada dokumen GRPO dalam rentang bulan ini)</td></tr>';
+  return out;
+}
 function _grafikToggleBreak(key){ window._grafikExpanded[key] = !window._grafikExpanded[key]; renderForecast(); }
+window._grafikItemExpanded = window._grafikItemExpanded || {};
+function _grafikToggleItem(rowKey, code){ var k=rowKey+'|'+code; window._grafikItemExpanded[k] = !window._grafikItemExpanded[k]; renderForecast(); }
 
 // Export tabel grafik (ringkasan per baris + rincian per item) ke Excel
 function _grafikExportExcel(){
@@ -14506,20 +14547,41 @@ function _grafikExportExcel(){
   var wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Ringkasan');
 
-  // Sheet 2 — Rincian per item (untuk baris yg bisa di-breakdown)
+  // Sheet 2 — Rincian per item + per dokumen GRPO (level 3)
+  var ymIdx={}; months.forEach(function(m,i){ ymIdx[m.ym]=i; });
   var det=[
-    ['Rincian per item — '+unit],
+    ['Rincian per item & per dokumen GRPO — '+unit],
     ['Tipe: '+_typeLbl+(cfg.supplier?('  ·  Supplier: '+cfg.supplier):'')],
     [],
-    ['Baris','Kode Item','Nama'].concat(mLabels).concat(['TOTAL'])
+    ['Baris','Level','Kode Item','Nama','Dok GRPO','Tanggal','Supplier'].concat(mLabels).concat(['TOTAL'])
   ];
   var anyDet=false;
   datasets.forEach(function(ds){
     if(ds.yAxisID==='yDOI') return; // DOI tak dijumlah
+    var rowDef=_GRAFIK_ROWS.filter(function(r){return r.key===ds._rowKey;})[0]||{};
+    var isG=!!rowDef.isGRPO;
     var per=_grafikBreakdownData(ds, months, ctx);
     per.forEach(function(it){
       anyDet=true;
-      det.push([ds.label, it.code, it.name].concat(it.arr.map(rnd)).concat([rnd(it.total)]));
+      det.push([ds.label,'Item',it.code,it.name,'','',''].concat(it.arr.map(rnd)).concat([rnd(it.total)]));
+      if(isG){
+        // level 3 — tiap dokumen GRPO utk item ini
+        var recs=_grafikGrpoRecords().filter(function(g){
+          if(String(g.itemCode)!==String(it.code)) return false;
+          if(cfg.supplier && (g.supplierName||'')!==cfg.supplier) return false;
+          if(!_fcCodeMatch(String(g.itemCode))) return false;
+          return true;
+        });
+        recs.sort(function(a,b){ return _dateToSortISO(a.grpoDate).localeCompare(_dateToSortISO(b.grpoDate)); });
+        recs.forEach(function(g){
+          var p=String(g.grpoDate||'').split('/'); if(p.length!==3) return;
+          var ym=p[2]+'-'+String(p[1]).padStart(2,'0'); var mi=ymIdx[ym]; if(mi==null) return;
+          var qty=parseFloat(g.qty)||0; if((g.uom||'').toUpperCase()==='GR') qty/=1000;
+          var val=isValue? qty*_fcCOGM(g.itemCode) : qty;
+          var arr=months.map(function(_,i){ return i===mi? rnd(val) : ''; });
+          det.push([ds.label,'GRPO',it.code,it.name,(g.grpoDocNum||''),(g.grpoDate||''),(g.supplierName||'')].concat(arr).concat([rnd(val)]));
+        });
+      }
     });
   });
   if(anyDet) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(det), 'Rincian per item');
