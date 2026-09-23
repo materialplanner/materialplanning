@@ -3611,7 +3611,15 @@ function _applyRealtimeChanges(keys) {
           } catch(e) {} break;
         case 'npd_data':
           try {
-            STATE.npdData = JSON.parse(val || '[]');
+            var _nd = JSON.parse(val || 'null');
+            var _ndEmpty = !_nd || !_nd.fgs || !_nd.fgs.length;
+            var _curLocal = (function(){ try{ return JSON.parse(localStorage.getItem('npd_data')||'null'); }catch(e){ return null; } })();
+            var _curEmpty = !_curLocal || !_curLocal.fgs || !_curLocal.fgs.length;
+            // LINDUNGI: update cloud yang KOSONG tidak boleh menimpa data lokal yang ADA isinya
+            if(_ndEmpty && !_curEmpty){ console.warn('[npd] update cloud kosong diabaikan (data lokal dipertahankan)'); break; }
+            if(!_ndEmpty && !_curEmpty){ _npdSnapshotPush(_curLocal); } // snapshot dulu sebelum diganti dari device lain
+            STATE.npdData = _nd || {fgs:[]};
+            try{ localStorage.setItem('npd_data', JSON.stringify(STATE.npdData)); }catch(e){}
             if(document.getElementById('npd-table')) _npdRender();
             if(window._inclNPD && STATE.projectionData && STATE.projectionData.length){ buildProjection(); if(document.getElementById('proj-table')) renderProjection(); }
           } catch(e) {} break;
@@ -4273,13 +4281,90 @@ function _npdLoad() {
   try { var d = JSON.parse(localStorage.getItem('npd_data') || 'null'); return (d && d.fgs) ? d : {fgs:[]}; }
   catch(e){ return {fgs:[]}; }
 }
+// ── Keamanan data NPD: snapshot lokal bergilir (auto-restore) ──
+function _npdIsEmpty(d){ return !d || !d.fgs || !d.fgs.length; }
+function _npdSnapshotPush(data){
+  try{
+    if(_npdIsEmpty(data)) return;                       // jangan snapshot data kosong
+    var json=JSON.stringify(data);
+    if(json.length > 900000) return;                    // terlalu besar → skip (jaga localStorage)
+    var snaps=[]; try{ snaps=JSON.parse(localStorage.getItem('npd_snapshots')||'[]'); }catch(e){}
+    if(snaps.length){
+      var last=snaps[snaps.length-1];
+      if(last.json===json) return;                       // tak berubah
+      if(Date.now()-last.ts < 120000) return;            // throttle 2 menit
+    }
+    snaps.push({ts:Date.now(), json:json, nfg:(data.fgs||[]).length});
+    while(snaps.length>30) snaps.shift();               // simpan 30 terakhir
+    localStorage.setItem('npd_snapshots', JSON.stringify(snaps));
+  }catch(e){}
+}
 function _npdSave(data) {
+  // snapshot dulu keadaan SEBELUM ditimpa (utk restore kalau ada yg salah/hilang)
+  try{ var _prev=localStorage.getItem('npd_data'); if(_prev){ var _pj=JSON.parse(_prev); if(!_npdIsEmpty(_pj)) _npdSnapshotPush(_pj); } }catch(e){}
   STATE.npdData = data;
   try { localStorage.setItem('npd_data', JSON.stringify(data)); cloudSave('npd_data', JSON.stringify(data)); } catch(e){}
   if(window._inclNPD){
     if(STATE.projectionData && STATE.projectionData.length){ buildProjection(); if(document.getElementById('proj-table')) renderProjection(); }
     if(document.getElementById('fc-table')) renderForecast();
   }
+}
+// Export SELURUH data NPD ke file JSON (backup manual — independen dari Firebase)
+function _npdBackupExport(){
+  var d=_npdNormalize();
+  try{
+    var blob=new Blob([JSON.stringify(d,null,2)],{type:'application/json'});
+    var url=URL.createObjectURL(blob); var a=document.createElement('a');
+    a.href=url; a.download='npd_backup_'+new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')+'.json';
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(url);},1000);
+    toast('Backup NPD di-download ('+((d.fgs||[]).length)+' FG) ✓','ok');
+  }catch(e){ toast('Gagal export: '+e.message,'err'); }
+}
+// Import/restore dari file JSON backup
+function _npdBackupImport(){
+  var inp=document.createElement('input'); inp.type='file'; inp.accept='.json,application/json';
+  inp.onchange=function(){
+    var f=inp.files&&inp.files[0]; if(!f) return;
+    var r=new FileReader();
+    r.onload=function(){
+      try{
+        var d=JSON.parse(r.result);
+        if(!d||!d.fgs){ toast('File bukan backup NPD yang valid','err'); return; }
+        var cur=_npdNormalize();
+        if(!confirm('Ganti data NPD sekarang ('+((cur.fgs||[]).length)+' FG) dengan isi backup ('+d.fgs.length+' FG)?\nData sekarang akan disnapshot dulu sehingga bisa di-restore.')) return;
+        _npdSnapshotPush(cur);
+        _npdSave(d); _npdRender();
+        toast('Backup dipulihkan: '+d.fgs.length+' FG ✓','ok');
+      }catch(e){ toast('Gagal baca file: '+e.message,'err'); }
+    };
+    r.readAsText(f);
+  };
+  inp.click();
+}
+// Popup restore snapshot lokal
+function _npdRestoreMenu(){
+  var snaps=[]; try{ snaps=JSON.parse(localStorage.getItem('npd_snapshots')||'[]'); }catch(e){}
+  var ov=document.getElementById('npd-restore-overlay');
+  if(!ov){ ov=document.createElement('div'); ov.id='npd-restore-overlay'; ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:960;display:flex;align-items:center;justify-content:center;padding:24px'; ov.onclick=function(e){if(e.target===ov)ov.style.display='none';}; document.body.appendChild(ov); }
+  var rows = snaps.length ? snaps.slice().reverse().map(function(s){
+    var dt=new Date(s.ts); var lbl=dt.toLocaleString('id-ID',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+    return '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:7px 4px;border-bottom:1px solid var(--border)"><span style="font-size:12px">🕑 '+lbl+' <span style="color:var(--muted);font-size:11px">· '+s.nfg+' FG</span></span><button class="btn btn-sm" onclick="_npdRestoreSnapshot('+s.ts+')" style="font-size:11px">Pulihkan</button></div>';
+  }).join('') : '<div style="font-size:12px;color:var(--muted);padding:10px 0">Belum ada snapshot. Snapshot dibuat otomatis tiap kali ada perubahan (maks. 30 terakhir).</div>';
+  ov.innerHTML='<div style="background:var(--bg2);border-radius:12px;max-width:460px;width:100%;box-shadow:0 8px 40px rgba(0,0,0,.3);max-height:80vh;overflow:auto">'
+    +'<div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center"><b style="font-size:14px">🛡️ Restore data NPD</b><button onclick="document.getElementById(\'npd-restore-overlay\').style.display=\'none\'" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)">✕</button></div>'
+    +'<div style="padding:14px 18px"><div style="font-size:11px;color:var(--muted);margin-bottom:8px">Pilih titik pemulihan (snapshot lokal di browser ini). Data sekarang akan disnapshot dulu sebelum diganti.</div>'+rows+'</div></div>';
+  ov.style.display='flex';
+}
+function _npdRestoreSnapshot(ts){
+  var snaps=[]; try{ snaps=JSON.parse(localStorage.getItem('npd_snapshots')||'[]'); }catch(e){}
+  var s=snaps.filter(function(x){return x.ts===ts;})[0]; if(!s){ toast('Snapshot tidak ditemukan','err'); return; }
+  try{
+    var d=JSON.parse(s.json); if(!d||!d.fgs){ toast('Snapshot rusak','err'); return; }
+    if(!confirm('Pulihkan ke snapshot '+new Date(ts).toLocaleString('id-ID')+' ('+d.fgs.length+' FG)? Data sekarang akan disnapshot dulu.')) return;
+    _npdSnapshotPush(_npdNormalize());
+    _npdSave(d); var ov=document.getElementById('npd-restore-overlay'); if(ov) ov.style.display='none'; _npdRender();
+    toast('Dipulihkan ke '+new Date(ts).toLocaleString('id-ID')+' ✓','ok');
+  }catch(e){ toast('Gagal restore: '+e.message,'err'); }
 }
 function _npdNormalize() {
   // pastikan STATE.npdData bentuk {fgs:[]}
@@ -4766,7 +4851,14 @@ function _npdRenderFgList(el) {
   var groups={}, order=[], ungrouped=[];
   (data.fgs||[]).forEach(function(fg){ var gn=(fg.group||'').trim(); if(gn){ if(!groups[gn]){groups[gn]=[]; order.push(gn);} groups[gn].push(fg);} else ungrouped.push(fg); });
 
-  var html='<div style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-sm btn-primary" onclick="_npdAddFg()" style="font-size:12px">+ Tambah FG NPD</button></div>';
+  var html='<div style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
+    + '<button class="btn btn-sm btn-primary" onclick="_npdAddFg()" style="font-size:12px">+ Tambah FG NPD</button>'
+    + '<span style="margin-left:auto;display:flex;gap:6px;align-items:center">'
+    +   '<span style="font-size:10px;color:var(--muted)" title="Data NPD disimpan di browser + Firebase, dan di-snapshot otomatis. Untuk aman, sesekali Export ke file.">🛡️ Backup:</span>'
+    +   '<button class="btn btn-sm" onclick="_npdBackupExport()" style="font-size:11px" title="Download seluruh data NPD ke file JSON (backup manual)">↓ Export</button>'
+    +   '<button class="btn btn-sm" onclick="_npdBackupImport()" style="font-size:11px" title="Pulihkan data dari file backup JSON">↑ Import</button>'
+    +   '<button class="btn btn-sm" onclick="_npdRestoreMenu()" style="font-size:11px" title="Pulihkan dari snapshot otomatis (browser ini)">↺ Restore</button>'
+    + '</span></div>';
   if(!data.fgs.length){ el.innerHTML=html+'<div style="padding:32px;text-align:center;color:var(--muted);border:1px dashed var(--border2);border-radius:var(--r)">Belum ada FG NPD. Klik "+ Tambah FG NPD" untuk mulai.</div>'; return; }
 
   order.forEach(function(gn){
