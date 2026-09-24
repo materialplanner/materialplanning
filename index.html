@@ -12582,11 +12582,10 @@ function _fcCalcPallet(code, endingStock, uom) {
   var isRM = /^3/.test(code), isPM = /^4/.test(code);
   if(isRM && STATE.palletRM) {
     var pd = STATE.palletRM[code]; if(!pd) return null;
-    var ukuran = pd.ukuranKemasan, bobot = pd.bobotPalet;
-    var u = (uom||'').toLowerCase();
-    if(u==='gr'||u==='gram'||u==='g'){ ukuran/=1000; bobot/=1000; }
-    if(endingStock < 2*ukuran) return 0;
-    return Math.floor((endingStock - 2*ukuran) / bobot) + 1;
+    var bobot = pd.bobotPalet;                 // kapasitas per palet, satuan sama dgn ending stock (mis. kg)
+    if(!bobot || bobot<=0) return null;
+    if(!(endingStock>0)) return 0;
+    return Math.ceil(endingStock / bobot);     // jumlah palet = stock ÷ kapasitas per palet, bulat ke atas
   }
   if(isPM && STATE.palletPM) {
     var pd = STATE.palletPM[code]; if(!pd) return null;
