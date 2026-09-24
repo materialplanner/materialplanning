@@ -4968,7 +4968,8 @@ function _npdRenderGroupPivot(el){
     + '<button class="btn btn-sm" onclick="_npdBackFromGroup()" style="font-size:12px">← Semua FG</button>'
     + '<span style="font-size:13px;font-weight:700;color:var(--purple)">🗂️ Grup: '+grp+'</span>'
     + '<span style="font-size:11px;color:var(--muted)">'+pv.fgs.length+' varian: '+pv.fgs.map(function(f){return f.name;}).join(', ')+'</span>'
-    + '<span style="margin-left:auto"><button class="btn btn-sm" onclick="_npdExportGroup(\''+grp.replace(/'/g,"\\'")+'\')" style="font-size:11px" title="Export Excel pivot grup">↓ Export Excel</button></span>'
+    + '<span style="margin-left:auto;display:flex;gap:6px"><button class="btn btn-sm" onclick="_npdExportGroup(\''+grp.replace(/'/g,"\\'")+'\')" style="font-size:11px" title="Export Excel pivot grup">↓ Export Excel</button>'
+    + '<button class="btn btn-sm btn-primary" onclick="_npdPrintGroup(\''+grp.replace(/'/g,"\\'")+'\')" style="font-size:11px" title="Cetak lampiran PR gabungan grup ini">🖨 Lampiran PR</button></span>'
     + '</div>'
     + '<div style="display:flex;gap:14px;align-items:center;margin-bottom:10px;flex-wrap:wrap;padding:8px 12px;background:var(--bg3);border-radius:var(--r)">'
     +   '<span style="font-size:12px;color:var(--muted)">Kebutuhan RM gabungan semua varian di grup ini. <b style="color:var(--teal)">Mat req Grup</b> = jumlah dari '+pv.fgs.length+' varian. <b style="color:var(--purple)">NPD Luar Grup</b> = kebutuhan project NPD lain (di luar grup). Shortfall dihitung dari Total NPD.</span>'
@@ -5548,6 +5549,20 @@ function _npdExportFormula(fmId){
 }
 
 // Cetak lampiran PR 1 formula (print window)
+// Kode RM yg SEDANG terlihat di tabel NPD (setelah filter kolom/heading). null = tak ada filter aktif → semua.
+function _npdVisibleCodes(){
+  var host=document.getElementById('npd-table'); if(!host) return null;
+  var trs=host.querySelectorAll('tbody tr'); if(!trs.length) return null;
+  var set={}, any=false, hidden=false;
+  Array.prototype.forEach.call(trs, function(tr){
+    var cc=tr.querySelector('td[data-col="code"]'); if(!cc) return;
+    if(tr.style.display==='none'){ hidden=true; return; }
+    var v=(cc.getAttribute('data-val')||'').toLowerCase();
+    if(v){ set[v]=1; any=true; }
+  });
+  if(!any) return null;
+  return hidden ? set : null; // tak ada baris tersembunyi → anggap tanpa filter (print semua)
+}
 function _npdPrintFormula(fmId){
   var d=_npdNormalize(); var fg=(d.fgs||[]).filter(function(f){return f.id===window._npdVFg;})[0]; if(!fg)return;
   var fm=(fg.formulas||[]).filter(function(f){return f.id===fmId;})[0]; if(!fm)return;
@@ -5555,7 +5570,9 @@ function _npdPrintFormula(fmId){
   var _syncTs=localStorage.getItem('last_sync')||'(belum sync)';
   var _prodI=(fm.prodMonthIdx!=null)?fm.prodMonthIdx:0; var _prodM=(FC_MONTHS||[])[_prodI]||''; var _prodYr=typeof _fcYearForMonthIdx==='function'?_fcYearForMonthIdx(_prodI):'';
   var fmt=function(v){return (v===0||v==null||v==='')?'—':n_id(Math.round(v*100)/100);};
-  var rowsHtml=(fm.rows||[]).map(function(r){
+  var _vis=_npdVisibleCodes();
+  var _srcRows=_vis ? (fm.rows||[]).filter(function(r){ var raw=String(r.code||'').toLowerCase(), nm=_npdNormCode(r.code).toLowerCase(); return _vis[raw]||_vis[nm]; }) : (fm.rows||[]);
+  var rowsHtml=_srcRows.map(function(r){
     var c=_npdNormCode(r.code); var isW=_npdIsWater(r.code);
     var kg=isW?'':_npdMatReq(r,fm.plan,fm.netto);
     var ex=(c&&!isW)?_existingReqByCode(c,exM):'';
@@ -5579,9 +5596,51 @@ function _npdPrintFormula(fmId){
     +'th,td{border:1px solid #ccc;padding:4px 6px}th{background:#eef2f5;font-size:9px;text-transform:uppercase}'
     +'.r{text-align:right;font-family:monospace}.meta{font-size:10px;color:#666;margin:4px 0}</style></head><body>'
     +'<h2>Lampiran Permintaan Material — NPD</h2>'
-    +'<div class="meta"><b>FG:</b> '+fg.name+' &nbsp;·&nbsp; <b>Formula:</b> '+fm.name+' &nbsp;·&nbsp; <b>Plan:</b> '+n_id(fm.plan||0)+' pcs &nbsp;·&nbsp; <b>Bulan produksi:</b> '+(_prodM?_prodM+" '"+_prodYr:'-')+'</div>'
+    +'<div class="meta"><b>FG:</b> '+fg.name+' &nbsp;·&nbsp; <b>Formula:</b> '+fm.name+' &nbsp;·&nbsp; <b>Plan:</b> '+n_id(fm.plan||0)+' pcs &nbsp;·&nbsp; <b>Bulan produksi:</b> '+(_prodM?_prodM+" '"+_prodYr:'-')+(_vis?' &nbsp;·&nbsp; <b style="color:#c0392b">Terfilter:</b> '+_srcRows.length+' dari '+(fm.rows||[]).length+' baris':'')+'</div>'
     +'<div class="meta">Data stock/PO/PR per Sync SAP: '+_syncTs+' &nbsp;·&nbsp; Existing forecast: '+exM+' bulan ke depan &nbsp;·&nbsp; Kurang = kebutuhan − (Stock+PO+PR), PR dibulatkan ke MOQ/kelipatan &nbsp;·&nbsp; Semua angka dalam KG</div>'
     +'<table><thead><tr><th>Kode RM</th><th>SAP Name</th><th>Real Name</th><th>Mat req NPD</th><th>NPD Lain</th><th>Total NPD</th><th>MOQ</th><th>Mult</th><th>LT</th><th>Stock</th><th>PO</th><th>PR</th><th>Kurang (NPD)</th><th>PR (NPD saja)</th><th>Exist '+exM+'bln</th><th>Kurang (+Exist)</th><th>PR (NPD+Exist)</th></tr></thead>'
+    +'<tbody>'+rowsHtml+'</tbody></table>'
+    +'</body></html>';
+  var w=window.open('','_blank'); if(!w){toast('Popup diblokir — izinkan popup','err');return;}
+  w.document.write(doc); w.document.close(); w.focus(); setTimeout(function(){w.print();},300);
+}
+
+// Lampiran PR untuk 1 GRUP (gabungan semua varian) — sama format seperti Lampiran per-formula.
+function _npdPrintGroup(grp){
+  var pv=_npdGroupPivotData(grp); if(!pv.rows.length){toast('Grup kosong','err');return;}
+  var exM=window._npdExMonths||3;
+  var _syncTs=localStorage.getItem('last_sync')||'(belum sync)';
+  var fmt=function(v){return (v===0||v==null||v==='')?'—':n_id(Math.round(v*100)/100);};
+  var _vis=_npdVisibleCodes();
+  var _srcRows=_vis ? pv.rows.filter(function(g){ return _vis[String(g.code).toLowerCase()]||_vis[String(g.rawCode||'').toLowerCase()]; }) : pv.rows;
+  var rowsHtml=_srcRows.map(function(g){
+    var isW=_npdIsWater(g.code);
+    var nm=_npdDisplayName(g.code,g)||'';
+    var kg=isW?'':g.kg;
+    var ex=isW?'':_existingReqByCode(g.code,exM);
+    var otherKg=isW?'':_npdOtherNpdForCodeExcl(g.code, pv.fmIds).total;
+    var totalNpd=isW?'':((kg||0)+(otherKg||0));
+    var a=isW?{moq:'',mult:'',lt:'',stock:'',po:'',pr:'',shortNpd:'',prNpd:'',shortBoth:'',prBoth:''}:_npdRmAnalysis(g.code,totalNpd,ex||0);
+    return '<tr>'
+      +'<td>'+(g.rawCode||'')+(g.isNew?' <b style="color:#c0392b">[NEW]</b>':'')+(isW?' <span style="color:#888;font-size:8px">[AIR]</span>':'')+'</td>'
+      +'<td>'+nm+'</td>'
+      +'<td class="r">'+fmt(kg)+'</td>'
+      +'<td class="r" style="color:#7c3aed">'+fmt(otherKg)+'</td><td class="r"><b>'+fmt(totalNpd)+'</b></td>'
+      +'<td class="r">'+(a.moq||'—')+'</td><td class="r">'+(a.mult||'—')+'</td><td class="r">'+(a.lt!==''&&a.lt!=null?a.lt+'d':'—')+'</td>'
+      +'<td class="r">'+fmt(a.stock)+'</td><td class="r">'+fmt(a.po)+'</td><td class="r">'+fmt(a.pr)+'</td>'
+      +'<td class="r">'+fmt(a.shortNpd)+'</td><td class="r"><b>'+fmt(a.prNpd)+'</b></td>'
+      +'<td class="r">'+fmt(ex)+'</td><td class="r">'+fmt(a.shortBoth)+'</td><td class="r"><b>'+fmt(a.prBoth)+'</b></td>'
+      +'</tr>';
+  }).join('');
+  var doc='<!DOCTYPE html><html><head><meta charset="utf-8"><title>Lampiran PR NPD — Grup</title>'
+    +'<style>@page{margin:12mm;size:A4 landscape}body{font-family:Arial,sans-serif;color:#1a1a1a;padding:16px;font-size:11px}'
+    +'h2{margin:0 0 2px}table{width:100%;border-collapse:collapse;margin-top:10px;font-size:10px}'
+    +'th,td{border:1px solid #ccc;padding:4px 6px}th{background:#eef2f5;font-size:9px;text-transform:uppercase}'
+    +'.r{text-align:right;font-family:monospace}.meta{font-size:10px;color:#666;margin:4px 0}</style></head><body>'
+    +'<h2>Lampiran Permintaan Material — NPD (Grup)</h2>'
+    +'<div class="meta"><b>Grup:</b> '+grp+' &nbsp;·&nbsp; <b>'+pv.fgs.length+' varian:</b> '+pv.fgs.map(function(f){return f.name;}).join(', ')+(_vis?' &nbsp;·&nbsp; <b style="color:#c0392b">Terfilter:</b> '+_srcRows.length+' dari '+pv.rows.length+' RM':'')+'</div>'
+    +'<div class="meta">Data stock/PO/PR per Sync SAP: '+_syncTs+' &nbsp;·&nbsp; Existing forecast: '+exM+' bulan ke depan &nbsp;·&nbsp; Mat req Grup = gabungan semua varian; NPD Lain = kebutuhan project NPD di luar grup &nbsp;·&nbsp; Kurang = kebutuhan − (Stock+PO+PR), PR dibulatkan ke MOQ/kelipatan &nbsp;·&nbsp; Semua angka dalam KG</div>'
+    +'<table><thead><tr><th>Kode RM</th><th>Nama</th><th>Mat req Grup</th><th>NPD Lain</th><th>Total NPD</th><th>MOQ</th><th>Mult</th><th>LT</th><th>Stock</th><th>PO</th><th>PR</th><th>Kurang (NPD)</th><th>PR (NPD saja)</th><th>Exist '+exM+'bln</th><th>Kurang (+Exist)</th><th>PR (NPD+Exist)</th></tr></thead>'
     +'<tbody>'+rowsHtml+'</tbody></table>'
     +'</body></html>';
   var w=window.open('','_blank'); if(!w){toast('Popup diblokir — izinkan popup','err');return;}
