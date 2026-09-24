@@ -5251,13 +5251,18 @@ function _npdGridApplyFilter(){
   var q=String(window._npdGridQ||'').toLowerCase().trim();
   var host=document.getElementById('npd-table'); if(!host) return;
   var colF=window._npdColF||{}; var fkeys=Object.keys(colF);
+  // Kolom yg benar-benar ADA di tabel mode ini (punya minimal 1 sel). Filter utk kolom
+  // yg tak ada di mode ini diabaikan (mis. filter lama dari mode analisa saat balik ke edit).
+  var presentKeys={};
+  fkeys.forEach(function(k){ if(host.querySelector('td[data-col="'+k+'"]')) presentKeys[k]=1; });
   var rows=host.querySelectorAll('tbody tr');
   Array.prototype.forEach.call(rows, function(tr){
     var show = !q || (tr.getAttribute('data-search')||'').indexOf(q)>=0;
     if(show){
       for(var i=0;i<fkeys.length;i++){
-        var k=fkeys[i], td=tr.querySelector('td[data-col="'+k+'"]');
-        if(!td) continue; // kolom tak ada di mode ini → abaikan filter
+        var k=fkeys[i]; if(!presentKeys[k]) continue; // kolom tak ada di mode ini → abaikan filter
+        var td=tr.querySelector('td[data-col="'+k+'"]');
+        if(!td){ show=false; break; } // baris tanpa sel utk kolom aktif (mis. RO Water colspan) → sembunyikan
         if(colF[k].indexOf(td.getAttribute('data-val')||'')<0){ show=false; break; }
       }
     }
