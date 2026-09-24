@@ -3494,6 +3494,8 @@ function _applyRealtimeChanges(keys) {
           break;
         case 'fc_propose':
           try {
+            // Echo dari edit manual sendiri → jangan re-render (biar angka yg sedang diketik tidak balik)
+            if(val === _fcProposeSelfEcho){ _fcProposeSelfEcho=null; localStorage.setItem('fc_propose', val); break; }
             _fcPropose = JSON.parse(val || '{}');
             localStorage.setItem('fc_propose', val);
             // Propose PR valid → aktifkan flag
@@ -3502,8 +3504,13 @@ function _applyRealtimeChanges(keys) {
               localStorage.setItem('fc_autopropose','1');
             }
             _ppCache = null; // reset pallet cache
-            if(document.getElementById('fc-table')) setTimeout(renderForecast, 100);
-            if(document.getElementById('pg-pallet-pos') && document.getElementById('pg-pallet-pos').classList.contains('active')) setTimeout(renderPalletPos, 150);
+            // Kalau user sedang mengetik di kolom Propose, tunda render (jangan reset input aktif)
+            var _aeP=document.activeElement;
+            var _editingProp = _aeP && _aeP.getAttribute && _aeP.getAttribute('data-rowtype')==='propose';
+            if(!_editingProp){
+              if(document.getElementById('fc-table')) setTimeout(renderForecast, 100);
+              if(document.getElementById('pg-pallet-pos') && document.getElementById('pg-pallet-pos').classList.contains('active')) setTimeout(renderPalletPos, 150);
+            }
           } catch(e) {}
           break;
         case 'fc_autopropose':
@@ -15870,7 +15877,7 @@ function _fcDoiFromStock(forecast, s, monthIdx) {
 // ─── Cetak Lampiran Forecast (untuk dilampirkan saat buka PR) ─────────────
 // Reuse _calcForecast via window._fcRekapFcData (di-set oleh _fcRenderRekap).
 // Browser print dialog menangani dua kebutuhan sekaligus: cetak fisik & Save as PDF.
-function _fcPrintLampiranPR(selByCodeOverride) {
+function _fcPrintLampiranPR(selByCodeOverride, displayProposeByCode) {
   // Map code -> Set bulan (proposeIdx) yang DICENTANG SAJA, bukan semua bulan
   // yang punya Propose PR di fc.propose — supaya lampiran hanya menampilkan
   // apa yang benar-benar dipilih user, bukan seluruh kebutuhan ke depan.
@@ -16006,7 +16013,7 @@ function _fcPrintLampiranPR(selByCodeOverride) {
       +   rowHtmlSoh('Stock Ending (Existing)',  stockExistingArr, hiSet, null, false, false, fc.soh)
       +   rowHtmlSoh('Stock Ending (+ Propose)', fc.stockFc,       hiSet, null, false, false, fc.soh)
       +   doiArrowRow(doiExistingArr, fc.doiFc, hiSet)
-      +   rowHtmlSoh('Propose PR',   fc.propose,      hiSet, null, true, true)
+      +   rowHtmlSoh('Propose PR',   ((displayProposeByCode && displayProposeByCode[code]) ? displayProposeByCode[code] : fc.propose), hiSet, null, true, true)
       + '</tbody></table>'
       + '</div>';
   });
@@ -16538,6 +16545,20 @@ function _fcCetakLampiranDariExcel(input) {
       // 5) Restore semuanya kembali (data dashboard utuh)
       var _bakPropose = {}, _bakCache = {}, _bakAuto = _fcAutoPropose;
       var _cache = window._fcRekapFcData || {};
+      // Propose PR utk DITAMPILKAN di lampiran: bulan ACC = qty ACC (nanti di-highlight kuning),
+      // bulan lain = propose PR asli dari dashboard (tetap muncul, tanpa highlight).
+      // Stock Ending & DOI tetap dihitung dari qty ACC saja (bukti kebutuhan tidak berubah).
+      var _ospoIdx0 = _buildOSPOIndex();
+      var _dispProposeByCode = {};
+      Object.keys(proposeOverride).forEach(function(code){
+        var orig = (_cache[code] && _cache[code].propose) ? _cache[code].propose.slice() : null;
+        if(!orig){ try { orig = (_calcForecast(code, _ospoIdx0).propose||[]).slice(); } catch(e){ orig = []; } }
+        var merged = new Array(FC_MONTHS.length).fill(0);
+        for(var _mi=0;_mi<FC_MONTHS.length;_mi++){
+          merged[_mi] = (selByCode[code] && selByCode[code][_mi]) ? (proposeOverride[code][_mi]||0) : (orig[_mi]||0);
+        }
+        _dispProposeByCode[code] = merged;
+      });
       Object.keys(proposeOverride).forEach(function(code){
         _bakPropose[code] = _fcPropose[code]; // simpan referensi asli (bisa undefined)
         _fcPropose[code] = proposeOverride[code].slice();
@@ -16546,7 +16567,7 @@ function _fcCetakLampiranDariExcel(input) {
       _fcAutoPropose = false; // pakai propose manual (override) apa adanya
 
       try {
-        _fcPrintLampiranPR(selByCode);
+        _fcPrintLampiranPR(selByCode, _dispProposeByCode);
       } finally {
         // Restore — apa pun yang terjadi, kembalikan data dashboard ke semula
         Object.keys(proposeOverride).forEach(function(code){
@@ -18446,6 +18467,19 @@ function _fcProposeStep(code, mi, delta) {
   }
 }
 
+// Simpan _fcPropose: localStorage langsung, cloud di-debounce (biar tiap ketik tidak echo balik & re-render)
+var _fcProposeSaveTimer = null, _fcProposeSelfEcho = null;
+function _fcProposePersist(){
+  try { localStorage.setItem('fc_propose', JSON.stringify(_fcPropose)); } catch(e){}
+  clearTimeout(_fcProposeSaveTimer);
+  _fcProposeSaveTimer = setTimeout(function(){
+    try {
+      var s = JSON.stringify(_fcPropose);
+      _fcProposeSelfEcho = s;      // tandai supaya echo dari cloud tidak memicu re-render
+      cloudSave('fc_propose', s);
+    } catch(e){}
+  }, 700);
+}
 function _fcProposeEdit(input) {
   var code = input.getAttribute('data-code');
   var mi   = parseInt(input.getAttribute('data-mi'));
@@ -18477,8 +18511,8 @@ function _fcProposeEdit(input) {
   // Update input style based on value
   input.style.color = qty > 0 ? 'var(--amber)' : 'var(--muted)';
   input.style.fontWeight = qty > 0 ? '700' : '400';
-  // Persist to localStorage
-  try { localStorage.setItem('fc_propose', JSON.stringify(_fcPropose)); cloudSave('fc_propose', JSON.stringify(_fcPropose)); } catch(e){}
+  // Persist (localStorage langsung, cloud di-debounce + tandai self-echo)
+  _fcProposePersist();
   _fcLiveRecalc(code);
 }
 
