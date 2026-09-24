@@ -1054,6 +1054,18 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
     </div>
 
     <div class="card">
+      <div class="card-hdr"><span class="card-title">🛢 Pallet RM</span><span id="pallet_rm-status" class="dot off"></span></div>
+      <div style="padding:14px">
+        <div class="fg"><label style="font-size:11px">Google Sheets URL</label><input id="pallet_rm-url" placeholder="https://docs.google.com/spreadsheets/d/..." style="width:100%;font-size:11px"></div>
+        <div class="fg"><label style="font-size:11px">Nama Tab</label><input id="pallet_rm-sheet" placeholder="Pallet RM" style="width:100%;font-size:11px"></div>
+        <button class="btn btn-sm btn-primary" onclick="loadSheetData('pallet_rm')" style="width:100%;margin-top:6px">Muat Pallet RM</button>
+        <div id="pallet_rm-info" style="margin-top:8px;font-size:11px;color:var(--muted)"></div>
+        <div id="pallet_rm-ts" style="font-size:10px;color:var(--muted);margin-top:2px"></div>
+        <div style="margin-top:8px;font-size:10px;color:var(--muted);line-height:1.5">Kolom: <b>ItemCode</b>, <b>Ukuran Kemasan</b> (qty per kemasan), <b>Bobot/Palet</b> (kapasitas per palet). Dipakai Pallet Position untuk hitung jumlah palet Raw Material.</div>
+      </div>
+    </div>
+
+    <div class="card">
       <div class="card-hdr"><span class="card-title">🔧 BOM</span><span id="bom_sheet-status" class="dot off"></span></div>
       <div style="padding:14px">
         <div class="fg"><label style="font-size:11px">Google Sheets URL</label><input id="bom_sheet-url" placeholder="https://docs.google.com/spreadsheets/d/..." style="width:100%;font-size:11px"></div>
