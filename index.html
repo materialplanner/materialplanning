@@ -13376,14 +13376,30 @@ function _fcGrandTotalHTML(items, fcData) {
       + '<td style="text-align:right;padding:4px 10px;font-family:var(--mono);font-size:11px;font-weight:700;background:var(--bg4);border-left:2px solid var(--border2);color:'+r.color+'">'+n_id(Math.round(grand*100)/100)+'</td>'
       + '</tr>';
   }).join('');
+  var collapsed = !!window._fcGrandCollapsed;
   return '<div style="margin:10px 0 4px;border:1px solid var(--border2);border-radius:var(--r);overflow:hidden;background:var(--bg2)">'
-    + '<div style="padding:6px 10px;background:var(--bg3);font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--text)">'
-    +   '📊 Total Keseluruhan '+items.length+' Item — '+(isValue?'<span style="color:var(--teal)">Value (Rp)</span>':'<span style="color:var(--teal)">Qty</span>')
+    + '<div onclick="_fcToggleGrandTotal()" title="Klik untuk sembunyikan / tampilkan" style="padding:6px 10px;background:var(--bg3);font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--text);cursor:pointer;display:flex;align-items:center;gap:6px;user-select:none">'
+    +   '<span id="fc-grand-caret" style="font-size:9px;color:var(--muted);transition:transform .15s;display:inline-block;transform:rotate('+(collapsed?'-90':'0')+'deg)">▼</span>'
+    +   '<span>📊 Total Keseluruhan '+items.length+' Item — '+(isValue?'<span style="color:var(--teal)">Value (Rp)</span>':'<span style="color:var(--teal)">Qty</span>')+'</span>'
+    +   '<span id="fc-grand-lbl" style="margin-left:auto;font-size:9px;font-weight:600;color:var(--muted);text-transform:none;letter-spacing:0">'+(collapsed?'tampilkan':'sembunyikan')+'</span>'
     + '</div>'
-    + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'
+    + '<div id="fc-grand-body" style="overflow-x:auto;'+(collapsed?'display:none':'')+'"><table style="width:100%;border-collapse:collapse">'
     +   '<thead><tr style="background:var(--bg3)"><th style="text-align:left;padding:4px 8px;font-size:9.5px;font-weight:700;color:var(--muted)">Baris</th>'+monthHdr+'<th style="text-align:right;padding:4px 10px;font-size:9.5px;font-weight:700;color:var(--muted);background:var(--bg4);border-left:2px solid var(--border2)">TOTAL</th></tr></thead>'
     +   '<tbody>'+body+'</tbody>'
     + '</table></div></div>';
+}
+// Toggle sembunyikan/tampilkan panel Total Keseluruhan (tanpa re-render seluruh forecast)
+function _fcToggleGrandTotal(){
+  window._fcGrandCollapsed = !window._fcGrandCollapsed;
+  var body=document.getElementById('fc-grand-body');
+  var caret=document.getElementById('fc-grand-caret');
+  if(body){
+    var hide=!!window._fcGrandCollapsed;
+    body.style.display = hide?'none':'';
+    if(caret) caret.style.transform = 'rotate('+(hide?'-90':'0')+'deg)';
+    var lbl=document.getElementById('fc-grand-lbl');
+    if(lbl) lbl.textContent = hide?'tampilkan':'sembunyikan';
+  }
 }
 
 function _fcSetView(v) {
