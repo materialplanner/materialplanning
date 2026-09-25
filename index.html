@@ -6350,8 +6350,8 @@ function _autoRemoveDeliveredCards() {
   });
 
   if(removed.length) {
-    localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData));
-    localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
+    _saveScheduleLS();
+    try { localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides)); } catch(e){}
     cloudSave();
     renderSchedule();
     toast(removed.length + ' kartu jadwal diterima & dihapus otomatis ✓', 'ok');
@@ -9753,6 +9753,39 @@ function _toggleGenDropdown() {
   if(m) m.style.display = m.style.display === 'none' ? 'block' : 'none';
 }
 
+// Prune kartu jadwal 'confirmed' yang tanggal kirimnya sudah lewat > N hari (histori lama).
+// Kartu pending/approved/sent SELALU dipertahankan.
+function _pruneOldSchedule(days){
+  var cutoff = new Date(); cutoff.setHours(0,0,0,0); cutoff.setDate(cutoff.getDate() - (days||45));
+  STATE.scheduleData = (STATE.scheduleData||[]).filter(function(c){
+    if(!c || c.status !== 'confirmed') return true;
+    var iso = c._delivISO || '';
+    if(!iso && c.date && /^\d{2}\/\d{2}\/\d{4}$/.test(c.date)){ var p=c.date.split('/'); iso = p[2]+'-'+p[1]+'-'+p[0]; }
+    if(!iso) return true;
+    var d = new Date(iso);
+    if(isNaN(d)) return true;
+    return d >= cutoff;
+  });
+}
+// Simpan scheduleData ke localStorage tahan-quota: prune histori dulu; kalau tetap penuh,
+// buang semua kartu confirmed (histori) lalu coba lagi. Return string JSON utk cloudSave.
+function _saveScheduleLS(){
+  _pruneOldSchedule(45);
+  var s;
+  try { s = JSON.stringify(STATE.scheduleData||[]); localStorage.setItem('schedule', s); return s; }
+  catch(e){
+    try {
+      STATE.scheduleData = (STATE.scheduleData||[]).filter(function(c){ return c && c.status !== 'confirmed'; });
+      s = JSON.stringify(STATE.scheduleData||[]);
+      localStorage.setItem('schedule', s);
+      try { toast('Storage penuh — histori jadwal terkonfirmasi dibersihkan otomatis','inf'); } catch(_){}
+      return s;
+    } catch(e2){
+      try { toast('Storage browser penuh. Bersihkan data lama, tapi jadwal terbaru tetap tersimpan di cloud.','err'); } catch(_){}
+      try { return JSON.stringify(STATE.scheduleData||[]); } catch(_){ return '[]'; }
+    }
+  }
+}
 function generateSchedule(typeFilter) {
   // Bungkus supaya error apa pun tampil jelas (bukan diam/UI stuck) & bisa didiagnosa
   try { return _generateScheduleImpl(typeFilter); }
@@ -10234,7 +10267,7 @@ function _generateScheduleImpl(typeFilter) {
     // Hanya buat kartu kalau masih ada entries yang lolos (tidak semua di-skip)
     if(selectedEntries.length > 0) {
       newSchedule.push({
-        supName: sup.supName, date: delivDate,
+        supName: sup.supName, date: delivDate, _delivISO: assignedISO,
         items: itemSummaryParts.join(', '), pos: poNums.join(', '),
         entries: selectedEntries,
         status: 'pending', // selalu mulai dari pending, user approve manual
@@ -10259,9 +10292,9 @@ function _generateScheduleImpl(typeFilter) {
   });
 
   STATE.scheduleData = STATE.scheduleData.concat(newSchedule);
-  localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData));
-  localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
-  cloudSave('schedule', JSON.stringify(STATE.scheduleData));
+  var _schedStr = _saveScheduleLS();   // tahan-quota (prune histori + retry)
+  try { localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides)); } catch(e){}
+  cloudSave('schedule', _schedStr);
   cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
   var _sUnconf = document.getElementById('s-unconfirmed');
   if(_sUnconf) _sUnconf.textContent =
