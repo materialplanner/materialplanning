@@ -13856,6 +13856,11 @@ function _calcForecast(code, ospoIdx) {
   for(var am = snapMoIdx; am < FC_MONTHS.length; am++) {
     var am_DOI = _fcGetDOIForItem(code, am); // target DOI khusus bulan ini (override item+bulan jika ada)
     var req_a  = forecast[am];
+    // Basis kebutuhan utk target DOI. Bulan berjalan yg req NET=0 karena OVER-USAGE
+    // (matcom ≥ forecast asli, forecast asli>0) → pakai forecast ASLI (forecastRaw) supaya
+    // OSPO/OSPR DITARIK DULU untuk memenuhi DOI, baru propose PR kalau masih kurang.
+    // Bulan lain / non-over-usage tetap pakai req_a (tidak berubah).
+    var _reqBasis = (am === snapMoIdx && req_a <= 0 && (forecastRaw[am]||0) > 0) ? forecastRaw[am] : req_a;
     var ospr_a = (osprPool2[am]||0) + (osprPulled[am]||0);
 
     // Step 1: pull-forward OSPO dari bulan berikutnya jika DOI < target
@@ -13877,7 +13882,7 @@ function _calcForecast(code, ospoIdx) {
         if(ospoPool2[nx] <= 0) continue;
         var step2 = multiple > 0 ? multiple : 1;
         // Pull hanya sebesar deficit ke target DOI — bukan seluruh PO
-        var stockTarget = req_a * (am_DOI / WD);
+        var stockTarget = _reqBasis * (am_DOI / WD);
         var deficit = Math.max(0, stockTarget - stockAfterOspo);
         if(deficit <= 0) break;
         var pullNeeded = Math.ceil(deficit / step2) * step2;
@@ -13897,7 +13902,7 @@ function _calcForecast(code, ospoIdx) {
     if(!_amOverridden && !_anyOverridden && _pfD >= 0 && _pfD < am_DOI) {
       for(var nxr = am+1; nxr < FC_MONTHS.length; nxr++) {
         if((osprPool2[nxr]||0) <= 0) continue;
-        var deficit2 = Math.max(0, req_a * (am_DOI / WD) - stockAfterOspo);
+        var deficit2 = Math.max(0, _reqBasis * (am_DOI / WD) - stockAfterOspo);
         if(deficit2 <= 0) break;
         var pullR = Math.min(osprPool2[nxr], Math.ceil(deficit2 / _step) * _step);
         if(pullR <= 0) continue;
@@ -13928,15 +13933,8 @@ function _calcForecast(code, ospoIdx) {
       // Bulan terakhir di FC_MONTHS selalu propose — tidak ada data bulan berikutnya
       var _isLastMonth = (am === FC_MONTHS.length - 1);
       var _skipNoDemand = (!_isLastMonth && _next3Req === 0 && stockAfterOspo >= 0);
-      // ── Basis target DOI ──────────────────────────────────────────────────────
-      // Opsi 2 — restock bulan berjalan saat OVER-USAGE:
-      // kalau bulan berjalan req net = 0 karena matcom sudah menghabiskan/melebihi
-      // forecast (matcom ≥ forecast asli, forecast asli > 0), pakai forecast ASLI
-      // (forecastRaw) sebagai basis target — supaya stok tetap direstock meski req net 0.
-      // Trigger tetap butuh _chkDOI < target (stok di bawah target DOI) → tidak ada PR
-      // kalau stok masih aman. Kalau forecast asli memang 0 (bukan over-usage) → basis 0 → tidak propose.
-      var _reqBasis = req_a;
-      if(am === snapMoIdx && req_a <= 0 && (forecastRaw[am]||0) > 0){ _reqBasis = forecastRaw[am]; }
+      // _reqBasis sudah dihitung di atas (dipakai bersama Step 1 tarik OSPO & Step 1.5 tarik OSPR):
+      // untuk bulan berjalan over-usage = forecast asli, selain itu = req_a.
       if(_chkDOI >= 0 && _chkDOI < am_DOI && !_skipNoDemand) {
         var propNeeded = _reqBasis * (am_DOI / WD) - stockAfterOspo;
         if(propNeeded > 0) {
