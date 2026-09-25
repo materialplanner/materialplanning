@@ -3325,6 +3325,9 @@ function _applyRealtimeChanges(keys) {
       switch(k) {
         case 'schedule': {
           var _inSched = JSON.parse(val || '[]');
+          // Echo dari aksi hapus/ubah kita sendiri → jangan merge & jangan re-render
+          // (mencegah kartu/item yg baru dihapus muncul lagi karena data lokal sudah benar)
+          if(val === _schedSelfEcho){ _schedSelfEcho = null; STATE.scheduleData = _inSched; localStorage.setItem('schedule', val); break; }
           if(!STATE.scheduleData || !STATE.scheduleData.length) {
             STATE.scheduleData = _inSched;
           } else {
@@ -3350,22 +3353,27 @@ function _applyRealtimeChanges(keys) {
         case 'po_confirmations':
           var cloudConf = JSON.parse(val || '{}');
           if(!STATE.poConfirmations) STATE.poConfirmations = {};
+          var _affConf = {};
           Object.keys(cloudConf).forEach(function(ck){
             var cc = cloudConf[ck], lc = STATE.poConfirmations[ck];
-            if(!lc) { STATE.poConfirmations[ck] = cc; return; }
+            if(!lc) { STATE.poConfirmations[ck] = cc; _affConf[ck.slice(ck.lastIndexOf('_')+1)]=1; return; }
             // Newest confUpd menang — TANPA pengecualian.
             // Guard lama (skip kalau cc tidak punya confDate tapi lc punya) memblokir
             // penghapusan menyebar ke device lain → field terhapus di device A tetap
             // hidup di device B, lalu ke-push balik ke cloud dan "muncul lagi" di device A.
             if((cc.confUpd||'') > (lc.confUpd||'')) {
               STATE.poConfirmations[ck] = cc;
+              _affConf[ck.slice(ck.lastIndexOf('_')+1)]=1;
             }
           });
           localStorage.setItem('po_confirmations', JSON.stringify(STATE.poConfirmations));
+          // Refresh incoming Projection utk item yg berubah (tanpa Rebuild penuh)
+          if(STATE.projectionData && STATE.projectionData.length){ Object.keys(_affConf).forEach(function(ic){ if(ic) _refreshProjectionIncoming(ic); }); }
           renderFlags.po = true;
           break;
         case 'po_overrides':
           var cloudPO = JSON.parse(val || '{}');
+          var _affOvr = {};
           // Merge: per-key, lebih banyak data menang
           // Kalau local punya data manual (date/confDate) dan cloud tidak → pakai local
           if(!STATE.poOverrides) STATE.poOverrides = {};
@@ -3404,9 +3412,14 @@ function _applyRealtimeChanges(keys) {
               merged.reqQtyOverride = cOvr.reqQtyOverride;
               merged.qtyUpd         = cOvr.qtyUpd;
             }
+            // Tandai item utk refresh incoming Projection kalau confDate/qty berubah
+            if(merged.confDate !== lOvr.confDate || merged.confQty !== lOvr.confQty || merged.date !== lOvr.date){
+              _affOvr[k.slice(k.lastIndexOf('_')+1)] = 1;
+            }
             STATE.poOverrides[k] = merged;
           });
-          // Tambah key cloud yang tidak ada di local
+          // Refresh incoming Projection utk item yg berubah (tanpa Rebuild penuh)
+          if(STATE.projectionData && STATE.projectionData.length){ Object.keys(_affOvr).forEach(function(ic){ if(ic) _refreshProjectionIncoming(ic); }); }
           renderFlags.po = true; renderFlags.sched = true;
           break;
         case 'proj_comments':
@@ -7152,8 +7165,9 @@ function setPOConfQty(el) {
   el.style.color = el.value ? 'var(--amber)' : 'var(--muted)';
   localStorage.setItem('po_confirmations', JSON.stringify(STATE.poConfirmations));
   cloudSave('po_confirmations', JSON.stringify(STATE.poConfirmations));
-  // Update Projection Stock in-memory agar tidak perlu Rebuild
-  var _itemCode = key.slice(key.indexOf('_') + 1);
+  // Update Projection Stock in-memory agar tidak perlu Rebuild.
+  // itemCode = segmen TERAKHIR (key bisa docNum_lineNum_itemCode) — pakai lastIndexOf.
+  var _itemCode = key.slice(key.lastIndexOf('_') + 1);
   if(_itemCode) _refreshProjectionIncoming(_itemCode);
   var row = el.closest('tr');
   if(row) { var upd = row.querySelector('td.tgl-update'); if(upd) upd.textContent = new Date().toLocaleDateString('id-ID'); }
@@ -7186,7 +7200,8 @@ function setPOConfDate(el) {
   el.style.color = el.value ? 'var(--amber)' : 'var(--muted)';
   localStorage.setItem('po_confirmations', JSON.stringify(STATE.poConfirmations));
   cloudSave('po_confirmations', JSON.stringify(STATE.poConfirmations));
-  var _icD = key.slice(key.indexOf('_') + 1);
+  // itemCode = segmen TERAKHIR (key bisa docNum_lineNum_itemCode) — pakai lastIndexOf.
+  var _icD = key.slice(key.lastIndexOf('_') + 1);
   if(_icD) _refreshProjectionIncoming(_icD);
   var row = el.closest('tr');
   if(row) { var upd = row.querySelector('td.tgl-update'); if(upd) upd.textContent = new Date().toLocaleDateString('id-ID'); }
@@ -9786,6 +9801,10 @@ function _saveScheduleLS(){
     }
   }
 }
+// Simpan schedule ke cloud + tandai self-echo supaya sinkron realtime tidak "menghidupkan"
+// kembali kartu/item yg baru saja dihapus/diubah lokal (echo dari aksi sendiri diabaikan).
+var _schedSelfEcho = null;
+function _cloudSaveSchedule(str){ _schedSelfEcho = str; try { cloudSave('schedule', str); } catch(e){} }
 function generateSchedule(typeFilter) {
   // Bungkus supaya error apa pun tampil jelas (bukan diam/UI stuck) & bisa didiagnosa
   try { return _generateScheduleImpl(typeFilter); }
@@ -10294,7 +10313,7 @@ function _generateScheduleImpl(typeFilter) {
   STATE.scheduleData = STATE.scheduleData.concat(newSchedule);
   var _schedStr = _saveScheduleLS();   // tahan-quota (prune histori + retry)
   try { localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides)); } catch(e){}
-  cloudSave('schedule', _schedStr);
+  _cloudSaveSchedule(_schedStr);
   cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
   var _sUnconf = document.getElementById('s-unconfirmed');
   if(_sUnconf) _sUnconf.textContent =
@@ -10485,7 +10504,7 @@ function saveSchedDate(input) {
 
   localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData));
   localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
-  cloudSave('schedule', JSON.stringify(STATE.scheduleData));
+  _cloudSaveSchedule(JSON.stringify(STATE.scheduleData));
   cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
   // Re-render tanpa rebuild full — hanya update header hari
   renderSchedule();
@@ -10635,7 +10654,7 @@ function saveSchedQty(input) {
 
   localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData));
   localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
-  cloudSave('schedule', JSON.stringify(STATE.scheduleData));
+  _cloudSaveSchedule(JSON.stringify(STATE.scheduleData));
   cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
   toast('Qty disimpan ✓', 'ok');
 }
@@ -10688,7 +10707,7 @@ function toggleApprove(idx) {
   }
 
   localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData));
-  cloudSave('schedule', JSON.stringify(STATE.scheduleData));
+  _cloudSaveSchedule(JSON.stringify(STATE.scheduleData));
   renderSchedule();
   // Sync ke GSheet kalau approved
   if(nowApproved && e.entries) {
@@ -10747,7 +10766,7 @@ function removeSchedItem(schedIdx, entryIdx) {
     }).join(', ');
   }
   localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData));
-  cloudSave('schedule', JSON.stringify(STATE.scheduleData));
+  _cloudSaveSchedule(JSON.stringify(STATE.scheduleData));
   renderSchedule();
   toast('Item dihapus dari jadwal ✓', 'ok');
 }
@@ -10784,7 +10803,7 @@ function splitSchedItem(schedIdx, entryIdx) {
   };
   STATE.scheduleData.push(newEntry);
   localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData));
-  cloudSave('schedule', JSON.stringify(STATE.scheduleData));
+  _cloudSaveSchedule(JSON.stringify(STATE.scheduleData));
   renderSchedule();
   toast('Item dipisah ke jadwal terpisah ✓', 'ok');
 }
@@ -10810,7 +10829,7 @@ function approveAll() {
   localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
   cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
   localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData));
-  cloudSave('schedule', JSON.stringify(STATE.scheduleData));
+  _cloudSaveSchedule(JSON.stringify(STATE.scheduleData));
   renderSchedule();
   // Sync semua yang baru di-approve ke GSheet
   STATE.scheduleData.forEach(function(e){
@@ -10847,7 +10866,7 @@ function removeSchedule(idx) {
   }
   STATE.scheduleData.splice(idx, 1);
   localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData));
-  cloudSave('schedule', JSON.stringify(STATE.scheduleData));
+  _cloudSaveSchedule(JSON.stringify(STATE.scheduleData));
   renderSchedule();
 }
 
@@ -10873,7 +10892,7 @@ function resetSchedule() {
   cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
   STATE.scheduleData = [];
   localStorage.setItem('schedule', '[]');
-  cloudSave('schedule', '[]');  // harus disimpan ke Firebase juga
+  _cloudSaveSchedule('[]');  // harus disimpan ke Firebase juga
   document.getElementById('s-unconfirmed').textContent = '—';
   renderSchedule();
   updateDashStats();
@@ -10954,7 +10973,7 @@ async function sendWA() {
     if(data.status === false) throw new Error(data.reason||'Fonnte error');
     STATE.scheduleData[waQueue.idx].status = 'sent';
     localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData));
-    cloudSave('schedule', JSON.stringify(STATE.scheduleData));
+    _cloudSaveSchedule(JSON.stringify(STATE.scheduleData));
     closeModal('modal-wa'); renderSchedule(); toast('WA terkirim ✓','ok');
   } catch(e) { toast('Gagal kirim WA: '+e.message,'err'); }
   finally { document.getElementById('btn-send-wa').disabled = false; document.getElementById('btn-send-wa').textContent = '📲 Kirim WA'; }
@@ -10978,7 +10997,7 @@ async function blastAll() {
     await new Promise(function(r){setTimeout(r,1500)});
   }
   localStorage.setItem('schedule',JSON.stringify(STATE.scheduleData));
-  cloudSave('schedule',JSON.stringify(STATE.scheduleData));
+  _cloudSaveSchedule(JSON.stringify(STATE.scheduleData));
   renderSchedule();
   toast('Terkirim: '+ok+' ✓'+(fail?' | Gagal: '+fail:''),ok?'ok':'err');
 }
@@ -11135,7 +11154,7 @@ function saveFeedback() {
   e.confDate = dateISO || todayISO;
   e.note     = note;
   localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData));
-  cloudSave('schedule', JSON.stringify(STATE.scheduleData));
+  _cloudSaveSchedule(JSON.stringify(STATE.scheduleData));
 
   // Update projection comments for confirmed items — auto-generated, persists through rebuild
   if(!STATE.projComments) STATE.projComments = {};
