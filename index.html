@@ -11234,6 +11234,13 @@ function saveFeedback() {
   });
   try { localStorage.setItem('proj_comments', JSON.stringify(STATE.projComments)); cloudSave('proj_comments', JSON.stringify(STATE.projComments)); } catch(ex) {}
 
+  // Refresh incoming (Tgl/Qty Incoming, DOI+Incoming) di Projection utk tiap item yg dikonfirmasi
+  // di modal ini — tanpa perlu Rebuild. Baca ulang dari poConfirmations via _poResolveConf.
+  (e.entries||[]).forEach(function(en){
+    var ic2 = en.item && en.item.productCode;
+    if(ic2 && typeof _refreshProjectionIncoming === 'function') _refreshProjectionIncoming(ic2);
+  });
+
   closeModal('modal-fb');
   renderSchedule();
   updateDashStats();
