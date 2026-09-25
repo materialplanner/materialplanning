@@ -9754,6 +9754,14 @@ function _toggleGenDropdown() {
 }
 
 function generateSchedule(typeFilter) {
+  // Bungkus supaya error apa pun tampil jelas (bukan diam/UI stuck) & bisa didiagnosa
+  try { return _generateScheduleImpl(typeFilter); }
+  catch(e){
+    console.error('[generateSchedule] error:', e);
+    try { toast('Gagal generate jadwal: ' + (e && e.message ? e.message : e), 'err'); } catch(_){}
+  }
+}
+function _generateScheduleImpl(typeFilter) {
   if(!_requireAdmin('generate jadwal')) return;
 
   // Cleanup: reset isManual untuk PO yang tanggalnya sebelum delivery window berikutnya
@@ -10255,7 +10263,8 @@ function generateSchedule(typeFilter) {
   localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
   cloudSave('schedule', JSON.stringify(STATE.scheduleData));
   cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
-  document.getElementById('s-unconfirmed').textContent =
+  var _sUnconf = document.getElementById('s-unconfirmed');
+  if(_sUnconf) _sUnconf.textContent =
     STATE.scheduleData.filter(function(s){ return s.status !== 'confirmed'; }).length;
 
   // Summary toast
