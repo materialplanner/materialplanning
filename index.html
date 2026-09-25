@@ -8263,6 +8263,10 @@ function _doBuildProjection() {
     // actualMRP: ONLY from MPS→MRP months[currentMonth]
     var curMonthFC = _monthNamesID[new Date().getMonth()]; // e.g. 'Mei'
     var actualMRP  = (mrp.months && mrp.months[curMonthFC] != null) ? mrp.months[curMonthFC] : 0;
+    var _mrpRawForPct = actualMRP; // MRP asli (tanpa NPD) — utk % usage vs forecast
+    // 🆕 Sertakan NPD: NPD dianggap MRP → ikut jadi demand, sehingga Est Usg/day, DOI,
+    // coverage, kategori semua berubah saat switch aktif. Off → tidak berpengaruh (perilaku lama).
+    if(window._inclNPD){ actualMRP += (npdMap[code] || 0); }
     // max3MRP: still from GSheets (mrp.max3MRP)
     var max3MRP    = mrp.max3MRP || 0;
 
@@ -8403,7 +8407,7 @@ function _doBuildProjection() {
     var isUrgent = !hasNoDemand && coverageDate <= getCutoff();
 
     // % Usage vs Forecast: if(MRP2+1=0; if(actualUsage<=0; 0; 1); actualUsage/MRP2+1)
-    var pctUsageVsForecast = actualMRP === 0 ? (actualUsageDaily <= 0 ? 0 : 1) : actualUsageDaily / actualMRP;
+    var pctUsageVsForecast = _mrpRawForPct === 0 ? (actualUsageDaily <= 0 ? 0 : 1) : actualUsageDaily / _mrpRawForPct;
 
     projection.push({
       productCode: code, description: description, realName: realName, uom: uom,
