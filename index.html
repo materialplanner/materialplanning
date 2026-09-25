@@ -3298,7 +3298,7 @@ function cloudStartRealtime() {
         if(_myLastWrite[key] && (Date.now() - _myLastWrite[key]) < 5000) return;
         // Skip jika value identik
         if(localStorage.getItem(key) === val) return;
-        _origSetItem.call(localStorage, key, val); // bypass cloudSave for incoming data
+        try { _origSetItem.call(localStorage, key, val); } catch(e){} // bypass cloudSave; quota-safe (disk penuh → skip cache lokal, data tetap dari cloud)
         changed.push(key);
       }
     });
@@ -3711,7 +3711,10 @@ function _applyRealtimeChanges(keys) {
 // ── localStorage cloud sync — patch native setItem to auto-sync to Firebase ──
 var _origSetItem = Storage.prototype.setItem;
 Storage.prototype.setItem = function(k, v) {
-  _origSetItem.call(this, k, v);
+  // Quota-safe: kalau localStorage penuh, JANGAN lempar error (dulu ini bikin removeSchedItem
+  // & fungsi lain berhenti di tengah → hapus jadwal "tidak jalan"). Data tetap tersimpan ke cloud.
+  try { _origSetItem.call(this, k, v); }
+  catch(e){ if(e && e.name === 'QuotaExceededError') { try { console.warn('[localStorage penuh] skip cache lokal:', k); } catch(_){} } else { throw e; } }
   if(CLOUD_KEYS.indexOf(k) >= 0) cloudSave(k, v);
 };
 
@@ -10791,7 +10794,11 @@ function removeSchedItem(schedIdx, entryIdx) {
   }
   localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData));
   _cloudSaveSchedule(JSON.stringify(STATE.scheduleData));
+  // Render ulang di tick berikutnya — DOM yg diganti saat event klik masih berjalan
+  // (elemen ✕ yg diklik ikut dihancurkan) bisa bikin tampilan tidak ke-update sampai
+  // interaksi berikutnya. setTimeout memastikan render jalan setelah event/confirm selesai.
   renderSchedule();
+  setTimeout(function(){ try { renderSchedule(); } catch(e){} }, 0);
   toast('Item dihapus dari jadwal ✓', 'ok');
 }
 
@@ -10892,6 +10899,7 @@ function removeSchedule(idx) {
   localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData));
   _cloudSaveSchedule(JSON.stringify(STATE.scheduleData));
   renderSchedule();
+  setTimeout(function(){ try { renderSchedule(); } catch(e){} }, 0); // render ulang setelah event klik selesai
 }
 
 function resetSchedule() {
