@@ -3330,23 +3330,24 @@ function _applyRealtimeChanges(keys) {
           if(val === _schedSelfEcho){ _schedSelfEcho = null; STATE.scheduleData = _inSched; localStorage.setItem('schedule', val); break; }
           if(!STATE.scheduleData || !STATE.scheduleData.length) {
             STATE.scheduleData = _inSched;
+          } else if(!_inSched.length) {
+            // Cloud kosong tapi lokal ADA isi → snapshot stale, JANGAN wipe. Pertahankan lokal.
+            break;
           } else {
-            // Smart merge: status card tidak boleh didowngrade oleh push yang lebih stale
-            // (confirmed → pending terjadi kalau device lain push schedule lama setelah kita confirm)
+            // Union merge — JANGAN buang kartu lokal yg tak ada di cloud (mencegah "jadwal hilang").
+            // Pertahankan kartu LOKAL secara default (aksi user di device ini paling baru);
+            // ambil versi cloud HANYA kalau statusnya lebih tinggi (mis. device lain sudah confirm).
             var _sRank = {pending:0, approved:1, sent:2, partial:3, confirmed:4};
-            var _lMap = {};
-            STATE.scheduleData.forEach(function(c){
-              _lMap[(c.supName||'')+'|||'+(c.date||'')] = c;
+            var _byKey = {};
+            STATE.scheduleData.forEach(function(c){ _byKey[(c.supName||'')+'|||'+(c.date||'')] = c; });
+            _inSched.forEach(function(c){
+              var k = (c.supName||'')+'|||'+(c.date||''); var l = _byKey[k];
+              if(!l){ _byKey[k] = c; return; }
+              if((_sRank[c.status]||0) > (_sRank[l.status]||0)) _byKey[k] = c;
             });
-            STATE.scheduleData = _inSched.map(function(c){
-              var k = (c.supName||'')+'|||'+(c.date||'');
-              var l = _lMap[k];
-              if(!l) return c;
-              // Kalau lokal punya status lebih tinggi → pertahankan kartu lokal
-              if((_sRank[l.status]||0) > (_sRank[c.status]||0)) return l;
-              return c;
-            });
+            STATE.scheduleData = Object.keys(_byKey).map(function(k){ return _byKey[k]; });
           }
+          localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData));
           renderFlags.sched = true; renderFlags.dash = true;
           break;
         }
@@ -10661,11 +10662,14 @@ function saveSchedQty(input) {
 
 // Get total request qty for a schedule entry (sum of distributed PO overrides)
 function _getEntryReqQty(en) {
-  // Pakai reqQtyOverride kalau user sudah set manual, fallback ke openQty dari SAP
+  // Pakai reqQtyOverride kalau user sudah set manual, fallback ke openQty dari SAP.
+  // Abaikan override 0 yg nyangkut kalau PO masih punya openQty > 0 (jadwal qty 0 tak bermakna —
+  // untuk mengecualikan item, hapus barisnya, bukan set 0). Mencegah bug "ke-generate 0".
   if(!en.pos || !en.pos.length) return 0;
   return en.pos.reduce(function(s,po){
     var ovr = _poOvr(po);
-    var qty = (ovr.reqQtyOverride != null) ? ovr.reqQtyOverride : (po.openQty||0);
+    var oq = po.openQty||0;
+    var qty = (ovr.reqQtyOverride != null && !(Number(ovr.reqQtyOverride)===0 && oq>0)) ? ovr.reqQtyOverride : oq;
     return s + qty;
   }, 0);
 }
