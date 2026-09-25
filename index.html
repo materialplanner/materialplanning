@@ -3347,7 +3347,7 @@ function _applyRealtimeChanges(keys) {
             });
             STATE.scheduleData = Object.keys(_byKey).map(function(k){ return _byKey[k]; });
           }
-          localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData));
+          try { localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData)); } catch(e){} // quota-safe
           renderFlags.sched = true; renderFlags.dash = true;
           break;
         }
@@ -3756,6 +3756,21 @@ function appStart() {
       console.error('[boot] _appInit CRASH:', e.message, e.stack);
       toast('Boot error: ' + e.message, 'err');
     }
+    // ── Pulihkan schedule dari CLOUD kalau localStorage penuh (quota) ──────────
+    // Kalau localStorage penuh, boot gagal menulis 'schedule' ke localStorage →
+    // _appInit membaca kosong → jadwal "hilang". Cloud tetap punya datanya
+    // (cloudSave menulis langsung ke Firestore, tak lewat localStorage). Ambil dari situ.
+    try {
+      if(cloudData && cloudData['schedule']) {
+        var _cs = JSON.parse(cloudData['schedule'] || '[]');
+        if(_cs && _cs.length && (!STATE.scheduleData || !STATE.scheduleData.length)) {
+          STATE.scheduleData = _cs;
+          if(typeof renderSchedule === 'function') { try { renderSchedule(); } catch(_e){} }
+          if(typeof updateDashStats === 'function') { try { updateDashStats(); } catch(_e){} }
+          console.log('[boot] schedule dipulihkan dari cloud (localStorage penuh):', _cs.length, 'kartu');
+        }
+      }
+    } catch(e){ console.warn('[boot] restore schedule dari cloud gagal:', e.message); }
     removeSplash(); // always remove splash
     // Auto-load Sheets jika data belum ada tapi URL sudah ada di cloud
     setTimeout(function(){
