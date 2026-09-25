@@ -10352,6 +10352,11 @@ function _enUOM(en) {
 }
 
 function renderSchedule() {
+  // Bungkus: kalau render error, JANGAN diam (DOM lama tertinggal → kelihatan "hapus tidak jalan").
+  try { return _renderScheduleImpl(); }
+  catch(e){ console.error('[renderSchedule] error:', e); try { toast('Render jadwal error: ' + (e && e.message ? e.message : e), 'err'); } catch(_){} }
+}
+function _renderScheduleImpl() {
   var ftype = (document.getElementById('f-sched-type')||{value:''}).value;
   var fsrch = (document.getElementById('srch-sched')||{value:''}).value.toLowerCase();
   var items = (schedTab === 'all' ? STATE.scheduleData : STATE.scheduleData.filter(function(s){return s.status === schedTab}))
