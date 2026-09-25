@@ -13835,14 +13835,23 @@ function _calcForecast(code, ospoIdx) {
       // Bulan terakhir di FC_MONTHS selalu propose — tidak ada data bulan berikutnya
       var _isLastMonth = (am === FC_MONTHS.length - 1);
       var _skipNoDemand = (!_isLastMonth && _next3Req === 0 && stockAfterOspo >= 0);
+      // ── Basis target DOI ──────────────────────────────────────────────────────
+      // Opsi 2 — restock bulan berjalan saat OVER-USAGE:
+      // kalau bulan berjalan req net = 0 karena matcom sudah menghabiskan/melebihi
+      // forecast (matcom ≥ forecast asli, forecast asli > 0), pakai forecast ASLI
+      // (forecastRaw) sebagai basis target — supaya stok tetap direstock meski req net 0.
+      // Trigger tetap butuh _chkDOI < target (stok di bawah target DOI) → tidak ada PR
+      // kalau stok masih aman. Kalau forecast asli memang 0 (bukan over-usage) → basis 0 → tidak propose.
+      var _reqBasis = req_a;
+      if(am === snapMoIdx && req_a <= 0 && (forecastRaw[am]||0) > 0){ _reqBasis = forecastRaw[am]; }
       if(_chkDOI >= 0 && _chkDOI < am_DOI && !_skipNoDemand) {
-        var propNeeded = req_a * (am_DOI / WD) - stockAfterOspo;
+        var propNeeded = _reqBasis * (am_DOI / WD) - stockAfterOspo;
         if(propNeeded > 0) {
           propQty = moq > 0 ? Math.max(moq, Math.ceil(propNeeded / _step) * _step) : Math.max(_step||1, Math.ceil(propNeeded / (_step||1)) * (_step||1));
           _chkStock[am] = stockAfterOspo + propQty;
           var _verDOI = calcDOI(_chkStock)[am];
           var _safeIter = 0;
-          while(_verDOI < am_DOI && propQty < req_a * 24 && _safeIter++ < 50) {
+          while(_verDOI < am_DOI && propQty < _reqBasis * 24 && _safeIter++ < 50) {
             propQty += (_step > 0 ? _step : 1);
             _chkStock[am] = stockAfterOspo + propQty;
             _verDOI = calcDOI(_chkStock)[am];
@@ -13950,7 +13959,8 @@ function _calcForecast(code, ospoIdx) {
     forecastOspo: forecastOspo, stockFc: stockFc, doiFc: doiFc,
     propose: totalProp, pullNotifs: pullNotifs,
     lt_days: lt_days, moq: moq, multiple: multiple, maxDOI: maxDOI,
-    soh: soh, suggestions: suggestions, npdAdd: npdAddArr
+    soh: soh, suggestions: suggestions, npdAdd: npdAddArr,
+    forecastRaw: forecastRaw, snapMoIdx: snapMoIdx
   };
 }
 
@@ -14231,6 +14241,18 @@ function _fcDetailRow(code, fc, master) {
   matcomRows.push(['Matcom '+_MNAME[curMo],
     '<span style="color:'+(_mcQty>0?'var(--teal)':'var(--muted)')+';font-weight:600">'+n_id(_mcQty)+'</span>'
     +' <small style="color:var(--muted)">'+_mcUomDisplay+'</small>']);
+  // Forecast ASLI bulan berjalan (MRP sebelum dikurangi matcom) + % usage terhadap forecast asli
+  var _fcRawCur = (fc.forecastRaw && fc.snapMoIdx!=null) ? (fc.forecastRaw[fc.snapMoIdx]||0) : 0;
+  matcomRows.push(['Forecast '+_MNAME[curMo]+' (asli)',
+    '<span style="color:'+(_fcRawCur>0?'var(--text)':'var(--muted)')+';font-weight:600">'+n_id(_fcRawCur)+'</span>'
+    +' <small style="color:var(--muted)">'+_mcUomDisplay+'</small>'
+    +' <small style="color:var(--muted);font-size:9px">(sebelum matcom)</small>']);
+  var _usagePct = _fcRawCur>0 ? (_mcQty/_fcRawCur*100) : (_mcQty>0 ? Infinity : 0);
+  var _usageStr = (_fcRawCur>0) ? (n_id(Math.round(_usagePct))+'%') : (_mcQty>0 ? '∞ (forecast 0)' : '—');
+  var _usageColor = !isFinite(_usagePct) ? 'var(--red)' : (_usagePct>=100 ? 'var(--red)' : (_usagePct>=80 ? 'var(--amber)' : 'var(--muted)'));
+  matcomRows.push(['% Usage '+_MNAME[curMo],
+    '<span style="color:'+_usageColor+';font-weight:700">'+_usageStr+'</span>'
+    +(isFinite(_usagePct)&&_usagePct>=100?' <small style="color:var(--red);font-size:9px">over</small>':'')]);
   // SOH display: kalau ada BOM parents, tampilkan "asli + assembly" bukan langsung total
   var _sohDisplay = (function() {
     var _bomPar = BOM_PARENTS[code];
