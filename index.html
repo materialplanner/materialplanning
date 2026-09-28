@@ -14218,31 +14218,6 @@ function _fcShowReqDetail(code, mi) {
       }
     }
 
-    // ── Perbandingan matcom (bulan berjalan) — level RM ───────────────────────
-    // Matcom (SAP Report 80) hanya tersedia AGREGAT per material (RM), tidak ada
-    // dimensi FG. Jadi % usage per FG tidak bisa dihitung; yang ditampilkan adalah
-    // % usage level RM + share plan tiap FG.
-    var moNum   = (window.FC_MONTH_NUMS || [])[mi];
-    var isRunMo = (moNum === (new Date().getMonth() + 1));
-    if(isRunMo) {
-      var mm       = (STATE.matcomMonthly || {})[code] || {};
-      var mcUom    = ((STATE.masterData || {})[code] || {}).uom || '';
-      var mcFactor = /^(g|gr|gram)$/i.test((mcUom || '').trim()) ? 0.001 : 1;
-      var matcom   = (mm[moNum] || 0) * mcFactor;
-      var reqBase  = total; // = MRP asli (Requirement raw)
-      var usagePct = reqBase > 0 ? (matcom / reqBase * 100) : (matcom > 0 ? 999 : 0);
-      var sisa     = Math.round((reqBase - matcom) * 1000) / 1000;
-      html += '<div style="margin-top:14px;padding:10px 12px;background:var(--bg3);border-radius:var(--r);font-size:11.5px;line-height:1.7">'
-        + '<div style="font-weight:600;color:var(--text);margin-bottom:4px">Bulan berjalan — Pemakaian vs Requirement (level RM)</div>'
-        + 'Requirement (MRP asli): <strong style="color:var(--teal)">' + n_id(Math.round(reqBase * 1000) / 1000) + ' ' + uom + '</strong><br>'
-        + 'Sudah dipakai (matcom): <strong style="color:var(--amber)">' + n_id(Math.round(matcom * 1000) / 1000) + ' ' + uom + '</strong> '
-        + '→ <strong style="color:' + (usagePct >= 100 ? 'var(--red)' : 'var(--text)') + '">' + (usagePct >= 999 ? '>100' : usagePct.toFixed(1)) + '% usage</strong><br>'
-        + 'Sisa requirement: <strong style="color:' + (sisa < 0 ? 'var(--red)' : 'var(--text)') + '">' + n_id(sisa) + ' ' + uom + '</strong>'
-        + (usagePct >= 100 ? ' <span style="color:var(--red)">(over-usage: pemakaian melebihi plan)</span>' : '')
-        + '<div style="margin-top:6px;font-size:10.5px;color:var(--muted)">⚠ Matcom dari SAP hanya agregat per material — tidak bisa dipecah per FG. Kolom "%" di tabel atas adalah <em>share plan</em> tiap FG terhadap requirement, bukan realisasi pemakaian per FG.</div>'
-        + '</div>';
-    }
-
     // ── Ringkasan penyesuaian → Requirement yang tampil di tabel ──────────────
     try {
       var fc2 = _calcForecast(code);
