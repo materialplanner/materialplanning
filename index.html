@@ -2028,6 +2028,18 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
   </div>
 </div>
 
+<!-- Modal Rincian Requirement per FG -->
+<div class="modal-bg" id="modal-req-detail">
+  <div class="modal" style="width:720px;max-width:96vw">
+    <h3 style="margin-bottom:2px">Rincian Requirement — <span id="reqd-code" style="color:var(--teal);font-size:14px"></span></h3>
+    <div id="reqd-sub" style="font-size:11.5px;color:var(--muted);margin-bottom:10px"></div>
+    <div id="reqd-body" style="max-height:60vh;overflow:auto"></div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="closeModal('modal-req-detail')">Tutup</button>
+    </div>
+  </div>
+</div>
+
 <!-- Modal WA Preview -->
 <div class="modal-bg" id="modal-wa">
   <div class="modal" style="width:520px">
@@ -14107,6 +14119,105 @@ function _fcVal(qty, code) {
   return (qty || 0) * c;
 }
 // Konversi array qty → array value (dipakai untuk baris forecast/ospo/stock/propose)
+// ── Rincian Requirement per FG (klik angka Requirement di tabel Forecast) ─────
+// Dekomposisi mengikuti PERSIS rumus explosion MPS→MRP:
+//   requirement(RM, bulan) = Σ atas baris BOM (rm=code, type 'N', rm diawali 3/4)
+//                            _mpsData[fg][bulan] × qty
+// Angka "raw MRP" ini = forecastRaw[mi]. Nilai Requirement yang tampil di tabel
+// bisa berbeda utk bulan berjalan (dikurangi matcom) atau saat "Sertakan NPD" aktif
+// (ditambah kebutuhan NPD) — perbedaan itu ditampilkan sebagai catatan di bawah.
+function _fcShowReqDetail(code, mi) {
+  if(!_bomData || !_bomData.length || !_mpsData || !Object.keys(_mpsData).length) {
+    toast('Data BOM/MPS belum dimuat — rincian FG tidak tersedia', 'err'); return;
+  }
+  if(localStorage.getItem('mrp_source') !== 'mps') {
+    toast('Requirement bukan dari MPS→MRP (sumber GSheet) — rincian per FG tidak tersedia', 'err'); return;
+  }
+  var moNum  = (window.FC_MONTH_NUMS || [])[mi];
+  var mpsKey = MRP_MONTHS[(moNum || 1) - 1];           // nama bulan singkat utk _mpsData
+  var monLbl = (window.FC_MONTHS || [])[mi] + " '" + _fcYearForMonthIdx(mi);
+
+  // Agregasi kontribusi per FG (jumlahkan qty bila 1 FG punya >1 baris BOM utk RM ini)
+  var byFg = {}, total = 0;
+  _bomData.forEach(function(b) {
+    if(b.rm !== code || b.type !== 'N' || !/^[34]/.test(b.rm || '')) return;
+    var mps = _mpsData[b.fg]; if(!mps) return;
+    var plan = mps[mpsKey] || 0; if(plan <= 0) return;
+    var q = b.qty || 0; if(q <= 0) return;
+    if(!byFg[b.fg]) byFg[b.fg] = { fg: b.fg, desc: b.fgDesc || _fgDescFromMps[b.fg] || '', plan: plan, qty: 0 };
+    byFg[b.fg].qty += q;
+  });
+  var list = Object.keys(byFg).map(function(k) {
+    var o = byFg[k]; o.contrib = o.plan * o.qty; total += o.contrib; return o;
+  }).sort(function(a, b) { return b.contrib - a.contrib; });
+
+  var uom = ((STATE.masterData || {})[code] || {}).uom
+         || ((STATE.mrpData || {})[code] || {}).uom || 'KG';
+  var codeName = ((STATE.mrpData || {})[code] || {}).desc
+              || ((STATE.masterData || {})[code] || {}).desc || '';
+
+  document.getElementById('reqd-code').textContent = code + (codeName ? ' · ' + codeName : '');
+  document.getElementById('reqd-sub').innerHTML =
+    'Bulan <strong style="color:var(--text)">' + monLbl + '</strong> · '
+    + list.length + ' FG · Requirement (MRP asli) = <strong style="color:var(--teal)">'
+    + n_id(Math.round(total * 1000) / 1000) + ' ' + uom + '</strong>';
+
+  var html;
+  if(!list.length) {
+    html = '<div style="padding:24px;text-align:center;color:var(--muted);font-size:12px">Tidak ada FG dengan plan &gt; 0 di bulan ini untuk RM ini.</div>';
+  } else {
+    html = '<table style="width:100%;border-collapse:collapse;font-size:11.5px">'
+      + '<thead><tr style="border-bottom:1px solid var(--border2)">'
+      + '<th style="text-align:left;padding:6px 8px;color:var(--muted);font-weight:600">Kode FG</th>'
+      + '<th style="text-align:left;padding:6px 8px;color:var(--muted);font-weight:600">Nama FG</th>'
+      + '<th style="text-align:right;padding:6px 8px;color:var(--muted);font-weight:600">Plan (pcs)</th>'
+      + '<th style="text-align:right;padding:6px 8px;color:var(--muted);font-weight:600">Qty/pcs</th>'
+      + '<th style="text-align:right;padding:6px 8px;color:var(--muted);font-weight:600">Requirement (' + uom + ')</th>'
+      + '<th style="text-align:right;padding:6px 8px;color:var(--muted);font-weight:600">%</th>'
+      + '</tr></thead><tbody>';
+    list.forEach(function(o) {
+      var pct = total > 0 ? (o.contrib / total * 100) : 0;
+      html += '<tr style="border-bottom:1px dotted var(--border)">'
+        + '<td style="padding:5px 8px;font-family:var(--mono);color:var(--text)">' + o.fg + '</td>'
+        + '<td style="padding:5px 8px;color:var(--muted)">' + (o.desc || '—') + '</td>'
+        + '<td style="padding:5px 8px;text-align:right;font-family:var(--mono);color:var(--text)">' + n_id(Math.round(o.plan)) + '</td>'
+        + '<td style="padding:5px 8px;text-align:right;font-family:var(--mono);color:var(--muted)">' + n_id(Math.round(o.qty * 1000) / 1000) + '</td>'
+        + '<td style="padding:5px 8px;text-align:right;font-family:var(--mono);color:var(--teal);font-weight:600">' + n_id(Math.round(o.contrib * 1000) / 1000) + '</td>'
+        + '<td style="padding:5px 8px;text-align:right;font-family:var(--mono);color:var(--muted)">' + pct.toFixed(1) + '%</td>'
+        + '</tr>';
+    });
+    html += '<tr style="border-top:2px solid var(--border2);font-weight:700">'
+      + '<td style="padding:6px 8px" colspan="4">TOTAL Requirement (MRP asli)</td>'
+      + '<td style="padding:6px 8px;text-align:right;font-family:var(--mono);color:var(--teal)">' + n_id(Math.round(total * 1000) / 1000) + '</td>'
+      + '<td style="padding:6px 8px;text-align:right">100%</td></tr>';
+    html += '</tbody></table>';
+
+    // Catatan penyesuaian: matcom (bulan berjalan) & NPD
+    try {
+      var fc2 = _calcForecast(code);
+      if(fc2) {
+        var shown = (fc2.forecast && fc2.forecast[mi] != null) ? fc2.forecast[mi] : null;
+        var raw   = (fc2.forecastRaw && fc2.forecastRaw[mi] != null) ? fc2.forecastRaw[mi] : total;
+        var npd   = (fc2.npdAdd && fc2.npdAdd[mi]) ? fc2.npdAdd[mi] : 0;
+        var diff  = (shown != null) ? Math.round((raw - shown - (npd ? 0 : 0)) * 1000) / 1000 : 0;
+        var notes = [];
+        var consumed = Math.round((raw + npd - (shown != null ? shown : raw)) * 1000) / 1000;
+        if(consumed > 0.001) notes.push('Dikurangi pemakaian (matcom) bulan berjalan: <strong style="color:var(--amber)">−' + n_id(consumed) + ' ' + uom + '</strong>');
+        if(npd > 0.001) notes.push('Ditambah kebutuhan NPD (Sertakan NPD aktif): <strong style="color:var(--teal)">+' + n_id(Math.round(npd * 1000) / 1000) + ' ' + uom + '</strong>');
+        if(shown != null && Math.abs(shown - raw) > 0.001) {
+          html += '<div style="margin-top:10px;padding:8px 10px;background:var(--bg3);border-radius:var(--r);font-size:11px;color:var(--muted);line-height:1.6">'
+            + '<div style="font-weight:600;color:var(--text);margin-bottom:3px">Penyesuaian → Requirement tampil di tabel</div>'
+            + (notes.length ? notes.map(function(n){return '• ' + n;}).join('<br>') : '')
+            + '<br>Requirement tampil = <strong style="color:var(--text)">' + n_id(Math.round(shown * 1000) / 1000) + ' ' + uom + '</strong>'
+            + '</div>';
+        }
+      }
+    } catch(e) { /* diamkan: catatan opsional */ }
+  }
+  document.getElementById('reqd-body').innerHTML = html;
+  document.getElementById('modal-req-detail').classList.add('open');
+}
+
 function _fcValArr(arr, code) {
   if(!window._fcValueView || !arr) return arr;
   var c = _fcCOGM(code);
@@ -14462,7 +14573,7 @@ function _fcDetailRow(code, fc, master) {
       + cells + _totO + '</tr>';
   }
 
-  function gRow(label, vals, clsFn, editable, fieldCode) {
+  function gRow(label, vals, clsFn, editable, fieldCode, cellClick) {
     var isValueMode = window._fcValueView;
     var isDOI = (label === 'DOI (hari)');
     var cells = vals.map(function(v, i) {
@@ -14496,6 +14607,9 @@ function _fcDetailRow(code, fc, master) {
       }
       var style = clsFn ? clsFn(v, i) : 'color:var(--text)';
       var disp  = (v===0||v===null||v===undefined) ? '<span style="color:var(--hint)">—</span>' : n_id(v);
+      if(cellClick && v>0) {
+        return '<td onclick="event.stopPropagation();'+cellClick+'(\''+code+'\','+i+')" title="Klik: rincian FG pembentuk requirement" style="text-align:right;padding:5px 5px;font-family:var(--mono);font-size:11px;cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px;'+style+'">'+disp+'</td>';
+      }
       return '<td style="text-align:right;padding:5px 5px;font-family:var(--mono);font-size:11px;'+style+'">'+disp+'</td>';
     }).join('');
     var rowLabel = label==='Stock (Ending)'?'stock':label==='DOI (hari)'?'doi':label==='Propose PR'?'propose':label==='Adjusted OSPO'?'fcospo':label==='OSPR'?'fcospr':'';
@@ -14581,7 +14695,7 @@ function _fcDetailRow(code, fc, master) {
           + '</td>'
           + cells + '<td style="background:var(--bg3);border-left:2px solid var(--border2)"></td></tr>';
       })() : '')
-    + gRow('Requirement', _fcValArr(fc.forecast, code), function(v,i){ return (window._inclNPD && fc.npdAdd && fc.npdAdd[i]>0) ? 'background:var(--teal-bg);color:var(--teal);font-weight:700' : 'color:var(--text)'; })
+    + gRow('Requirement', _fcValArr(fc.forecast, code), function(v,i){ return (window._inclNPD && fc.npdAdd && fc.npdAdd[i]>0) ? 'background:var(--teal-bg);color:var(--teal);font-weight:700' : 'color:var(--text)'; }, false, code, '_fcShowReqDetail')
     + (isFcView
         ? gRow('Adjusted OSPO', _fcValArr(fc.forecastOspo, code), function(v){ return v>0?'color:var(--teal);font-weight:600':'color:var(--hint)'; })
         : gRowOspo('OSPO', _fcValArr(fc.ospo, code), _fcValArr(fc.ospoBase, code), code, 'ospo')
