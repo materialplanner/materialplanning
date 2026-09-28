@@ -14192,23 +14192,73 @@ function _fcShowReqDetail(code, mi) {
       + '<td style="padding:6px 8px;text-align:right">100%</td></tr>';
     html += '</tbody></table>';
 
-    // Catatan penyesuaian: matcom (bulan berjalan) & NPD
+    // ── Detail NPD (FG/formula apa) — saat "Sertakan NPD" aktif ───────────────
+    var npdTotal = 0;
+    if(window._inclNPD && typeof _npdDetailByCode === 'function') {
+      var npdList = (_npdDetailByCode(code) || []).filter(function(d){ return d.prodMonthIdx === mi && d.kg > 0; });
+      if(npdList.length) {
+        npdList.sort(function(a, b){ return b.kg - a.kg; });
+        npdList.forEach(function(d){ npdTotal += d.kg; });
+        html += '<div style="margin-top:14px;font-size:11px;font-weight:600;color:var(--text)">Tambahan Kebutuhan NPD di bulan ini ('
+          + npdList.length + ' formula · +' + n_id(Math.round(npdTotal * 1000) / 1000) + ' ' + uom + ')</div>';
+        html += '<table style="width:100%;border-collapse:collapse;font-size:11.5px;margin-top:4px">'
+          + '<thead><tr style="border-bottom:1px solid var(--border2)">'
+          + '<th style="text-align:left;padding:6px 8px;color:var(--muted);font-weight:600">FG / Project NPD</th>'
+          + '<th style="text-align:left;padding:6px 8px;color:var(--muted);font-weight:600">Formula</th>'
+          + '<th style="text-align:right;padding:6px 8px;color:var(--muted);font-weight:600">Kebutuhan (' + uom + ')</th>'
+          + '</tr></thead><tbody>';
+        npdList.forEach(function(d){
+          html += '<tr style="border-bottom:1px dotted var(--border)">'
+            + '<td style="padding:5px 8px;color:var(--text)">📁 ' + (d.fg || '(tanpa nama)') + '</td>'
+            + '<td style="padding:5px 8px;color:var(--muted)">' + (d.formula || '—') + '</td>'
+            + '<td style="padding:5px 8px;text-align:right;font-family:var(--mono);color:var(--teal);font-weight:600">' + n_id(Math.round(d.kg * 1000) / 1000) + '</td>'
+            + '</tr>';
+        });
+        html += '</tbody></table>';
+      }
+    }
+
+    // ── Perbandingan matcom (bulan berjalan) — level RM ───────────────────────
+    // Matcom (SAP Report 80) hanya tersedia AGREGAT per material (RM), tidak ada
+    // dimensi FG. Jadi % usage per FG tidak bisa dihitung; yang ditampilkan adalah
+    // % usage level RM + share plan tiap FG.
+    var moNum   = (window.FC_MONTH_NUMS || [])[mi];
+    var isRunMo = (moNum === (new Date().getMonth() + 1));
+    if(isRunMo) {
+      var mm       = (STATE.matcomMonthly || {})[code] || {};
+      var mcUom    = ((STATE.masterData || {})[code] || {}).uom || '';
+      var mcFactor = /^(g|gr|gram)$/i.test((mcUom || '').trim()) ? 0.001 : 1;
+      var matcom   = (mm[moNum] || 0) * mcFactor;
+      var reqBase  = total; // = MRP asli (Requirement raw)
+      var usagePct = reqBase > 0 ? (matcom / reqBase * 100) : (matcom > 0 ? 999 : 0);
+      var sisa     = Math.round((reqBase - matcom) * 1000) / 1000;
+      html += '<div style="margin-top:14px;padding:10px 12px;background:var(--bg3);border-radius:var(--r);font-size:11.5px;line-height:1.7">'
+        + '<div style="font-weight:600;color:var(--text);margin-bottom:4px">Bulan berjalan — Pemakaian vs Requirement (level RM)</div>'
+        + 'Requirement (MRP asli): <strong style="color:var(--teal)">' + n_id(Math.round(reqBase * 1000) / 1000) + ' ' + uom + '</strong><br>'
+        + 'Sudah dipakai (matcom): <strong style="color:var(--amber)">' + n_id(Math.round(matcom * 1000) / 1000) + ' ' + uom + '</strong> '
+        + '→ <strong style="color:' + (usagePct >= 100 ? 'var(--red)' : 'var(--text)') + '">' + (usagePct >= 999 ? '>100' : usagePct.toFixed(1)) + '% usage</strong><br>'
+        + 'Sisa requirement: <strong style="color:' + (sisa < 0 ? 'var(--red)' : 'var(--text)') + '">' + n_id(sisa) + ' ' + uom + '</strong>'
+        + (usagePct >= 100 ? ' <span style="color:var(--red)">(over-usage: pemakaian melebihi plan)</span>' : '')
+        + '<div style="margin-top:6px;font-size:10.5px;color:var(--muted)">⚠ Matcom dari SAP hanya agregat per material — tidak bisa dipecah per FG. Kolom "%" di tabel atas adalah <em>share plan</em> tiap FG terhadap requirement, bukan realisasi pemakaian per FG.</div>'
+        + '</div>';
+    }
+
+    // ── Ringkasan penyesuaian → Requirement yang tampil di tabel ──────────────
     try {
       var fc2 = _calcForecast(code);
       if(fc2) {
         var shown = (fc2.forecast && fc2.forecast[mi] != null) ? fc2.forecast[mi] : null;
-        var raw   = (fc2.forecastRaw && fc2.forecastRaw[mi] != null) ? fc2.forecastRaw[mi] : total;
-        var npd   = (fc2.npdAdd && fc2.npdAdd[mi]) ? fc2.npdAdd[mi] : 0;
-        var diff  = (shown != null) ? Math.round((raw - shown - (npd ? 0 : 0)) * 1000) / 1000 : 0;
+        var raw2  = (fc2.forecastRaw && fc2.forecastRaw[mi] != null) ? fc2.forecastRaw[mi] : total;
+        var npdA  = (fc2.npdAdd && fc2.npdAdd[mi]) ? fc2.npdAdd[mi] : 0;
         var notes = [];
-        var consumed = Math.round((raw + npd - (shown != null ? shown : raw)) * 1000) / 1000;
-        if(consumed > 0.001) notes.push('Dikurangi pemakaian (matcom) bulan berjalan: <strong style="color:var(--amber)">−' + n_id(consumed) + ' ' + uom + '</strong>');
-        if(npd > 0.001) notes.push('Ditambah kebutuhan NPD (Sertakan NPD aktif): <strong style="color:var(--teal)">+' + n_id(Math.round(npd * 1000) / 1000) + ' ' + uom + '</strong>');
-        if(shown != null && Math.abs(shown - raw) > 0.001) {
+        var consumed = Math.round((raw2 + npdA - (shown != null ? shown : raw2)) * 1000) / 1000;
+        if(consumed > 0.001) notes.push('− pemakaian (matcom) bulan berjalan: <strong style="color:var(--amber)">' + n_id(consumed) + ' ' + uom + '</strong>');
+        if(npdA > 0.001)     notes.push('+ kebutuhan NPD (Sertakan NPD aktif): <strong style="color:var(--teal)">' + n_id(Math.round(npdA * 1000) / 1000) + ' ' + uom + '</strong>');
+        if(shown != null && Math.abs(shown - raw2) > 0.001) {
           html += '<div style="margin-top:10px;padding:8px 10px;background:var(--bg3);border-radius:var(--r);font-size:11px;color:var(--muted);line-height:1.6">'
-            + '<div style="font-weight:600;color:var(--text);margin-bottom:3px">Penyesuaian → Requirement tampil di tabel</div>'
-            + (notes.length ? notes.map(function(n){return '• ' + n;}).join('<br>') : '')
-            + '<br>Requirement tampil = <strong style="color:var(--text)">' + n_id(Math.round(shown * 1000) / 1000) + ' ' + uom + '</strong>'
+            + '<div style="font-weight:600;color:var(--text);margin-bottom:3px">Requirement asli ' + n_id(Math.round(raw2 * 1000) / 1000) + ' ' + uom + ' → tampil di tabel</div>'
+            + (notes.length ? notes.map(function(n){ return '• ' + n; }).join('<br>') : '')
+            + '<br>= <strong style="color:var(--text)">' + n_id(Math.round(shown * 1000) / 1000) + ' ' + uom + '</strong>'
             + '</div>';
         }
       }
