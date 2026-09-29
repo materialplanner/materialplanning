@@ -774,36 +774,48 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
   <div class="page-hdr" style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:10px">
     <div class="ph-l">
       <h2>🔁 Transfer to SNG (Sangiang)</h2>
-      <p>Rekap stock RM parfum NCO &amp; Fyne di Bitung (BTG) vs Sangiang (SNG) + saran transfer bila stock SNG di bawah requirement bulan berjalan. Qty kelipatan multiple, dibatasi stok Bitung.</p>
+      <p>Rekap stock RM/PM parfum N.Co &amp; Fyne di Bitung (BTG) vs Sangiang (SNG). MRP SNG = kebutuhan FG parfum (produksi Sangiang); MRP BTG = sisa (dipakai FG non-parfum di Bitung). Qty Kirim = kelipatan multiple dari kekurangan SNG, dibatasi stok Bitung.</p>
     </div>
     <div class="ph-r" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
       <button class="btn btn-sm btn-primary" onclick="renderTransferSNG()" style="font-size:11px">🔄 Refresh</button>
+      <button class="btn btn-sm btn-green" onclick="_transferSNGCopyWH()" style="font-size:11px" title="Salin kode, nama, qty kirim (baris perlu kirim) untuk dikirim ke WH">📋 Salin list WH</button>
       <button class="btn btn-sm" onclick="_transferSNGExport()" style="font-size:11px">↓ Export Excel</button>
     </div>
   </div>
 
-  <div style="background:var(--bg3);border-radius:10px;padding:12px 16px;margin-bottom:14px;display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end">
-    <div class="fg" style="min-width:150px">
-      <label style="font-size:11px">Keyword FG NCO (deskripsi)</label>
-      <input id="tsng-kw-nco" value="NCO" oninput="_transferSNGDebounced()" placeholder="mis. NCO, N.CO" style="width:100%;font-size:12px">
+  <div style="background:var(--bg3);border-radius:10px;padding:12px 16px;margin-bottom:14px;display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end">
+    <div class="fg" style="min-width:140px">
+      <label style="font-size:11px">Keyword FG N.Co (deskripsi)</label>
+      <input id="tsng-kw-nco" value="N.CO" oninput="_transferSNGDebounced()" placeholder="mis. N.CO, NCO" style="width:100%;font-size:12px">
     </div>
-    <div class="fg" style="min-width:150px">
+    <div class="fg" style="min-width:140px">
       <label style="font-size:11px">Keyword FG Fyne (deskripsi)</label>
       <input id="tsng-kw-fyne" value="FYNE" oninput="_transferSNGDebounced()" placeholder="mis. FYNE, FINE" style="width:100%;font-size:12px">
     </div>
-    <div class="fg" style="min-width:110px">
-      <label style="font-size:11px">Filter kata "PARFUM"?</label>
-      <select id="tsng-parfum-only" onchange="renderTransferSNG()" style="width:100%;font-size:12px">
-        <option value="1">Ya — hanya FG ber-"PARFUM"</option>
-        <option value="0">Tidak — semua FG NCO/Fyne</option>
+    <div class="fg" style="min-width:100px">
+      <label style="font-size:11px">Tipe material</label>
+      <select id="tsng-type" onchange="renderTransferSNG()" style="width:100%;font-size:12px">
+        <option value="all">RM + PM</option>
+        <option value="RM">RM saja</option>
+        <option value="PM">PM saja</option>
       </select>
     </div>
-    <div class="fg" style="min-width:90px">
+    <div class="fg" style="min-width:105px">
+      <label style="font-size:11px">Filter "PARFUM"?</label>
+      <select id="tsng-parfum-only" onchange="renderTransferSNG()" style="width:100%;font-size:12px">
+        <option value="1">Ya — ber-"PARFUM"</option>
+        <option value="0">Tidak — semua</option>
+      </select>
+    </div>
+    <div class="fg" style="min-width:80px">
       <label style="font-size:11px">Target DOI (hari)</label>
       <input id="tsng-doi" type="number" value="30" min="0" oninput="_transferSNGDebounced()" style="width:100%;font-size:12px">
     </div>
-    <div class="fg" style="min-width:130px">
-      <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;cursor:pointer;margin:0"><input type="checkbox" id="tsng-need-only" onchange="renderTransferSNG()"> Hanya yg perlu kirim</label>
+    <div class="fg" style="min-width:120px">
+      <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;cursor:pointer;margin:0"><input type="checkbox" id="tsng-need-only" onchange="renderTransferSNG()"> Hanya perlu kirim</label>
+    </div>
+    <div class="fg" style="min-width:120px">
+      <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;cursor:pointer;margin:0"><input type="checkbox" id="tsng-wh-mode" onchange="renderTransferSNG()"> Mode kirim WH</label>
     </div>
   </div>
 
@@ -14334,22 +14346,24 @@ function _fcShowReqDetail(code, mi, _retry) {
 }
 
 // ═══ Transfer to SNG (Sangiang) ══════════════════════════════════════════════
-// Rekap stock RM parfum NCO & Fyne: Bitung (BTG) vs Sangiang (SNG) + saran transfer.
-// FG parfum dideteksi via keyword deskripsi (editable). RM diambil dari BOM (type 'N',
-// kode diawali 3/4) yang dipakai FG parfum tsb. Requirement = MRP bulan berjalan (KG,
-// satuan sama dgn stock). Saran transfer = kelipatan multiple dari kekurangan SNG,
-// dibatasi stok Bitung.
+// Rekap stock RM/PM parfum N.Co & Fyne: Bitung (BTG) vs Sangiang (SNG).
+// FG parfum dideteksi via keyword deskripsi (editable). RM/PM diambil dari BOM
+// (type 'N', kode diawali 3=RM / 4=PM) yang dipakai FG parfum tsb.
+// MRP SNG = kebutuhan bulan berjalan dari FG parfum (produksi Sangiang), dihitung
+//   ulang dari _mpsData × qty BOM (rumus explosion yang sama).
+// MRP BTG = total requirement (mrp.months) − MRP SNG = sisa dipakai FG non-parfum.
+// Qty Kirim = kelipatan multiple dari (MRP SNG − stock SNG), dibatasi stok Bitung.
 var _tsngTimer = null;
+var _tsngColF = {}; // filter teks per kolom { colKey: 'text' }
 function _transferSNGDebounced(){ clearTimeout(_tsngTimer); _tsngTimer = setTimeout(renderTransferSNG, 350); }
 
 function _transferSNGComputeFGs(kwNco, kwFyne, parfumOnly) {
-  // Bangun peta deskripsi FG dari _fgDescFromMps + baris BOM
   var descMap = {};
   if(_fgDescFromMps) Object.keys(_fgDescFromMps).forEach(function(fg){ descMap[fg] = _fgDescFromMps[fg]; });
   (_bomData||[]).forEach(function(b){ if(b.fg && b.fgDesc && !descMap[b.fg]) descMap[b.fg] = b.fgDesc; });
   var toks = function(s){ return String(s||'').split(',').map(function(t){return t.trim().toUpperCase();}).filter(Boolean); };
   var tN = toks(kwNco), tF = toks(kwFyne);
-  var fgBrand = {}; // fgCode -> {nco:bool, fyne:bool, desc}
+  var fgBrand = {};
   Object.keys(descMap).forEach(function(fg){
     var d = String(descMap[fg]||'').toUpperCase();
     if(parfumOnly && d.indexOf('PARFUM') < 0) return;
@@ -14361,29 +14375,36 @@ function _transferSNGComputeFGs(kwNco, kwFyne, parfumOnly) {
 }
 
 function _transferSNGData() {
-  var kwNco  = (document.getElementById('tsng-kw-nco')||{}).value || 'NCO';
+  var kwNco  = (document.getElementById('tsng-kw-nco')||{}).value || 'N.CO';
   var kwFyne = (document.getElementById('tsng-kw-fyne')||{}).value || 'FYNE';
   var parfumOnly = ((document.getElementById('tsng-parfum-only')||{}).value || '1') === '1';
+  var typeSel    = (document.getElementById('tsng-type')||{}).value || 'all';
   var targetDOI  = parseFloat((document.getElementById('tsng-doi')||{}).value) || 0;
 
   var fgBrand = _transferSNGComputeFGs(kwNco, kwFyne, parfumOnly);
-  var fgCodes = Object.keys(fgBrand);
 
-  // RM union dari FG parfum (type 'N', kode diawali 3/4). Tandai brand pemakai.
-  var rmBrand = {}; // rm -> {nco, fyne}
+  // RM/PM union + brand pemakai. Sekaligus akumulasi qty BOM per (rm→fg) utk MRP SNG.
+  var rmBrand = {};       // rm -> {nco, fyne}
+  var rmFgQty = {};       // rm -> { fg: qtySum }  (khusus FG parfum, utk MRP SNG)
   (_bomData||[]).forEach(function(b){
     if(!b.fg || !b.rm || b.type !== 'N' || !/^[34]/.test(b.rm)) return;
     if(!fgBrand[b.fg]) return;
     if(!rmBrand[b.rm]) rmBrand[b.rm] = { nco:false, fyne:false };
     if(fgBrand[b.fg].nco)  rmBrand[b.rm].nco = true;
     if(fgBrand[b.fg].fyne) rmBrand[b.rm].fyne = true;
+    if(!rmFgQty[b.rm]) rmFgQty[b.rm] = {};
+    rmFgQty[b.rm][b.fg] = (rmFgQty[b.rm][b.fg] || 0) + (b.qty || 0);
   });
 
   var stockData = STATE.stockData || {};
-  var curMonthFC = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'][new Date().getMonth()];
+  var _idMon = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+  var curMonthFC = _idMon[new Date().getMonth()];
+  var mpsKey = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][new Date().getMonth()];
   var daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth()+1, 0).getDate();
+  var haveMps = _mpsData && Object.keys(_mpsData).length;
 
   var rows = Object.keys(rmBrand).map(function(code){
+    var itemType = /^3/.test(code) ? 'RM' : (/^4/.test(code) ? 'PM' : 'OTHER');
     var master = (STATE.masterData||{})[code] || {};
     var mrp    = (STATE.mrpData||{})[code] || {};
     var uomRaw = String(master.uom||'').trim().toLowerCase();
@@ -14393,35 +14414,84 @@ function _transferSNGData() {
     var st  = stockData[code] || {};
     var stBTG = Math.round((st.btg||0)*100)/100;
     var stSNG = Math.round((st.sng||0)*100)/100;
-    var req   = (mrp.months && mrp.months[curMonthFC] != null) ? (mrp.months[curMonthFC]||0) : 0;
-    var estUsg = req>0 ? req/daysInMonth : 0;
+    var reqTotal = (mrp.months && mrp.months[curMonthFC] != null) ? (mrp.months[curMonthFC]||0) : 0;
+
+    // MRP SNG = Σ qty FG parfum × plan MPS bulan ini. Fallback (MPS belum ada): pakai total.
+    var mrpSNG;
+    if(haveMps) {
+      mrpSNG = 0;
+      var fgq = rmFgQty[code] || {};
+      Object.keys(fgq).forEach(function(fg){
+        var mps = _mpsData[fg]; if(!mps) return;
+        var plan = mps[mpsKey] || 0;
+        mrpSNG += plan * fgq[fg];
+      });
+    } else {
+      mrpSNG = reqTotal; // tanpa MPS tidak bisa dipisah — anggap semua kebutuhan Sangiang
+    }
+    mrpSNG = Math.round(mrpSNG*100)/100;
+    var mrpBTG = Math.max(0, Math.round((reqTotal - mrpSNG)*100)/100);
+
+    var estUsg = mrpSNG>0 ? mrpSNG/daysInMonth : 0;
     var doiSNG = estUsg>0 ? stSNG/estUsg : (stSNG>0?999:0);
-    var deficit = Math.round((req - stSNG)*100)/100;          // kekurangan SNG thd requirement bln berjalan
+    var deficit = Math.round((mrpSNG - stSNG)*100)/100;   // kekurangan SNG thd MRP SNG
     var needReq = deficit > 0;
-    var transferRaw = needReq ? Math.ceil(deficit/mult)*mult : 0;
-    var maxBitung   = Math.floor(stBTG/mult)*mult;             // kelipatan multiple yg tersedia di Bitung
-    var transfer    = Math.min(transferRaw, maxBitung);
-    if(transfer < 0) transfer = 0;
-    var shortage    = Math.round((transferRaw - transfer)*100)/100; // Bitung tak cukup
+    var kirimRaw = needReq ? Math.ceil(deficit/mult)*mult : 0;
+    var maxBitung = Math.floor(stBTG/mult)*mult;
+    var kirim = Math.min(kirimRaw, maxBitung); if(kirim < 0) kirim = 0;
+    var shortage = Math.round((kirimRaw - kirim)*100)/100;
+
     return {
-      code: code, name: mrp.desc || master.desc || master.name || '',
-      brand: (rmBrand[code].nco && rmBrand[code].fyne) ? 'NCO+Fyne' : (rmBrand[code].nco ? 'NCO' : 'Fyne'),
+      code: code, name: (typeof _npdDisplayName==='function' ? _npdDisplayName(code) : (mrp.desc||master.desc||'')) || '',
+      type: itemType,
+      brand: (rmBrand[code].nco && rmBrand[code].fyne) ? 'N.Co+Fyne' : (rmBrand[code].nco ? 'N.Co' : 'Fyne'),
       uom: isGram ? 'KG' : (master.uom||'KG'), mult: Math.round(mult*1000)/1000,
-      stBTG: stBTG, stSNG: stSNG, req: Math.round(req*100)/100,
+      stBTG: stBTG, stSNG: stSNG, mrpSNG: mrpSNG, mrpBTG: mrpBTG,
       doiSNG: doiSNG, deficit: deficit, needReq: needReq,
       lowDOI: (targetDOI>0 && doiSNG < targetDOI),
-      transferRaw: Math.round(transferRaw*100)/100, transfer: Math.round(transfer*100)/100,
-      shortage: shortage
+      kirimRaw: Math.round(kirimRaw*100)/100, kirim: Math.round(kirim*100)/100, shortage: shortage
     };
-  });
+  }).filter(function(r){ return typeSel==='all' ? true : r.type===typeSel; });
 
-  // Urut: yang perlu kirim & kekurangan terbesar dulu, lalu DOI SNG terkecil
   rows.sort(function(a,b){
     if(a.needReq !== b.needReq) return a.needReq ? -1 : 1;
     if(b.deficit !== a.deficit) return b.deficit - a.deficit;
     return a.doiSNG - b.doiSNG;
   });
-  return { rows: rows, fgBrand: fgBrand, fgCount: fgCodes.length, targetDOI: targetDOI };
+  return { rows: rows, fgBrand: fgBrand, targetDOI: targetDOI, haveMps: haveMps };
+}
+
+// Definisi kolom (key dipakai utk filter per-kolom & mode WH)
+var _TSNG_COLS = [
+  { k:'code',   label:'Kode',          align:'left',   wh:true,  get:function(r){return r.code;} },
+  { k:'name',   label:'Nama',          align:'left',   wh:true,  get:function(r){return r.name||'—';} },
+  { k:'type',   label:'Tipe',          align:'center', get:function(r){return r.type;} },
+  { k:'brand',  label:'Brand',         align:'center', get:function(r){return r.brand;} },
+  { k:'mult',   label:'Multiple',      align:'right',  get:function(r){return n_id(r.mult);} },
+  { k:'stBTG',  label:'Stock Bitung',  align:'right',  get:function(r){return n_id(r.stBTG);} },
+  { k:'stSNG',  label:'Stock Sangiang',align:'right',  get:function(r){return n_id(r.stSNG);} },
+  { k:'mrpSNG', label:'MRP SNG',       align:'right',  get:function(r){return n_id(r.mrpSNG);} },
+  { k:'mrpBTG', label:'MRP BTG',       align:'right',  get:function(r){return n_id(r.mrpBTG);} },
+  { k:'doiSNG', label:'DOI SNG',       align:'right',  get:function(r){return r.doiSNG>=999?'∞':(Math.round(r.doiSNG*10)/10);} },
+  { k:'deficit',label:'Kekurangan SNG',align:'right',  get:function(r){return r.deficit>0?n_id(r.deficit):'—';} },
+  { k:'kirim',  label:'Qty Kirim',     align:'right',  wh:true,  get:function(r){return r.kirim>0?n_id(r.kirim):'—';} },
+  { k:'status', label:'Status',        align:'left',   get:function(r){
+      if(!r.needReq) return 'Cukup'+(r.lowDOI?' · DOI<target':'');
+      if(r.kirim<=0) return '⚠ Bitung kosong/kurang';
+      if(r.shortage>0) return 'Kirim '+n_id(r.kirim)+' · ⚠ Bitung kurang '+n_id(r.shortage);
+      return 'Kirim '+n_id(r.kirim);
+  } }
+];
+
+function _tsngRowPassFilter(r){
+  var ks = Object.keys(_tsngColF);
+  for(var i=0;i<ks.length;i++){
+    var q = String(_tsngColF[ks[i]]||'').trim().toLowerCase(); if(!q) continue;
+    var col = _TSNG_COLS.filter(function(c){return c.k===ks[i];})[0]; if(!col) continue;
+    var v = String(col.get(r)).toLowerCase();
+    if(v.indexOf(q) < 0) return false;
+  }
+  return true;
 }
 
 function renderTransferSNG() {
@@ -14438,20 +14508,25 @@ function renderTransferSNG() {
   }
   var d = _transferSNGData();
   var needOnly = !!(document.getElementById('tsng-need-only')||{}).checked;
-  var rows = needOnly ? d.rows.filter(function(r){ return r.needReq; }) : d.rows;
+  var whMode   = !!(document.getElementById('tsng-wh-mode')||{}).checked;
+  var rows = d.rows.filter(_tsngRowPassFilter);
+  if(needOnly || whMode) rows = rows.filter(function(r){ return r.needReq && r.kirim>0; });
+
+  // Kolom aktif (mode WH → hanya kode/nama/qty)
+  var cols = whMode ? _TSNG_COLS.filter(function(c){return c.wh;}) : _TSNG_COLS;
 
   // Ringkasan
-  var nNeed = d.rows.filter(function(r){return r.needReq;}).length;
+  var nNeed  = d.rows.filter(function(r){return r.needReq;}).length;
   var nShort = d.rows.filter(function(r){return r.shortage>0;}).length;
-  var totTransfer = d.rows.reduce(function(s,r){return s+r.transfer;},0);
+  var totKirim = d.rows.reduce(function(s,r){return s+r.kirim;},0);
   if(elS) {
-    elS.innerHTML =
-      '<div style="display:flex;gap:10px;flex-wrap:wrap">'
-      + _tsngStat('RM parfum dipantau', n_id(d.rows.length), 'var(--text)')
+    elS.innerHTML = '<div style="display:flex;gap:10px;flex-wrap:wrap">'
+      + _tsngStat('RM/PM dipantau', n_id(d.rows.length), 'var(--text)')
       + _tsngStat('Perlu kirim ke SNG', n_id(nNeed), nNeed>0?'var(--amber)':'var(--green)')
       + _tsngStat('Bitung tak cukup', n_id(nShort), nShort>0?'var(--red)':'var(--muted)')
-      + _tsngStat('Total saran transfer', n_id(Math.round(totTransfer*100)/100)+' KG', 'var(--teal)')
-      + '</div>';
+      + _tsngStat('Total Qty Kirim', n_id(Math.round(totKirim*100)/100)+' KG', 'var(--teal)')
+      + '</div>'
+      + (!d.haveMps ? '<div style="margin-top:8px;padding:8px 10px;background:var(--bg3);border-radius:6px;font-size:11px;color:var(--amber)">⚠ MPS belum termuat di device ini — MRP SNG belum bisa dipisah dari MRP BTG (sementara MRP SNG = total requirement). Muat MPS agar pemisahan akurat.</div>' : '');
   }
 
   // Daftar FG cocok (verifikasi)
@@ -14459,54 +14534,65 @@ function renderTransferSNG() {
     var fgs = Object.keys(d.fgBrand);
     var nco = fgs.filter(function(f){return d.fgBrand[f].nco;});
     var fyne = fgs.filter(function(f){return d.fgBrand[f].fyne;});
-    elF.innerHTML =
-      '<details style="background:var(--bg3);border-radius:8px;padding:8px 12px;font-size:11.5px">'
-      + '<summary style="cursor:pointer;color:var(--text);font-weight:600">FG parfum terdeteksi: '+fgs.length+' ('+nco.length+' NCO · '+fyne.length+' Fyne) — klik untuk verifikasi</summary>'
+    elF.innerHTML = '<details style="background:var(--bg3);border-radius:8px;padding:8px 12px;font-size:11.5px">'
+      + '<summary style="cursor:pointer;color:var(--text);font-weight:600">FG parfum terdeteksi: '+fgs.length+' ('+nco.length+' N.Co · '+fyne.length+' Fyne) — klik untuk verifikasi</summary>'
       + '<div style="margin-top:8px;max-height:180px;overflow:auto;color:var(--muted);line-height:1.6">'
-      + (fgs.length ? fgs.map(function(f){ var b=d.fgBrand[f]; return '<div><span style="font-family:var(--mono);color:var(--text)">'+f+'</span> · '+(b.desc||'')+' <span style="color:var(--teal)">['+(b.nco&&b.fyne?'NCO+Fyne':b.nco?'NCO':'Fyne')+']</span></div>'; }).join('') : '<i>Tidak ada FG cocok. Cek keyword atau matikan filter "PARFUM".</i>')
+      + (fgs.length ? fgs.map(function(f){ var b=d.fgBrand[f]; return '<div><span style="font-family:var(--mono);color:var(--text)">'+f+'</span> · '+(b.desc||'')+' <span style="color:var(--teal)">['+(b.nco&&b.fyne?'N.Co+Fyne':b.nco?'N.Co':'Fyne')+']</span></div>'; }).join('') : '<i>Tidak ada FG cocok. Cek keyword atau matikan filter "PARFUM".</i>')
       + '</div></details>';
   }
 
   if(!rows.length) {
-    elR.innerHTML = '<div style="padding:16px;color:var(--muted)">'+(needOnly?'Tidak ada RM yang perlu kirim saat ini. ':'Tidak ada RM parfum terdeteksi. ')+'Cek keyword FG di atas.</div>';
+    elR.innerHTML = '<div style="padding:16px;color:var(--muted)">'+((needOnly||whMode)?'Tidak ada RM/PM yang perlu kirim saat ini.':'Tidak ada baris cocok. Cek keyword / filter kolom.')+'</div>';
     return;
   }
 
-  var th = function(t,extra){ return '<th style="text-align:'+(extra||'left')+';padding:7px 8px;color:var(--muted);font-weight:600;white-space:nowrap;position:sticky;top:0;background:var(--bg2)">'+t+'</th>'; };
-  var h = '<div style="overflow:auto;border:1px solid var(--border);border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:11.5px">'
-    + '<thead><tr>'
-    + th('Kode RM') + th('Nama') + th('Brand','center') + th('Multiple','right')
-    + th('Stock Bitung','right') + th('Stock Sangiang','right') + th('Req bln ini','right')
-    + th('DOI SNG','right') + th('Kekurangan SNG','right') + th('Saran Transfer','right') + th('Status')
-    + '</tr></thead><tbody>';
+  // Header + baris filter per kolom. Kolom Kode & Nama di-freeze (sticky-left).
+  var stickyLeft = { code:0, name:96 }; // px offset; Kode dipatok 96px
+  var colW = function(c){ return c.k==='code' ? ';min-width:96px;width:96px' : ''; };
+  var thStyle = function(c){
+    var base = 'text-align:'+c.align+';padding:7px 8px;color:var(--muted);font-weight:600;white-space:nowrap;position:sticky;top:0;background:var(--bg2);z-index:2'+colW(c);
+    if(stickyLeft[c.k]!=null){ base += ';left:'+stickyLeft[c.k]+'px;z-index:3'; }
+    return base;
+  };
+  var h = '<div style="overflow:auto;max-height:70vh;border:1px solid var(--border);border-radius:8px"><table style="width:100%;border-collapse:separate;border-spacing:0;font-size:11.5px">';
+  h += '<thead><tr>';
+  cols.forEach(function(c){ h += '<th style="'+thStyle(c)+'">'+c.label+'</th>'; });
+  h += '</tr><tr>';
+  cols.forEach(function(c){
+    var stk = stickyLeft[c.k]!=null ? ';position:sticky;left:'+stickyLeft[c.k]+'px;z-index:2' : '';
+    h += '<th style="padding:2px 4px;background:var(--bg2);position:sticky;top:31px'+stk+'">'
+      + '<input value="'+String(_tsngColF[c.k]||'').replace(/"/g,'&quot;')+'" oninput="_tsngColF[\''+c.k+'\']=this.value;_transferSNGDebounced()" placeholder="filter" style="width:100%;box-sizing:border-box;font-size:10px;padding:2px 4px;border:1px solid var(--border2);border-radius:3px;background:var(--bg2);color:var(--text)">'
+      + '</th>';
+  });
+  h += '</tr></thead><tbody>';
   rows.forEach(function(r){
-    var doiCol = r.doiSNG>=999?'∞':(Math.round(r.doiSNG*10)/10);
-    var doiClr = r.needReq?'var(--red)':(r.lowDOI?'var(--amber)':'var(--green)');
-    var statusHtml, statusClr;
-    if(!r.needReq) { statusHtml = 'Cukup'+(r.lowDOI?' · DOI &lt; target':''); statusClr = r.lowDOI?'var(--amber)':'var(--green)'; }
-    else if(r.transfer<=0) { statusHtml = '⚠ Bitung kosong/kurang'; statusClr = 'var(--red)'; }
-    else if(r.shortage>0) { statusHtml = 'Kirim '+n_id(r.transfer)+' · ⚠ Bitung kurang '+n_id(r.shortage); statusClr = 'var(--amber)'; }
-    else { statusHtml = 'Kirim '+n_id(r.transfer); statusClr = 'var(--teal)'; }
-    h += '<tr style="border-top:1px solid var(--border)">'
-      + '<td style="padding:6px 8px;font-family:var(--mono);color:var(--text);white-space:nowrap">'+r.code+'</td>'
-      + '<td style="padding:6px 8px;color:var(--muted);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(r.name||'—')+'</td>'
-      + '<td style="padding:6px 8px;text-align:center;color:var(--muted);white-space:nowrap">'+r.brand+'</td>'
-      + '<td style="padding:6px 8px;text-align:right;font-family:var(--mono);color:var(--muted)">'+n_id(r.mult)+'</td>'
-      + '<td style="padding:6px 8px;text-align:right;font-family:var(--mono);color:var(--text)">'+n_id(r.stBTG)+'</td>'
-      + '<td style="padding:6px 8px;text-align:right;font-family:var(--mono);color:'+(r.needReq?'var(--red)':'var(--text)')+';font-weight:'+(r.needReq?'700':'400')+'">'+n_id(r.stSNG)+'</td>'
-      + '<td style="padding:6px 8px;text-align:right;font-family:var(--mono);color:var(--text)">'+n_id(r.req)+'</td>'
-      + '<td style="padding:6px 8px;text-align:right;font-family:var(--mono);color:'+doiClr+'">'+doiCol+'</td>'
-      + '<td style="padding:6px 8px;text-align:right;font-family:var(--mono);color:'+(r.deficit>0?'var(--red)':'var(--hint)')+'">'+(r.deficit>0?n_id(r.deficit):'—')+'</td>'
-      + '<td style="padding:6px 8px;text-align:right;font-family:var(--mono);color:var(--teal);font-weight:700">'+(r.transfer>0?n_id(r.transfer):'—')+'</td>'
-      + '<td style="padding:6px 8px;color:'+statusClr+';white-space:nowrap">'+statusHtml+'</td>'
-      + '</tr>';
+    h += '<tr style="border-top:1px solid var(--border)">';
+    cols.forEach(function(c){
+      var val = c.get(r);
+      var clr = 'var(--text)', wt = '400';
+      if(c.k==='stSNG' && r.needReq){ clr='var(--red)'; wt='700'; }
+      else if(c.k==='mrpSNG'){ clr='var(--text)'; }
+      else if(c.k==='mrpBTG'){ clr='var(--muted)'; }
+      else if(c.k==='doiSNG'){ clr = r.needReq?'var(--red)':(r.lowDOI?'var(--amber)':'var(--green)'); }
+      else if(c.k==='deficit'){ clr = r.deficit>0?'var(--red)':'var(--hint)'; }
+      else if(c.k==='kirim'){ clr='var(--teal)'; wt='700'; }
+      else if(c.k==='status'){ clr = !r.needReq?(r.lowDOI?'var(--amber)':'var(--green)') : (r.kirim<=0?'var(--red)':(r.shortage>0?'var(--amber)':'var(--teal)')); }
+      else if(c.align==='left'||c.align==='center'){ clr='var(--muted)'; }
+      var mono = (c.align==='right'||c.k==='code') ? 'font-family:var(--mono);' : '';
+      var stk = stickyLeft[c.k]!=null ? 'position:sticky;left:'+stickyLeft[c.k]+'px;background:var(--bg1);z-index:1;' : '';
+      var extra = c.k==='name' ? 'max-width:200px;overflow:hidden;text-overflow:ellipsis;' : (c.k==='code' ? 'min-width:96px;width:96px;' : '');
+      h += '<td style="padding:6px 8px;text-align:'+c.align+';'+mono+'color:'+clr+';font-weight:'+wt+';white-space:nowrap;'+stk+extra+'">'+val+'</td>';
+    });
+    h += '</tr>';
   });
   h += '</tbody></table></div>';
-  h += '<div style="margin-top:8px;font-size:10.5px;color:var(--muted);line-height:1.6">'
-    + 'Semua angka KG. <b>Requirement</b> = MRP bulan berjalan ('+['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'][new Date().getMonth()]+'). '
-    + '<b>Kekurangan SNG</b> = Requirement − Stock Sangiang. <b>Saran Transfer</b> = pembulatan ke atas kelipatan multiple, dibatasi stok Bitung. '
-    + '<b>DOI SNG</b> = Stock Sangiang ÷ (Requirement ÷ hari sebulan) — cek tambahan thd target '+d.targetDOI+' hari.'
-    + '</div>';
+  if(!whMode){
+    h += '<div style="margin-top:8px;font-size:10.5px;color:var(--muted);line-height:1.6">'
+      + 'Semua angka KG. <b>MRP SNG</b> = kebutuhan bulan ini dari FG parfum (produksi Sangiang). <b>MRP BTG</b> = total requirement − MRP SNG (dipakai FG non-parfum di Bitung). '
+      + '<b>Kekurangan SNG</b> = MRP SNG − Stock Sangiang. <b>Qty Kirim</b> = pembulatan ke atas kelipatan multiple, dibatasi stok Bitung. '
+      + '<b>DOI SNG</b> = Stock Sangiang ÷ (MRP SNG ÷ hari) vs target '+d.targetDOI+' hari.'
+      + '</div>';
+  }
   elR.innerHTML = h;
 }
 
@@ -14516,19 +14602,39 @@ function _tsngStat(lbl, val, clr){
     + '<div style="font-size:17px;font-weight:700;color:'+(clr||'var(--text)')+'">'+val+'</div></div>';
 }
 
+// Salin list kirim ke WH: kode, nama, qty kirim (hanya baris perlu kirim & lolos filter)
+function _transferSNGCopyWH(){
+  var d = _transferSNGData();
+  var rows = d.rows.filter(_tsngRowPassFilter).filter(function(r){ return r.needReq && r.kirim>0; });
+  if(!rows.length){ toast('Tidak ada item yang perlu dikirim','err'); return; }
+  var lines = ['Kode\tNama\tQty Kirim (KG)'];
+  rows.forEach(function(r){ lines.push(r.code+'\t'+(r.name||'')+'\t'+r.kirim); });
+  var txt = lines.join('\n');
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(function(){ toast('Tersalin '+rows.length+' item — tinggal paste ke WH ✓','ok'); },
+      function(){ _tsngFallbackCopy(txt, rows.length); });
+  } else { _tsngFallbackCopy(txt, rows.length); }
+}
+function _tsngFallbackCopy(txt, n){
+  var ta=document.createElement('textarea'); ta.value=txt; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.select();
+  try{ document.execCommand('copy'); toast('Tersalin '+n+' item ✓','ok'); }catch(e){ toast('Gagal menyalin — blok manual','err'); }
+  document.body.removeChild(ta);
+}
+
 function _transferSNGExport(){
   var d = _transferSNGData();
-  if(!d.rows.length){ toast('Tidak ada data untuk diexport','err'); return; }
-  var headers = ['Kode RM','Nama','Brand','UOM','Multiple','Stock Bitung','Stock Sangiang','Req Bln Ini','DOI SNG','Kekurangan SNG','Saran Transfer','Bitung Kurang','Status'];
+  var rows = d.rows.filter(_tsngRowPassFilter);
+  if(!rows.length){ toast('Tidak ada data untuk diexport','err'); return; }
+  var headers = ['Kode','Nama','Tipe','Brand','UOM','Multiple','Stock Bitung','Stock Sangiang','MRP SNG','MRP BTG','DOI SNG','Kekurangan SNG','Qty Kirim','Bitung Kurang','Status'];
   var lines = [headers.join('\t')];
-  d.rows.forEach(function(r){
-    var status = !r.needReq ? 'Cukup' : (r.transfer<=0 ? 'Bitung kurang' : (r.shortage>0 ? 'Kirim '+r.transfer+' (Bitung kurang '+r.shortage+')' : 'Kirim '+r.transfer));
-    lines.push([r.code, (r.name||'').replace(/\t/g,' '), r.brand, r.uom, r.mult, r.stBTG, r.stSNG, r.req, (r.doiSNG>=999?'999':Math.round(r.doiSNG*10)/10), (r.deficit>0?r.deficit:0), r.transfer, r.shortage, status].join('\t'));
+  rows.forEach(function(r){
+    var status = !r.needReq ? 'Cukup' : (r.kirim<=0 ? 'Bitung kurang' : (r.shortage>0 ? 'Kirim '+r.kirim+' (Bitung kurang '+r.shortage+')' : 'Kirim '+r.kirim));
+    lines.push([r.code,(r.name||'').replace(/\t/g,' '),r.type,r.brand,r.uom,r.mult,r.stBTG,r.stSNG,r.mrpSNG,r.mrpBTG,(r.doiSNG>=999?'999':Math.round(r.doiSNG*10)/10),(r.deficit>0?r.deficit:0),r.kirim,r.shortage,status].join('\t'));
   });
   var blob = new Blob(['﻿'+lines.join('\n')], {type:'text/csv;charset=utf-8'});
   var a = document.createElement('a'); a.href = URL.createObjectURL(blob);
   a.download = 'Transfer_to_SNG_'+new Date().toISOString().slice(0,10)+'.csv'; a.click();
-  toast('Export '+d.rows.length+' RM ✓','ok');
+  toast('Export '+rows.length+' baris ✓','ok');
 }
 
 function _fcValArr(arr, code) {
