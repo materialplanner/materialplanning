@@ -800,13 +800,6 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
         <option value="PM">PM saja</option>
       </select>
     </div>
-    <div class="fg" style="min-width:105px">
-      <label style="font-size:11px">Filter "PARFUM"?</label>
-      <select id="tsng-parfum-only" onchange="renderTransferSNG()" style="width:100%;font-size:12px">
-        <option value="1">Ya — ber-"PARFUM"</option>
-        <option value="0">Tidak — semua</option>
-      </select>
-    </div>
     <div class="fg" style="min-width:80px">
       <label style="font-size:11px">Target DOI (hari)</label>
       <input id="tsng-doi" type="number" value="30" min="0" oninput="_transferSNGDebounced()" style="width:100%;font-size:12px">
@@ -14347,17 +14340,17 @@ function _fcShowReqDetail(code, mi, _retry) {
 
 // ═══ Transfer to SNG (Sangiang) ══════════════════════════════════════════════
 // Rekap stock RM/PM parfum N.Co & Fyne: Bitung (BTG) vs Sangiang (SNG).
-// FG parfum dideteksi via keyword deskripsi (editable). RM/PM diambil dari BOM
-// (type 'N', kode diawali 3=RM / 4=PM) yang dipakai FG parfum tsb.
-// MRP SNG = kebutuhan bulan berjalan dari FG parfum (produksi Sangiang), dihitung
-//   ulang dari _mpsData × qty BOM (rumus explosion yang sama).
-// MRP BTG = total requirement (mrp.months) − MRP SNG = sisa dipakai FG non-parfum.
-// Qty Kirim = kelipatan multiple dari (MRP SNG − stock SNG), dibatasi stok Bitung.
+// Deteksi FG: N.Co = deskripsi mengandung "N.CO"; Fyne = mengandung "FYNE" DAN "PARFUM".
+// RM/PM diambil dari BOM (type 'N', kode 3=RM / 4=PM) yg dipakai FG tsb.
+// MRP SNG = kebutuhan bulan ini dari FG parfum (produksi Sangiang) = Σ plan MPS × qty BOM.
+// MRP BTG = total requirement (mrp.months) − MRP SNG = dipakai FG non-parfum di Bitung.
+// Qty Kirim = kelipatan multiple dari (MRP SNG − stock SNG), TAPI dibatasi agar stock
+//   Bitung tidak turun di bawah MRP BTG. Kalau Bitung tak bisa memenuhi → Request to supplier.
 var _tsngTimer = null;
-var _tsngColF = {}; // filter teks per kolom { colKey: 'text' }
+var _tsngColSel = {}; // { colKey: [allowed data-val,...] }  (absen = semua)
 function _transferSNGDebounced(){ clearTimeout(_tsngTimer); _tsngTimer = setTimeout(renderTransferSNG, 350); }
 
-function _transferSNGComputeFGs(kwNco, kwFyne, parfumOnly) {
+function _transferSNGComputeFGs(kwNco, kwFyne) {
   var descMap = {};
   if(_fgDescFromMps) Object.keys(_fgDescFromMps).forEach(function(fg){ descMap[fg] = _fgDescFromMps[fg]; });
   (_bomData||[]).forEach(function(b){ if(b.fg && b.fgDesc && !descMap[b.fg]) descMap[b.fg] = b.fgDesc; });
@@ -14366,26 +14359,29 @@ function _transferSNGComputeFGs(kwNco, kwFyne, parfumOnly) {
   var fgBrand = {};
   Object.keys(descMap).forEach(function(fg){
     var d = String(descMap[fg]||'').toUpperCase();
-    if(parfumOnly && d.indexOf('PARFUM') < 0) return;
-    var isN = tN.some(function(t){ return d.indexOf(t) >= 0; });
-    var isF = tF.some(function(t){ return d.indexOf(t) >= 0; });
+    var isN = tN.some(function(t){ return d.indexOf(t) >= 0; });                       // N.Co: cukup mengandung N.CO
+    var isF = tF.some(function(t){ return d.indexOf(t) >= 0; }) && d.indexOf('PARFUM') >= 0; // Fyne: FYNE + PARFUM
     if(isN || isF) fgBrand[fg] = { nco:isN, fyne:isF, desc:descMap[fg] };
   });
   return fgBrand;
 }
 
+// RM yg dikecualikan (mis. RO Water — tidak dikirim antar pabrik)
+function _tsngExcluded(code, name){
+  if(code === '3000010009') return true;                    // RO Water
+  if(/ro\s*water/i.test(String(name||''))) return true;
+  return false;
+}
+
 function _transferSNGData() {
   var kwNco  = (document.getElementById('tsng-kw-nco')||{}).value || 'N.CO';
   var kwFyne = (document.getElementById('tsng-kw-fyne')||{}).value || 'FYNE';
-  var parfumOnly = ((document.getElementById('tsng-parfum-only')||{}).value || '1') === '1';
   var typeSel    = (document.getElementById('tsng-type')||{}).value || 'all';
   var targetDOI  = parseFloat((document.getElementById('tsng-doi')||{}).value) || 0;
 
-  var fgBrand = _transferSNGComputeFGs(kwNco, kwFyne, parfumOnly);
+  var fgBrand = _transferSNGComputeFGs(kwNco, kwFyne);
 
-  // RM/PM union + brand pemakai. Sekaligus akumulasi qty BOM per (rm→fg) utk MRP SNG.
-  var rmBrand = {};       // rm -> {nco, fyne}
-  var rmFgQty = {};       // rm -> { fg: qtySum }  (khusus FG parfum, utk MRP SNG)
+  var rmBrand = {}, rmFgQty = {};
   (_bomData||[]).forEach(function(b){
     if(!b.fg || !b.rm || b.type !== 'N' || !/^[34]/.test(b.rm)) return;
     if(!fgBrand[b.fg]) return;
@@ -14407,6 +14403,7 @@ function _transferSNGData() {
     var itemType = /^3/.test(code) ? 'RM' : (/^4/.test(code) ? 'PM' : 'OTHER');
     var master = (STATE.masterData||{})[code] || {};
     var mrp    = (STATE.mrpData||{})[code] || {};
+    var name = (typeof _npdDisplayName==='function' ? _npdDisplayName(code) : (mrp.desc||master.desc||'')) || '';
     var uomRaw = String(master.uom||'').trim().toLowerCase();
     var isGram = (uomRaw==='g'||uomRaw==='gr'||uomRaw==='gram');
     var mult   = isGram ? (parseFloat(master.multiple)||1)/1000 : (parseFloat(master.multiple)||1);
@@ -14416,42 +14413,40 @@ function _transferSNGData() {
     var stSNG = Math.round((st.sng||0)*100)/100;
     var reqTotal = (mrp.months && mrp.months[curMonthFC] != null) ? (mrp.months[curMonthFC]||0) : 0;
 
-    // MRP SNG = Σ qty FG parfum × plan MPS bulan ini. Fallback (MPS belum ada): pakai total.
     var mrpSNG;
     if(haveMps) {
-      mrpSNG = 0;
-      var fgq = rmFgQty[code] || {};
-      Object.keys(fgq).forEach(function(fg){
-        var mps = _mpsData[fg]; if(!mps) return;
-        var plan = mps[mpsKey] || 0;
-        mrpSNG += plan * fgq[fg];
-      });
-    } else {
-      mrpSNG = reqTotal; // tanpa MPS tidak bisa dipisah — anggap semua kebutuhan Sangiang
-    }
+      mrpSNG = 0; var fgq = rmFgQty[code] || {};
+      Object.keys(fgq).forEach(function(fg){ var mps=_mpsData[fg]; if(!mps) return; mrpSNG += (mps[mpsKey]||0) * fgq[fg]; });
+    } else { mrpSNG = reqTotal; }
     mrpSNG = Math.round(mrpSNG*100)/100;
     var mrpBTG = Math.max(0, Math.round((reqTotal - mrpSNG)*100)/100);
 
     var estUsg = mrpSNG>0 ? mrpSNG/daysInMonth : 0;
-    var doiSNG = estUsg>0 ? stSNG/estUsg : (stSNG>0?999:0);
+    var doiSNGraw = estUsg>0 ? stSNG/estUsg : (stSNG>0?9999:0);
+    var doiSNG = doiSNGraw>=9999 ? 9999 : Math.ceil(doiSNGraw); // round up ke atas
     var deficit = Math.round((mrpSNG - stSNG)*100)/100;   // kekurangan SNG thd MRP SNG
     var needReq = deficit > 0;
     var kirimRaw = needReq ? Math.ceil(deficit/mult)*mult : 0;
-    var maxBitung = Math.floor(stBTG/mult)*mult;
-    var kirim = Math.min(kirimRaw, maxBitung); if(kirim < 0) kirim = 0;
-    var shortage = Math.round((kirimRaw - kirim)*100)/100;
+    // Batasi kirim: stock Bitung tidak boleh turun di bawah MRP BTG (kebutuhan Bitung sendiri)
+    var availBTG = Math.round((stBTG - mrpBTG)*100)/100;          // surplus Bitung yg bisa dilepas
+    var maxTransfer = availBTG > 0 ? Math.floor(availBTG/mult)*mult : 0;
+    var kirim = Math.min(kirimRaw, maxTransfer); if(kirim < 0) kirim = 0;
+    var supplierQty = needReq ? Math.max(0, Math.round((kirimRaw - kirim)*100)/100) : 0; // sisa yg tak tertutup Bitung
+    var needSupplier = supplierQty > 0;
 
     return {
-      code: code, name: (typeof _npdDisplayName==='function' ? _npdDisplayName(code) : (mrp.desc||master.desc||'')) || '',
-      type: itemType,
+      code: code, name: name, type: itemType,
       brand: (rmBrand[code].nco && rmBrand[code].fyne) ? 'N.Co+Fyne' : (rmBrand[code].nco ? 'N.Co' : 'Fyne'),
       uom: isGram ? 'KG' : (master.uom||'KG'), mult: Math.round(mult*1000)/1000,
       stBTG: stBTG, stSNG: stSNG, mrpSNG: mrpSNG, mrpBTG: mrpBTG,
       doiSNG: doiSNG, deficit: deficit, needReq: needReq,
       lowDOI: (targetDOI>0 && doiSNG < targetDOI),
-      kirimRaw: Math.round(kirimRaw*100)/100, kirim: Math.round(kirim*100)/100, shortage: shortage
+      kirim: Math.round(kirim*100)/100, supplierQty: supplierQty, needSupplier: needSupplier
     };
-  }).filter(function(r){ return typeSel==='all' ? true : r.type===typeSel; });
+  }).filter(function(r){
+    if(_tsngExcluded(r.code, r.name)) return false;
+    return typeSel==='all' ? true : r.type===typeSel;
+  });
 
   rows.sort(function(a,b){
     if(a.needReq !== b.needReq) return a.needReq ? -1 : 1;
@@ -14461,7 +14456,13 @@ function _transferSNGData() {
   return { rows: rows, fgBrand: fgBrand, targetDOI: targetDOI, haveMps: haveMps };
 }
 
-// Definisi kolom (key dipakai utk filter per-kolom & mode WH)
+function _tsngStatusText(r){
+  if(!r.needReq) return 'Cukup'+(r.lowDOI?' · DOI<target':'');
+  if(r.kirim<=0)  return 'Request to supplier';
+  if(r.needSupplier) return 'Kirim '+n_id(r.kirim)+' · request supplier '+n_id(r.supplierQty);
+  return 'Kirim '+n_id(r.kirim);
+}
+
 var _TSNG_COLS = [
   { k:'code',   label:'Kode',          align:'left',   wh:true,  get:function(r){return r.code;} },
   { k:'name',   label:'Nama',          align:'left',   wh:true,  get:function(r){return r.name||'—';} },
@@ -14472,27 +14473,11 @@ var _TSNG_COLS = [
   { k:'stSNG',  label:'Stock Sangiang',align:'right',  get:function(r){return n_id(r.stSNG);} },
   { k:'mrpSNG', label:'MRP SNG',       align:'right',  get:function(r){return n_id(r.mrpSNG);} },
   { k:'mrpBTG', label:'MRP BTG',       align:'right',  get:function(r){return n_id(r.mrpBTG);} },
-  { k:'doiSNG', label:'DOI SNG',       align:'right',  get:function(r){return r.doiSNG>=999?'∞':(Math.round(r.doiSNG*10)/10);} },
+  { k:'doiSNG', label:'DOI SNG',       align:'right',  get:function(r){return r.doiSNG>=9999?'∞':n_id(r.doiSNG);} },
   { k:'deficit',label:'Kekurangan SNG',align:'right',  get:function(r){return r.deficit>0?n_id(r.deficit):'—';} },
   { k:'kirim',  label:'Qty Kirim',     align:'right',  wh:true,  get:function(r){return r.kirim>0?n_id(r.kirim):'—';} },
-  { k:'status', label:'Status',        align:'left',   get:function(r){
-      if(!r.needReq) return 'Cukup'+(r.lowDOI?' · DOI<target':'');
-      if(r.kirim<=0) return '⚠ Bitung kosong/kurang';
-      if(r.shortage>0) return 'Kirim '+n_id(r.kirim)+' · ⚠ Bitung kurang '+n_id(r.shortage);
-      return 'Kirim '+n_id(r.kirim);
-  } }
+  { k:'status', label:'Status',        align:'left',   get:_tsngStatusText }
 ];
-
-function _tsngRowPassFilter(r){
-  var ks = Object.keys(_tsngColF);
-  for(var i=0;i<ks.length;i++){
-    var q = String(_tsngColF[ks[i]]||'').trim().toLowerCase(); if(!q) continue;
-    var col = _TSNG_COLS.filter(function(c){return c.k===ks[i];})[0]; if(!col) continue;
-    var v = String(col.get(r)).toLowerCase();
-    if(v.indexOf(q) < 0) return false;
-  }
-  return true;
-}
 
 function renderTransferSNG() {
   var elR = document.getElementById('tsng-result'); if(!elR) return;
@@ -14509,27 +14494,23 @@ function renderTransferSNG() {
   var d = _transferSNGData();
   var needOnly = !!(document.getElementById('tsng-need-only')||{}).checked;
   var whMode   = !!(document.getElementById('tsng-wh-mode')||{}).checked;
-  var rows = d.rows.filter(_tsngRowPassFilter);
+  var rows = d.rows.slice();
   if(needOnly || whMode) rows = rows.filter(function(r){ return r.needReq && r.kirim>0; });
-
-  // Kolom aktif (mode WH → hanya kode/nama/qty)
   var cols = whMode ? _TSNG_COLS.filter(function(c){return c.wh;}) : _TSNG_COLS;
 
-  // Ringkasan
   var nNeed  = d.rows.filter(function(r){return r.needReq;}).length;
-  var nShort = d.rows.filter(function(r){return r.shortage>0;}).length;
+  var nSup   = d.rows.filter(function(r){return r.needSupplier;}).length;
   var totKirim = d.rows.reduce(function(s,r){return s+r.kirim;},0);
   if(elS) {
     elS.innerHTML = '<div style="display:flex;gap:10px;flex-wrap:wrap">'
       + _tsngStat('RM/PM dipantau', n_id(d.rows.length), 'var(--text)')
       + _tsngStat('Perlu kirim ke SNG', n_id(nNeed), nNeed>0?'var(--amber)':'var(--green)')
-      + _tsngStat('Bitung tak cukup', n_id(nShort), nShort>0?'var(--red)':'var(--muted)')
+      + _tsngStat('Request to supplier', n_id(nSup), nSup>0?'var(--red)':'var(--muted)')
       + _tsngStat('Total Qty Kirim', n_id(Math.round(totKirim*100)/100)+' KG', 'var(--teal)')
       + '</div>'
-      + (!d.haveMps ? '<div style="margin-top:8px;padding:8px 10px;background:var(--bg3);border-radius:6px;font-size:11px;color:var(--amber)">⚠ MPS belum termuat di device ini — MRP SNG belum bisa dipisah dari MRP BTG (sementara MRP SNG = total requirement). Muat MPS agar pemisahan akurat.</div>' : '');
+      + (!d.haveMps ? '<div style="margin-top:8px;padding:8px 10px;background:var(--bg3);border-radius:6px;font-size:11px;color:var(--amber)">⚠ MPS belum termuat — MRP SNG belum bisa dipisah dari MRP BTG (sementara MRP SNG = total requirement). Muat MPS agar akurat.</div>' : '');
   }
 
-  // Daftar FG cocok (verifikasi)
   if(elF) {
     var fgs = Object.keys(d.fgBrand);
     var nco = fgs.filter(function(f){return d.fgBrand[f].nco;});
@@ -14537,63 +14518,61 @@ function renderTransferSNG() {
     elF.innerHTML = '<details style="background:var(--bg3);border-radius:8px;padding:8px 12px;font-size:11.5px">'
       + '<summary style="cursor:pointer;color:var(--text);font-weight:600">FG parfum terdeteksi: '+fgs.length+' ('+nco.length+' N.Co · '+fyne.length+' Fyne) — klik untuk verifikasi</summary>'
       + '<div style="margin-top:8px;max-height:180px;overflow:auto;color:var(--muted);line-height:1.6">'
-      + (fgs.length ? fgs.map(function(f){ var b=d.fgBrand[f]; return '<div><span style="font-family:var(--mono);color:var(--text)">'+f+'</span> · '+(b.desc||'')+' <span style="color:var(--teal)">['+(b.nco&&b.fyne?'N.Co+Fyne':b.nco?'N.Co':'Fyne')+']</span></div>'; }).join('') : '<i>Tidak ada FG cocok. Cek keyword atau matikan filter "PARFUM".</i>')
+      + (fgs.length ? fgs.map(function(f){ var b=d.fgBrand[f]; return '<div><span style="font-family:var(--mono);color:var(--text)">'+f+'</span> · '+(b.desc||'')+' <span style="color:var(--teal)">['+(b.nco&&b.fyne?'N.Co+Fyne':b.nco?'N.Co':'Fyne')+']</span></div>'; }).join('') : '<i>Tidak ada FG cocok. Cek keyword.</i>')
       + '</div></details>';
   }
 
   if(!rows.length) {
-    elR.innerHTML = '<div style="padding:16px;color:var(--muted)">'+((needOnly||whMode)?'Tidak ada RM/PM yang perlu kirim saat ini.':'Tidak ada baris cocok. Cek keyword / filter kolom.')+'</div>';
+    elR.innerHTML = '<div style="padding:16px;color:var(--muted)">'+((needOnly||whMode)?'Tidak ada RM/PM yang perlu kirim saat ini.':'Tidak ada baris. Cek keyword.')+'</div>';
     return;
   }
 
-  // Header + baris filter per kolom. Kolom Kode & Nama di-freeze (sticky-left).
-  var stickyLeft = { code:0, name:96 }; // px offset; Kode dipatok 96px
+  var stickyLeft = { code:0, name:96 };
   var colW = function(c){ return c.k==='code' ? ';min-width:96px;width:96px' : ''; };
+  var fbtn = function(c){ return '<span class="tsng-colbtn" data-k="'+c.k+'" onclick="_tsngColMenu(\''+c.k+'\',\''+c.label.replace(/'/g,'')+'\',this);event.stopPropagation()" title="Filter '+c.label+'" style="cursor:pointer;font-size:9px;color:var(--muted);user-select:none;margin-left:4px">▽</span>'; };
   var thStyle = function(c){
-    var base = 'text-align:'+c.align+';padding:7px 8px;color:var(--muted);font-weight:600;white-space:nowrap;position:sticky;top:0;background:var(--bg2);z-index:2'+colW(c);
-    if(stickyLeft[c.k]!=null){ base += ';left:'+stickyLeft[c.k]+'px;z-index:3'; }
+    var base='text-align:'+c.align+';padding:7px 8px;color:var(--muted);font-weight:600;white-space:nowrap;position:sticky;top:0;background:var(--bg2);z-index:2'+colW(c);
+    if(stickyLeft[c.k]!=null){ base+=';left:'+stickyLeft[c.k]+'px;z-index:3'; }
     return base;
   };
-  var h = '<div style="overflow:auto;max-height:70vh;border:1px solid var(--border);border-radius:8px"><table style="width:100%;border-collapse:separate;border-spacing:0;font-size:11.5px">';
+  var h = '<div id="tsng-tablewrap" style="overflow:auto;max-height:70vh;border:1px solid var(--border);border-radius:8px"><table style="width:100%;border-collapse:separate;border-spacing:0;font-size:11.5px">';
   h += '<thead><tr>';
-  cols.forEach(function(c){ h += '<th style="'+thStyle(c)+'">'+c.label+'</th>'; });
-  h += '</tr><tr>';
   cols.forEach(function(c){
-    var stk = stickyLeft[c.k]!=null ? ';position:sticky;left:'+stickyLeft[c.k]+'px;z-index:2' : '';
-    h += '<th style="padding:2px 4px;background:var(--bg2);position:sticky;top:31px'+stk+'">'
-      + '<input value="'+String(_tsngColF[c.k]||'').replace(/"/g,'&quot;')+'" oninput="_tsngColF[\''+c.k+'\']=this.value;_transferSNGDebounced()" placeholder="filter" style="width:100%;box-sizing:border-box;font-size:10px;padding:2px 4px;border:1px solid var(--border2);border-radius:3px;background:var(--bg2);color:var(--text)">'
-      + '</th>';
+    var inner = '<div style="display:flex;align-items:center;gap:2px;justify-content:'+(c.align==='right'?'flex-end':(c.align==='center'?'center':'flex-start'))+'">'+c.label+fbtn(c)+'</div>';
+    h += '<th style="'+thStyle(c)+'">'+inner+'</th>';
   });
   h += '</tr></thead><tbody>';
   rows.forEach(function(r){
     h += '<tr style="border-top:1px solid var(--border)">';
     cols.forEach(function(c){
       var val = c.get(r);
-      var clr = 'var(--text)', wt = '400';
+      var clr='var(--text)', wt='400';
       if(c.k==='stSNG' && r.needReq){ clr='var(--red)'; wt='700'; }
-      else if(c.k==='mrpSNG'){ clr='var(--text)'; }
       else if(c.k==='mrpBTG'){ clr='var(--muted)'; }
       else if(c.k==='doiSNG'){ clr = r.needReq?'var(--red)':(r.lowDOI?'var(--amber)':'var(--green)'); }
       else if(c.k==='deficit'){ clr = r.deficit>0?'var(--red)':'var(--hint)'; }
       else if(c.k==='kirim'){ clr='var(--teal)'; wt='700'; }
-      else if(c.k==='status'){ clr = !r.needReq?(r.lowDOI?'var(--amber)':'var(--green)') : (r.kirim<=0?'var(--red)':(r.shortage>0?'var(--amber)':'var(--teal)')); }
+      else if(c.k==='status'){ clr = !r.needReq?(r.lowDOI?'var(--amber)':'var(--green)') : (r.kirim<=0?'var(--red)':(r.needSupplier?'var(--amber)':'var(--teal)')); }
       else if(c.align==='left'||c.align==='center'){ clr='var(--muted)'; }
       var mono = (c.align==='right'||c.k==='code') ? 'font-family:var(--mono);' : '';
       var stk = stickyLeft[c.k]!=null ? 'position:sticky;left:'+stickyLeft[c.k]+'px;background:var(--bg1);z-index:1;' : '';
       var extra = c.k==='name' ? 'max-width:200px;overflow:hidden;text-overflow:ellipsis;' : (c.k==='code' ? 'min-width:96px;width:96px;' : '');
-      h += '<td style="padding:6px 8px;text-align:'+c.align+';'+mono+'color:'+clr+';font-weight:'+wt+';white-space:nowrap;'+stk+extra+'">'+val+'</td>';
+      var dv = String(val).toLowerCase().replace(/"/g,'&quot;');
+      h += '<td data-col="'+c.k+'" data-val="'+dv+'" data-disp="'+String(val).replace(/"/g,'&quot;')+'" style="padding:6px 8px;text-align:'+c.align+';'+mono+'color:'+clr+';font-weight:'+wt+';white-space:nowrap;'+stk+extra+'">'+val+'</td>';
     });
     h += '</tr>';
   });
   h += '</tbody></table></div>';
   if(!whMode){
     h += '<div style="margin-top:8px;font-size:10.5px;color:var(--muted);line-height:1.6">'
-      + 'Semua angka KG. <b>MRP SNG</b> = kebutuhan bulan ini dari FG parfum (produksi Sangiang). <b>MRP BTG</b> = total requirement − MRP SNG (dipakai FG non-parfum di Bitung). '
-      + '<b>Kekurangan SNG</b> = MRP SNG − Stock Sangiang. <b>Qty Kirim</b> = pembulatan ke atas kelipatan multiple, dibatasi stok Bitung. '
-      + '<b>DOI SNG</b> = Stock Sangiang ÷ (MRP SNG ÷ hari) vs target '+d.targetDOI+' hari.'
+      + 'Semua angka KG. <b>MRP SNG</b> = kebutuhan bulan ini FG parfum (Sangiang). <b>MRP BTG</b> = total requirement − MRP SNG (FG non-parfum di Bitung). '
+      + '<b>Qty Kirim</b> = kelipatan multiple dari kekurangan SNG, dibatasi agar stock Bitung tidak turun di bawah MRP BTG. '
+      + 'Kalau Bitung tak bisa memenuhi → <b>Request to supplier</b>. <b>DOI SNG</b> dibulatkan ke atas, target '+d.targetDOI+' hari.'
       + '</div>';
   }
   elR.innerHTML = h;
+  _tsngApplyColFilter();
+  _tsngUpdateColBtns();
 }
 
 function _tsngStat(lbl, val, clr){
@@ -14602,36 +14581,109 @@ function _tsngStat(lbl, val, clr){
     + '<div style="font-size:17px;font-weight:700;color:'+(clr||'var(--text)')+'">'+val+'</div></div>';
 }
 
-// Salin list kirim ke WH: kode, nama, qty kirim (hanya baris perlu kirim & lolos filter)
+// ── Filter dropdown per kolom (ala tabel NPD, namespace _tsng) ────────────────
+function _tsngApplyColFilter(){
+  var host=document.getElementById('tsng-result'); if(!host) return;
+  var keys=Object.keys(_tsngColSel);
+  Array.prototype.forEach.call(host.querySelectorAll('tbody tr'), function(tr){
+    var show=true;
+    for(var i=0;i<keys.length;i++){
+      var k=keys[i], sel=_tsngColSel[k]; if(!sel) continue;
+      var td=tr.querySelector('td[data-col="'+k+'"]'); if(!td){ show=false; break; }
+      if(sel.indexOf(td.getAttribute('data-val')||'')<0){ show=false; break; }
+    }
+    tr.style.display = show ? '' : 'none';
+  });
+}
+function _tsngUpdateColBtns(){
+  Array.prototype.forEach.call(document.querySelectorAll('.tsng-colbtn'), function(b){
+    var k=b.getAttribute('data-k'); var on=!!_tsngColSel[k];
+    b.textContent = on ? '▼' : '▽';
+    b.style.color = on ? 'var(--teal)' : 'var(--muted)';
+    b.style.fontWeight = on ? '700' : '400';
+  });
+}
+function _tsngColMenu(key, label, btn){
+  var ex=document.getElementById('tsng-col-pop'); if(ex){ var wasK=ex.getAttribute('data-k'); ex.remove(); document.removeEventListener('mousedown',_tsngColOutside); if(wasK===key) return; }
+  var host=document.getElementById('tsng-result'); if(!host) return;
+  var cells=host.querySelectorAll('td[data-col="'+key+'"]');
+  var vals={};
+  Array.prototype.forEach.call(cells, function(td){ var v=td.getAttribute('data-val')||''; if(!(v in vals)) vals[v]=td.getAttribute('data-disp')||v; });
+  var keysArr=Object.keys(vals);
+  var _numCnt=0,_tot=0;
+  keysArr.forEach(function(v){ if(v!==''){ _tot++; var n=parseFloat(String(v).replace(/\./g,'').replace(/,/g,'.')); if(!isNaN(n)&&/[0-9]/.test(v)) _numCnt++; } });
+  if(_tot>0 && _numCnt/_tot>=0.6){ keysArr.sort(function(a,b){ var na=parseFloat(String(a).replace(/\./g,'').replace(/,/g,'.'))||0, nb=parseFloat(String(b).replace(/\./g,'').replace(/,/g,'.'))||0; return na-nb; }); }
+  else keysArr.sort();
+  var sel=_tsngColSel[key];
+  var listHtml=keysArr.map(function(v){
+    var checked=(!sel || sel.indexOf(v)>=0);
+    var disp=vals[v]; if(disp==null||disp==='') disp='(kosong)';
+    return '<label style="display:flex;align-items:center;gap:6px;font-size:11px;padding:2px 1px;cursor:pointer"><input type="checkbox" data-v="'+String(v).replace(/"/g,'&quot;')+'" '+(checked?'checked':'')+' onchange="_tsngColTick(\''+String(key).replace(/'/g,"\\'")+'\')"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+String(disp).slice(0,30)+'</span></label>';
+  }).join('');
+  var pop=document.createElement('div'); pop.id='tsng-col-pop'; pop.setAttribute('data-k',key);
+  pop.style.cssText='position:fixed;z-index:1200;background:var(--bg2);border:1px solid var(--border2);border-radius:8px;box-shadow:0 8px 30px rgba(0,0,0,.3);padding:9px;width:230px;max-height:340px;display:flex;flex-direction:column';
+  pop.innerHTML='<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);margin-bottom:6px">Filter '+label+'</div>'
+    +'<input type="text" placeholder="Cari nilai…" oninput="_tsngColSearchList(this.value)" style="width:100%;font-size:11px;padding:4px 6px;margin-bottom:6px;border:1px solid var(--border2);border-radius:4px;background:var(--bg3);color:var(--text);box-sizing:border-box">'
+    +'<div style="display:flex;gap:6px;margin-bottom:6px"><button onclick="_tsngColAll(\''+key+'\',true)" style="flex:1;font-size:10px;padding:3px;border:1px solid var(--border2);border-radius:4px;background:var(--bg3);color:var(--text);cursor:pointer">Semua</button><button onclick="_tsngColAll(\''+key+'\',false)" style="flex:1;font-size:10px;padding:3px;border:1px solid var(--border2);border-radius:4px;background:var(--bg3);color:var(--text);cursor:pointer">Kosongkan</button></div>'
+    +'<div id="tsng-col-list" style="overflow:auto;flex:1">'+listHtml+'</div>';
+  document.body.appendChild(pop);
+  var r=btn.getBoundingClientRect();
+  pop.style.left=Math.max(6, Math.min(r.left, window.innerWidth-238))+'px';
+  pop.style.top=Math.min(r.bottom+4, window.innerHeight-350)+'px';
+  setTimeout(function(){ document.addEventListener('mousedown', _tsngColOutside); }, 0);
+}
+function _tsngColOutside(e){ var pop=document.getElementById('tsng-col-pop'); if(pop && !pop.contains(e.target) && !(e.target.classList && e.target.classList.contains('tsng-colbtn'))){ pop.remove(); document.removeEventListener('mousedown',_tsngColOutside); } }
+function _tsngColSearchList(q){ q=(q||'').toLowerCase(); var list=document.getElementById('tsng-col-list'); if(!list)return; Array.prototype.forEach.call(list.querySelectorAll('label'), function(l){ l.style.display=l.textContent.toLowerCase().indexOf(q)>=0?'':'none'; }); }
+function _tsngColTick(key){
+  var list=document.getElementById('tsng-col-list'); if(!list) return;
+  var boxes=list.querySelectorAll('input[type=checkbox]');
+  var checked=[], total=boxes.length, nOn=0;
+  Array.prototype.forEach.call(boxes, function(b){ if(b.checked){ nOn++; checked.push(b.getAttribute('data-v')); } });
+  if(nOn===total) delete _tsngColSel[key]; else _tsngColSel[key]=checked;
+  _tsngApplyColFilter(); _tsngUpdateColBtns();
+}
+function _tsngColAll(key, on){
+  var list=document.getElementById('tsng-col-list'); if(!list) return;
+  Array.prototype.forEach.call(list.querySelectorAll('input[type=checkbox]'), function(b){ b.checked=on; });
+  _tsngColTick(key);
+}
+
 function _transferSNGCopyWH(){
   var d = _transferSNGData();
-  var rows = d.rows.filter(_tsngRowPassFilter).filter(function(r){ return r.needReq && r.kirim>0; });
+  var rows = d.rows.filter(function(r){ return r.needReq && r.kirim>0; });
+  // hormati filter kolom yg aktif (cocokkan via display value)
+  if(Object.keys(_tsngColSel).length){
+    rows = rows.filter(function(r){
+      return Object.keys(_tsngColSel).every(function(k){
+        var col=_TSNG_COLS.filter(function(c){return c.k===k;})[0]; if(!col) return true;
+        return _tsngColSel[k].indexOf(String(col.get(r)).toLowerCase())>=0;
+      });
+    });
+  }
   if(!rows.length){ toast('Tidak ada item yang perlu dikirim','err'); return; }
   var lines = ['Kode\tNama\tQty Kirim (KG)'];
   rows.forEach(function(r){ lines.push(r.code+'\t'+(r.name||'')+'\t'+r.kirim); });
   var txt = lines.join('\n');
   if(navigator.clipboard && navigator.clipboard.writeText){
-    navigator.clipboard.writeText(txt).then(function(){ toast('Tersalin '+rows.length+' item — tinggal paste ke WH ✓','ok'); },
-      function(){ _tsngFallbackCopy(txt, rows.length); });
+    navigator.clipboard.writeText(txt).then(function(){ toast('Tersalin '+rows.length+' item ✓','ok'); }, function(){ _tsngFallbackCopy(txt, rows.length); });
   } else { _tsngFallbackCopy(txt, rows.length); }
 }
 function _tsngFallbackCopy(txt, n){
   var ta=document.createElement('textarea'); ta.value=txt; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.select();
-  try{ document.execCommand('copy'); toast('Tersalin '+n+' item ✓','ok'); }catch(e){ toast('Gagal menyalin — blok manual','err'); }
+  try{ document.execCommand('copy'); toast('Tersalin '+n+' item ✓','ok'); }catch(e){ toast('Gagal menyalin','err'); }
   document.body.removeChild(ta);
 }
 
 function _transferSNGExport(){
   var d = _transferSNGData();
-  var rows = d.rows.filter(_tsngRowPassFilter);
-  if(!rows.length){ toast('Tidak ada data untuk diexport','err'); return; }
-  var headers = ['Kode','Nama','Tipe','Brand','UOM','Multiple','Stock Bitung','Stock Sangiang','MRP SNG','MRP BTG','DOI SNG','Kekurangan SNG','Qty Kirim','Bitung Kurang','Status'];
+  var rows = d.rows;
+  if(!rows.length){ toast('Tidak ada data','err'); return; }
+  var headers = ['Kode','Nama','Tipe','Brand','UOM','Multiple','Stock Bitung','Stock Sangiang','MRP SNG','MRP BTG','DOI SNG','Kekurangan SNG','Qty Kirim','Request Supplier','Status'];
   var lines = [headers.join('\t')];
   rows.forEach(function(r){
-    var status = !r.needReq ? 'Cukup' : (r.kirim<=0 ? 'Bitung kurang' : (r.shortage>0 ? 'Kirim '+r.kirim+' (Bitung kurang '+r.shortage+')' : 'Kirim '+r.kirim));
-    lines.push([r.code,(r.name||'').replace(/\t/g,' '),r.type,r.brand,r.uom,r.mult,r.stBTG,r.stSNG,r.mrpSNG,r.mrpBTG,(r.doiSNG>=999?'999':Math.round(r.doiSNG*10)/10),(r.deficit>0?r.deficit:0),r.kirim,r.shortage,status].join('\t'));
+    lines.push([r.code,(r.name||'').replace(/\t/g,' '),r.type,r.brand,r.uom,r.mult,r.stBTG,r.stSNG,r.mrpSNG,r.mrpBTG,(r.doiSNG>=9999?'999':r.doiSNG),(r.deficit>0?r.deficit:0),r.kirim,r.supplierQty,_tsngStatusText(r)].join('\t'));
   });
-  var blob = new Blob(['﻿'+lines.join('\n')], {type:'text/csv;charset=utf-8'});
+  var blob = new Blob(['\ufeff'+lines.join('\n')], {type:'text/csv;charset=utf-8'});
   var a = document.createElement('a'); a.href = URL.createObjectURL(blob);
   a.download = 'Transfer_to_SNG_'+new Date().toISOString().slice(0,10)+'.csv'; a.click();
   toast('Export '+rows.length+' baris ✓','ok');
