@@ -7672,24 +7672,35 @@ document.addEventListener('click', function(e){
 function resetPOOverrides() {
   if(!_requireAdmin('reset PO')) return;
   if(!confirm('Reset semua tanggal request kirim dan konfirmasi? Data tidak bisa dikembalikan.')) return;
+  // FIX "muncul lagi": penghapusan harus MENANG di merge realtime.
+  // Merge pakai "confUpd/dateUpd terbaru menang" → set timestamp BARU (bukan '') supaya
+  // clear ini mengalahkan salinan lama dari cloud/laptop lain, tidak balik lagi.
+  var nowISO = new Date().toISOString();
+  var hadConf = {};
+  Object.keys(STATE.poConfirmations||{}).forEach(function(k){ hadConf[k]=1; });
   // Clear all date/confirm fields but keep notes
   Object.keys(STATE.poOverrides).forEach(function(key) {
     var ovr = STATE.poOverrides[key];
+    if(ovr.confDate) hadConf[key] = 1;   // key ini punya konfirmasi → perlu tombstone
     ovr.date       = '';
     ovr.isManual   = false;
     ovr.isAuto     = false;
     ovr.isSchedManual = false;
+    ovr.dateUpd    = nowISO;             // propagate penghapusan tgl request
     ovr.confQty    = '';
     ovr.confDate   = '';
-    ovr.confUpd    = '';
+    ovr.confUpd    = nowISO;             // FIX: dulu '' → selalu kalah; sekarang timestamp baru
     ovr.confSource = '';
   });
-  // Juga bersihkan po_confirmations (tempat penyimpanan konfirmasi yang baru)
-  STATE.poConfirmations = {};
+  // po_confirmations: jangan dikosongkan mentah (bikin key "hilang" lalu di-add balik tanpa
+  // syarat oleh device lain). Ganti jadi tombstone {confUpd: baru} per key yg pernah konfirmasi.
+  var newConf = {};
+  Object.keys(hadConf).forEach(function(k){ newConf[k] = { confUpd: nowISO }; });
+  STATE.poConfirmations = newConf;
   localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
-  localStorage.setItem('po_confirmations', '{}');
+  localStorage.setItem('po_confirmations', JSON.stringify(STATE.poConfirmations));
   cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
-  cloudSave('po_confirmations', '{}');
+  cloudSave('po_confirmations', JSON.stringify(STATE.poConfirmations));
   // Clear auto-generated comments (keep manual ones)
   if(STATE.projComments) {
     Object.keys(STATE.projComments).forEach(function(code){
