@@ -3804,6 +3804,23 @@ function appStart() {
     // URL BOM Sheet mungkin baru ke-restore dari Firebase di sini — coba auto-load BOM
     // (guard _bomAutoLoadDone + cek _bomData kosong ada di dalam fungsinya)
     setTimeout(function(){ if(typeof _autoLoadBomFromSheet === 'function') _autoLoadBomFromSheet(); }, 1200);
+    // MPS dari cloud — simpan bundle, lalu restore bila IndexedDB device ini kosong.
+    // Delay 2.5s supaya _mrpIdbLoad (IndexedDB) sempat mengisi _mpsData dulu.
+    if(data && data.mps_data_full) window._mpsCloudBundle = data.mps_data_full;
+    setTimeout(function(){
+      var _haveLocal = _mpsData && Object.keys(_mpsData).length;
+      if(!_haveLocal && window._mpsCloudBundle) {
+        // Device tanpa MPS lokal → restore dari cloud
+        _mpsApplyBundle(window._mpsCloudBundle);
+        if(_mpsData && Object.keys(_mpsData).length && typeof _mrpCheckReady === 'function') _mrpCheckReady();
+      } else if(_haveLocal && !window._mpsCloudBundle && _fbReady && _db) {
+        // Device utama punya MPS lokal tapi cloud belum ada → seed sekali (tanpa upload ulang)
+        try {
+          var _seed = JSON.stringify({ data:_mpsData, months:_mpsActiveMonths, fgDescs:_fgDescFromMps||{}, ts:new Date().toISOString() });
+          if(_seed.length <= 950000) { cloudSave('mps_data_full', _seed); window._mpsCloudBundle = _seed; }
+        } catch(e){}
+      }
+    }, 2500);
   }); }
   else { setTimeout(function(){ afterLoad({}); setTimeout(cloudStartRealtime, 500); }, 50); }
 }
@@ -14126,9 +14143,26 @@ function _fcVal(qty, code) {
 // Angka "raw MRP" ini = forecastRaw[mi]. Nilai Requirement yang tampil di tabel
 // bisa berbeda utk bulan berjalan (dikurangi matcom) atau saat "Sertakan NPD" aktif
 // (ditambah kebutuhan NPD) — perbedaan itu ditampilkan sebagai catatan di bawah.
-function _fcShowReqDetail(code, mi) {
-  if(!_bomData || !_bomData.length || !_mpsData || !Object.keys(_mpsData).length) {
-    toast('Data BOM/MPS belum dimuat — rincian FG tidak tersedia', 'err'); return;
+function _fcShowReqDetail(code, mi, _retry) {
+  var _mpsOk = _mpsData && Object.keys(_mpsData).length;
+  var _bomOk = _bomData && _bomData.length;
+  if(!_mpsOk || !_bomOk) {
+    if(!_retry) {
+      // Device lain: MPS/BOM belum ada di IndexedDB. Coba tarik dari cloud/GSheet dulu.
+      toast('Menarik data BOM/MPS dari cloud…', 'inf');
+      var _pending = 0, _done = function(){ if(--_pending <= 0) _fcShowReqDetail(code, mi, true); };
+      if(!_mpsOk && typeof _mpsEnsureFromCloud === 'function') { _pending++; _mpsEnsureFromCloud(function(){ _done(); }); }
+      if(!_bomOk && typeof _autoLoadBomFromSheet === 'function') { _pending++; try { _autoLoadBomFromSheet(); } catch(e){} setTimeout(_done, 2500); }
+      if(_pending === 0) _fcShowReqDetail(code, mi, true);
+      return;
+    }
+    // Sudah dicoba tarik, tetap tidak ada.
+    if(!(_mpsData && Object.keys(_mpsData).length)) {
+      toast('MPS belum tersedia di device ini — buka Data Source → Muat MPS, atau upload MPS di device utama agar tersync', 'err'); return;
+    }
+    if(!(_bomData && _bomData.length)) {
+      toast('BOM belum termuat — tunggu beberapa detik lalu klik lagi (auto-load dari GSheet)', 'err'); return;
+    }
   }
   if(localStorage.getItem('mrp_source') !== 'mps') {
     toast('Requirement bukan dari MPS→MRP (sumber GSheet) — rincian per FG tidak tersedia', 'err'); return;
@@ -17887,6 +17921,60 @@ function _mrpIdbSaveMps(data, months) {
     var tx = db.transaction('mps', 'readwrite');
     tx.objectStore('mps').put({ id:'mps_data', data: data, months: months, fgDescs: _fgDescFromMps||{}, ts: new Date().toISOString() });
   });
+  // Sync ke cloud (Firestore) supaya device lain bisa buka rincian FG tanpa upload ulang.
+  // Hanya cloud/IndexedDB — TIDAK menyentuh localStorage (hindari kuota).
+  try {
+    if(typeof cloudSave === 'function') {
+      var _mpsBundle = JSON.stringify({ data: data, months: months, fgDescs: _fgDescFromMps || {}, ts: new Date().toISOString() });
+      // Firestore batas 1 dokumen ~1MB. Kalau MPS terlalu besar, lewati (device lain
+      // tetap bisa upload manual). Ambang aman 950 KB.
+      if(_mpsBundle.length <= 950000) {
+        cloudSave('mps_data_full', _mpsBundle);
+      } else {
+        console.warn('[MPS] bundle', _mpsBundle.length, 'byte > batas Firestore — tidak disync ke cloud');
+        if(typeof toast === 'function') toast('MPS terlalu besar untuk sync cloud — rincian FG hanya di device ini', 'err');
+      }
+    }
+  } catch(e) { console.warn('[MPS] gagal sync cloud:', e && e.message); }
+}
+// Terapkan bundle MPS dari cloud → _mpsData + IndexedDB (tanpa localStorage).
+function _mpsApplyBundle(str) {
+  if(!str) return false;
+  try {
+    var b = (typeof str === 'string') ? JSON.parse(str) : str;
+    if(!b || !b.data || !Object.keys(b.data).length) return false;
+    _mpsData = b.data;
+    if(b.fgDescs) _fgDescFromMps = b.fgDescs;
+    if(b.months && typeof _mpsRecomputeActiveMonths === 'function') {
+      _mpsActiveMonths = _mpsRecomputeActiveMonths(b.months);
+      if(typeof _syncFcMonthsToMps === 'function') _syncFcMonthsToMps();
+    }
+    // Simpan ke IndexedDB device ini supaya next boot langsung ada (tidak perlu cloud lagi)
+    if(typeof _mrpIdbSaveMps === 'function') {
+      // panggil versi IDB-only tanpa re-cloudSave: tulis langsung
+      _mrpIdbOpen(function(db){
+        if(!db) return;
+        try { db.transaction('mps','readwrite').objectStore('mps').put({ id:'mps_data', data:_mpsData, months:(b.months||_mpsActiveMonths), fgDescs:_fgDescFromMps||{}, ts:new Date().toISOString() }); } catch(e){}
+      });
+    }
+    var el3 = document.getElementById('mps-status');
+    if(el3) { el3.textContent = '✓ MPS dari cloud: ' + Object.keys(_mpsData).length + ' FG'; el3.style.color='var(--green)'; }
+    return true;
+  } catch(e) { console.warn('[MPS] apply bundle gagal:', e && e.message); return false; }
+}
+// Pastikan _mpsData ada; kalau kosong, tarik dari cloud. cb(true/false).
+function _mpsEnsureFromCloud(cb) {
+  cb = cb || function(){};
+  if(_mpsData && Object.keys(_mpsData).length) { cb(true); return; }
+  if(window._mpsCloudBundle && _mpsApplyBundle(window._mpsCloudBundle)) { cb(true); return; }
+  if(!_fbReady || !_db) { cb(false); return; }
+  _db.collection('kv').doc('mps_data_full').get()
+    .then(function(doc){
+      var v = doc.exists ? doc.data().v : null;
+      if(v) window._mpsCloudBundle = v;
+      cb(v ? _mpsApplyBundle(v) : false);
+    })
+    .catch(function(e){ console.warn('[MPS] cloud get gagal:', e && e.message); cb(false); });
 }
 function _mrpIdbSaveMrp(data) {
   _mrpIdbOpen(function(db) {
