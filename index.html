@@ -1066,7 +1066,7 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
 <div class="page-inner">
   <div class="ph">
     <div class="ph-l"><h2>Data Source (Sheets)</h2><p>Koneksi ke Google Sheets — Master Data, MRP, Real Name</p></div>
-    <div class="ph-r"><button class="btn btn-primary" onclick="loadAllSheets()">↺ Muat Semua</button></div>
+    <div class="ph-r" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" onclick="_clearLocalCache()" title="Hapus cache SAP & riwayat di penyimpanan lokal untuk melegakan kuota. Data regenerable & aman di cloud.">🧹 Bersihkan Cache</button><button class="btn btn-primary" onclick="loadAllSheets()">↺ Muat Semua</button></div>
   </div>
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;max-width:1100px">
 
@@ -4484,6 +4484,26 @@ function _npdSnapshotPush(data){
     }
   }catch(e){}
 }
+// Bersihkan cache lokal yang besar & REGENERABLE untuk melegakan kuota localStorage.
+// Hanya menghapus data turunan (cache SAP, riwayat, snapshot) yang sudah ada di cloud /
+// bisa dibuat ulang via Refresh SAP. TIDAK menyentuh data penting (npd_data, po_overrides,
+// po_confirmations, schedule, config Firebase, URL sheet, dll).
+function _clearLocalCache() {
+  if(typeof _requireAdmin==='function' && !_requireAdmin('bersihkan cache')) return;
+  // HANYA cache yg REGENERABLE + ADA DI CLOUD. TIDAK termasuk proj_history & npd_snapshots
+  // (lokal-only, bukan regenerable — itu riwayat & titik pulihkan, menghapusnya = kehilangan data).
+  var _keys = ['sap_cache_stock','sap_cache_po','sap_cache_grpo','sap_cache_ospr','proj_snapshots'];
+  var before = 0, after = 0;
+  try { Object.keys(localStorage).forEach(function(k){ before += ((localStorage.getItem(k)||'').length + k.length); }); } catch(e){}
+  if(!confirm('Bersihkan cache SAP lokal untuk melegakan penyimpanan?\n\nHanya menghapus cache SAP (stock/PO/GRPO/OSPR) yang bisa dibuat ulang via Refresh SAP & sudah tersimpan di cloud.\n\nTIDAK menghapus: NPD, PO, jadwal, riwayat projection (proj_history), titik pulihkan NPD, maupun konfigurasi.')) return;
+  var _removed = [];
+  _keys.forEach(function(k){ try { if(localStorage.getItem(k)!=null){ localStorage.removeItem(k); _removed.push(k); } } catch(e){} });
+  try { Object.keys(localStorage).forEach(function(k){ after += ((localStorage.getItem(k)||'').length + k.length); }); } catch(e){}
+  var freedKB = Math.max(0, Math.round((before - after)/1024));
+  toast('Cache dibersihkan: ' + _removed.length + ' item · ~' + freedKB + ' KB dilegakan ✓', 'ok');
+  console.log('[cache] dibersihkan:', _removed, '~'+freedKB+'KB');
+}
+
 function _npdSave(data) {
   // Penanda versi: setiap simpan naikkan _rev. Realtime hanya terima cloud yg _rev-nya
   // lebih baru → mencegah device/tab yang ketinggalan menimpa data baru (FG/grup hilang).
@@ -4493,6 +4513,12 @@ function _npdSave(data) {
   // ⭐ CLOUD DULU & TERPISAH: data harus sampai ke Firebase walau localStorage PENUH.
   // Bug lama: cloudSave satu try dengan localStorage.setItem — kalau setItem throw (kuota),
   // cloudSave ikut tidak jalan → FG baru cuma di memori → hilang saat refresh.
+  // GUARD 1MB: batas 1 dokumen Firestore ~1MB. Kalau NPD melebihi, cloudSave akan ditolak
+  // → data TIDAK tersimpan di cloud. Peringatkan planner lebih awal (ambang 950KB).
+  if(_json.length > 950000 && typeof toast==='function'){
+    toast('⚠ Data NPD '+Math.round(_json.length/1024)+'KB mendekati/melebihi batas 1MB Firestore — sebagian bisa gagal tersimpan. Pertimbangkan hapus FG lama / split.','err');
+    console.warn('[npd] ukuran '+_json.length+' byte > ~950KB (batas Firestore 1MB)');
+  }
   try { cloudSave('npd_data', _json); } catch(e){ console.warn('[npd] cloudSave gagal:', e && e.message); }
   // localStorage best-effort (quota-safe). Gagal pun data tetap aman di cloud + STATE.
   try { localStorage.setItem('npd_data', _json); }
@@ -6670,16 +6696,17 @@ async function syncAll() {
         return {d:o.docNum,i:o.itemCode,n:o.itemName,s:o.supplierName,q:o.openQty,u:o.uom,r:o.prReqDate,t:o.site};
       }));
       console.log('[syncAll] Cache sizes — stock:', Math.round(sStock.length/1024)+'KB, po:', Math.round(sPO.length/1024)+'KB, grpo:', Math.round(sGRPO.length/1024)+'KB');
-      localStorage.setItem('sap_cache_stock', sStock);
-      localStorage.setItem('sap_cache_po',    sPO);
-      localStorage.setItem('sap_cache_grpo',  sGRPO);
-      localStorage.setItem('sap_cache_ospr',  sOSPR);
-      // Explicit cloudSave — bypass shim
+      // ⭐ CLOUD DULU (durable, tak kena kuota localStorage) — bypass shim
       cloudSave('sap_cache_stock', sStock);
       cloudSave('sap_cache_po',    sPO);
       cloudSave('sap_cache_grpo',  sGRPO);
       cloudSave('sap_cache_ospr',  sOSPR);
-      console.log('[syncAll] ✓ Cache saved + pushed to Firebase');
+      // localStorage best-effort PER-KEY (quota-safe). Gagal satu tidak membatalkan yg lain
+      // maupun cloudSave. Cache SAP regenerable + sudah di cloud, jadi aman kalau tak tersimpan lokal.
+      [['sap_cache_stock',sStock],['sap_cache_po',sPO],['sap_cache_grpo',sGRPO],['sap_cache_ospr',sOSPR]].forEach(function(kv){
+        try { localStorage.setItem(kv[0], kv[1]); } catch(e){ console.warn('[syncAll] localStorage penuh, skip '+kv[0]+' (aman di cloud)'); }
+      });
+      console.log('[syncAll] ✓ Cache pushed to Firebase (+localStorage best-effort)');
     } catch(e) { console.warn('[syncAll] Cache FAILED:', e.message); }
   }
 
