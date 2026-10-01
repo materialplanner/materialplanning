@@ -3713,6 +3713,10 @@ function _applyRealtimeChanges(keys) {
             var _curEmpty = !_curLocal || !_curLocal.fgs || !_curLocal.fgs.length;
             // LINDUNGI: update cloud yang KOSONG tidak boleh menimpa data lokal yang ADA isinya
             if(_ndEmpty && !_curEmpty){ console.warn('[npd] update cloud kosong diabaikan (data lokal dipertahankan)'); break; }
+            // LINDUNGI: cloud yang _rev-nya LEBIH LAMA dari lokal diabaikan — cegah device/tab
+            // yang ketinggalan menimpa data baru (FG/grup hilang). Sama-sama tak ber-_rev → terima.
+            var _ndRev = (_nd && _nd._rev) || 0, _curRev = (_curLocal && _curLocal._rev) || 0;
+            if(!_ndEmpty && !_curEmpty && _ndRev < _curRev){ console.warn('[npd] update cloud lebih lama (_rev '+_ndRev+' < '+_curRev+') diabaikan'); break; }
             if(!_ndEmpty && !_curEmpty){ _npdSnapshotPush(_curLocal); } // snapshot dulu sebelum diganti dari device lain
             STATE.npdData = _nd || {fgs:[]};
             try{ localStorage.setItem('npd_data', JSON.stringify(STATE.npdData)); }catch(e){}
@@ -4434,6 +4438,9 @@ function _npdSnapshotPush(data){
 function _npdSave(data) {
   // snapshot dulu keadaan SEBELUM ditimpa (utk restore kalau ada yg salah/hilang)
   try{ var _prev=localStorage.getItem('npd_data'); if(_prev){ var _pj=JSON.parse(_prev); if(!_npdIsEmpty(_pj)) _npdSnapshotPush(_pj); } }catch(e){}
+  // Penanda versi: setiap simpan naikkan _rev. Realtime hanya terima cloud yg _rev-nya
+  // lebih baru → mencegah device/tab yang ketinggalan menimpa data baru (FG/grup hilang).
+  try { data._rev = Math.max(Date.now(), ((STATE.npdData&&STATE.npdData._rev)||0) + 1); } catch(e){ data._rev = Date.now(); }
   STATE.npdData = data;
   try { localStorage.setItem('npd_data', JSON.stringify(data)); cloudSave('npd_data', JSON.stringify(data)); } catch(e){}
   if(window._inclNPD){
