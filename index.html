@@ -7243,10 +7243,19 @@ function _refreshProjectionIncoming(itemCode) {
 function setPOConfQty(el) {
   if(!_requireAdmin('edit konfirmasi')) return;
   var key = el.getAttribute('data-key');
+  var _nowISO = new Date().toISOString();
   if(!STATE.poConfirmations) STATE.poConfirmations = {};
   if(!STATE.poConfirmations[key]) STATE.poConfirmations[key] = {};
   if(el.value) {
     STATE.poConfirmations[key].confQty = el.value;
+    // Double-layer: tulis juga ke po_overrides dgn confUpd baru (sama spt saveFeedback),
+    // supaya nilai manual tidak hilang kalau po_confirmations ter-clobber migrasi/tombstone.
+    if(!STATE.poOverrides[key]) STATE.poOverrides[key] = {};
+    STATE.poOverrides[key].confQty    = el.value;
+    STATE.poOverrides[key].confSource = STATE.poOverrides[key].confSource || 'manual';
+    STATE.poOverrides[key].confUpd    = _nowISO;
+    localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
+    cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
   } else {
     delete STATE.poConfirmations[key].confQty;
     // Hapus juga legacy field di poOverrides (asal dari approve Jadwal Pengiriman)
@@ -7256,12 +7265,12 @@ function setPOConfQty(el) {
       if(!STATE.poOverrides[key].confDate) delete STATE.poOverrides[key].confSource;
       // confUpd di-SET ke timestamp baru, bukan dihapus — supaya penghapusan ini
       // menang saat di-merge ke device lain (merge pakai "confUpd terbaru menang")
-      STATE.poOverrides[key].confUpd = new Date().toISOString();
+      STATE.poOverrides[key].confUpd = _nowISO;
       localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
       cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
     }
   }
-  STATE.poConfirmations[key].confUpd = new Date().toISOString();
+  STATE.poConfirmations[key].confUpd = _nowISO;
   el.style.color = el.value ? 'var(--amber)' : 'var(--muted)';
   localStorage.setItem('po_confirmations', JSON.stringify(STATE.poConfirmations));
   cloudSave('po_confirmations', JSON.stringify(STATE.poConfirmations));
@@ -7276,11 +7285,19 @@ function setPOConfQty(el) {
 function setPOConfDate(el) {
   if(!_requireAdmin('edit konfirmasi')) return;
   var key = el.getAttribute('data-key');
+  var _nowISO = new Date().toISOString();
   if(!STATE.poConfirmations) STATE.poConfirmations = {};
   if(!STATE.poConfirmations[key]) STATE.poConfirmations[key] = {};
   if(el.value) {
     STATE.poConfirmations[key].confDate   = el.value;
     STATE.poConfirmations[key].confSource = 'manual';
+    // Double-layer: tulis juga ke po_overrides dgn confUpd baru (sama spt saveFeedback).
+    if(!STATE.poOverrides[key]) STATE.poOverrides[key] = {};
+    STATE.poOverrides[key].confDate   = el.value;
+    STATE.poOverrides[key].confSource = 'manual';
+    STATE.poOverrides[key].confUpd    = _nowISO;
+    localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
+    cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
   } else {
     delete STATE.poConfirmations[key].confDate;
     delete STATE.poConfirmations[key].confSource;
@@ -7291,12 +7308,12 @@ function setPOConfDate(el) {
       delete STATE.poOverrides[key].confSource;
       // confUpd di-SET ke timestamp baru, bukan dihapus — supaya penghapusan ini
       // menang saat di-merge ke device lain (merge pakai "confUpd terbaru menang")
-      STATE.poOverrides[key].confUpd = new Date().toISOString();
+      STATE.poOverrides[key].confUpd = _nowISO;
       localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
       cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
     }
   }
-  STATE.poConfirmations[key].confUpd = new Date().toISOString();
+  STATE.poConfirmations[key].confUpd = _nowISO;
   el.style.color = el.value ? 'var(--amber)' : 'var(--muted)';
   localStorage.setItem('po_confirmations', JSON.stringify(STATE.poConfirmations));
   cloudSave('po_confirmations', JSON.stringify(STATE.poConfirmations));
@@ -7388,7 +7405,10 @@ function savePOChanges() {
   if(!_requireAdmin('simpan perubahan')) return;
   localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
   cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
-  toast('Perubahan PO disimpan ke Firebase ✓', 'ok');
+  // Simpan juga konfirmasi (qty & tgl konfirmasi manual) — sebelumnya tidak ikut tersimpan.
+  localStorage.setItem('po_confirmations', JSON.stringify(STATE.poConfirmations||{}));
+  cloudSave('po_confirmations', JSON.stringify(STATE.poConfirmations||{}));
+  toast('Perubahan PO (tgl request + konfirmasi) disimpan ke Firebase ✓', 'ok');
 }
 
 function cleanupStalePoOverrides() {
