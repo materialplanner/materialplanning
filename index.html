@@ -3867,6 +3867,24 @@ function appStart() {
         }
       }
     } catch(e){ console.warn('[boot] restore schedule dari cloud gagal:', e.message); }
+    // ── Pulihkan NPD dari CLOUD kalau localStorage penuh (quota) ───────────────
+    // Sama seperti schedule: kalau localStorage penuh, boot gagal menulis 'npd_data'
+    // → _npdRender baca localStorage lama → FG "hilang". Cloud selalu punya datanya.
+    try {
+      if(cloudData && cloudData['npd_data']) {
+        var _cn = JSON.parse(cloudData['npd_data'] || 'null');
+        if(_cn && _cn.fgs && _cn.fgs.length) {
+          var _lrev = (STATE.npdData && STATE.npdData._rev) || 0;
+          var _lnfg = (STATE.npdData && STATE.npdData.fgs) ? STATE.npdData.fgs.length : 0;
+          if(_lnfg === 0 || (_cn._rev||0) >= _lrev) {
+            STATE.npdData = _cn;
+            try { localStorage.setItem('npd_data', JSON.stringify(_cn)); } catch(_e){}
+            if(document.getElementById('npd-table') && typeof _npdRender === 'function'){ try{ _npdRender(); }catch(_e){} }
+            console.log('[boot] npd_data dipulihkan dari cloud:', _cn.fgs.length, 'FG (_rev '+(_cn._rev||0)+')');
+          }
+        }
+      }
+    } catch(e){ console.warn('[boot] restore npd dari cloud gagal:', e.message); }
     removeSplash(); // always remove splash
     // Auto-load Sheets jika data belum ada tapi URL sudah ada di cloud
     setTimeout(function(){
@@ -4449,7 +4467,7 @@ function _npdSnapshotPush(data){
   try{
     if(_npdIsEmpty(data)) return;                       // jangan snapshot data kosong
     var json=JSON.stringify(data);
-    if(json.length > 900000) return;                    // terlalu besar → skip (jaga localStorage)
+    if(json.length > 600000) return;                    // terlalu besar → skip (jaga localStorage)
     var snaps=[]; try{ snaps=JSON.parse(localStorage.getItem('npd_snapshots')||'[]'); }catch(e){}
     if(snaps.length){
       var last=snaps[snaps.length-1];
@@ -4457,18 +4475,30 @@ function _npdSnapshotPush(data){
       if(Date.now()-last.ts < 120000) return;            // throttle 2 menit
     }
     snaps.push({ts:Date.now(), json:json, nfg:(data.fgs||[]).length});
-    while(snaps.length>30) snaps.shift();               // simpan 30 terakhir
-    localStorage.setItem('npd_snapshots', JSON.stringify(snaps));
+    while(snaps.length>12) snaps.shift();               // simpan 12 terakhir (hemat kuota)
+    // Quota-safe: kalau penuh, buang snapshot terlama & coba lagi — JANGAN sampai
+    // bikin penyimpanan npd_data utama gagal.
+    for(var _try=0; _try<12; _try++){
+      try{ localStorage.setItem('npd_snapshots', JSON.stringify(snaps)); break; }
+      catch(e){ if(snaps.length<=1){ try{ localStorage.removeItem('npd_snapshots'); }catch(_){} break; } snaps.shift(); }
+    }
   }catch(e){}
 }
 function _npdSave(data) {
-  // snapshot dulu keadaan SEBELUM ditimpa (utk restore kalau ada yg salah/hilang)
-  try{ var _prev=localStorage.getItem('npd_data'); if(_prev){ var _pj=JSON.parse(_prev); if(!_npdIsEmpty(_pj)) _npdSnapshotPush(_pj); } }catch(e){}
   // Penanda versi: setiap simpan naikkan _rev. Realtime hanya terima cloud yg _rev-nya
   // lebih baru → mencegah device/tab yang ketinggalan menimpa data baru (FG/grup hilang).
   try { data._rev = Math.max(Date.now(), ((STATE.npdData&&STATE.npdData._rev)||0) + 1); } catch(e){ data._rev = Date.now(); }
   STATE.npdData = data;
-  try { localStorage.setItem('npd_data', JSON.stringify(data)); cloudSave('npd_data', JSON.stringify(data)); } catch(e){}
+  var _json = JSON.stringify(data);
+  // ⭐ CLOUD DULU & TERPISAH: data harus sampai ke Firebase walau localStorage PENUH.
+  // Bug lama: cloudSave satu try dengan localStorage.setItem — kalau setItem throw (kuota),
+  // cloudSave ikut tidak jalan → FG baru cuma di memori → hilang saat refresh.
+  try { cloudSave('npd_data', _json); } catch(e){ console.warn('[npd] cloudSave gagal:', e && e.message); }
+  // localStorage best-effort (quota-safe). Gagal pun data tetap aman di cloud + STATE.
+  try { localStorage.setItem('npd_data', _json); }
+  catch(e){ console.warn('[npd] localStorage penuh — npd_data tidak tersimpan lokal, tapi AMAN di cloud'); if(typeof toast==='function') toast('Penyimpanan lokal penuh — data NPD disimpan ke cloud ✓','ok'); }
+  // Snapshot SETELAH simpan utama (biar tidak merebut kuota dari npd_data).
+  try{ var _prev2=STATE.npdData; if(_prev2 && !_npdIsEmpty(_prev2)) _npdSnapshotPush(_prev2); }catch(e){}
   if(window._inclNPD){
     if(STATE.projectionData && STATE.projectionData.length){ buildProjection(); if(document.getElementById('proj-table')) renderProjection(); }
     if(document.getElementById('fc-table')) renderForecast();
