@@ -3713,12 +3713,38 @@ function _applyRealtimeChanges(keys) {
             var _curEmpty = !_curLocal || !_curLocal.fgs || !_curLocal.fgs.length;
             // LINDUNGI: update cloud yang KOSONG tidak boleh menimpa data lokal yang ADA isinya
             if(_ndEmpty && !_curEmpty){ console.warn('[npd] update cloud kosong diabaikan (data lokal dipertahankan)'); break; }
-            // LINDUNGI: cloud yang _rev-nya LEBIH LAMA dari lokal diabaikan — cegah device/tab
-            // yang ketinggalan menimpa data baru (FG/grup hilang). Sama-sama tak ber-_rev → terima.
+            // MERGE PER-FG (union by id) — JANGAN replace seluruh blob. Replace blob bikin
+            // FG baru hilang kalau ada device/tab lain push blob lama (walau _rev lebih baru,
+            // wall-clock tidak paham kausalitas). Dengan union: FG lokal TIDAK PERNAH dihapus
+            // oleh update masuk; FG yg sama di kedua sisi → ambil dari blob ber-_rev lebih baru.
             var _ndRev = (_nd && _nd._rev) || 0, _curRev = (_curLocal && _curLocal._rev) || 0;
-            if(!_ndEmpty && !_curEmpty && _ndRev < _curRev){ console.warn('[npd] update cloud lebih lama (_rev '+_ndRev+' < '+_curRev+') diabaikan'); break; }
-            if(!_ndEmpty && !_curEmpty){ _npdSnapshotPush(_curLocal); } // snapshot dulu sebelum diganti dari device lain
-            STATE.npdData = _nd || {fgs:[]};
+            if(_curEmpty){
+              STATE.npdData = _nd || {fgs:[]};
+            } else {
+              var _cloudNewer = _ndRev >= _curRev;
+              var _mergedFgs = [], _seen = {};
+              // Mulai dari urutan LOKAL (pertahankan urutan varian yg sudah diinput)
+              (_curLocal.fgs||[]).forEach(function(lf){
+                _seen[lf.id] = 1;
+                var cf = (_nd.fgs||[]).filter(function(x){ return x.id===lf.id; })[0];
+                // FG ada di kedua sisi → pakai versi dari blob yg _rev-nya lebih baru
+                _mergedFgs.push((cf && _cloudNewer) ? cf : lf);
+              });
+              // FG yg HANYA ada di cloud → tambahkan (jangan sampai hilang juga)
+              (_nd.fgs||[]).forEach(function(cf){ if(!_seen[cf.id]){ _mergedFgs.push(cf); } });
+              var _merged = (_cloudNewer ? _nd : _curLocal) || {};
+              _merged = JSON.parse(JSON.stringify(_merged));
+              _merged.fgs = _mergedFgs;
+              _merged._rev = Math.max(_ndRev, _curRev, Date.now());
+              // Apakah hasil merge punya FG yg TIDAK ada di cloud (mis. FG baru lokal)?
+              // Hanya kalau ya kita push balik — cegah ping-pong re-save antar device.
+              var _cloudIds = {}; (_nd.fgs||[]).forEach(function(x){ _cloudIds[x.id]=1; });
+              var _hasLocalOnly = _mergedFgs.some(function(f){ return !_cloudIds[f.id]; });
+              _npdSnapshotPush(_curLocal); // snapshot dulu sebelum diubah
+              STATE.npdData = _merged;
+              try { localStorage.setItem('npd_data', JSON.stringify(_merged)); } catch(e){}
+              if(_hasLocalOnly){ try { cloudSave('npd_data', JSON.stringify(_merged)); } catch(e){} }
+            }
             try{ localStorage.setItem('npd_data', JSON.stringify(STATE.npdData)); }catch(e){}
             if(document.getElementById('npd-table')) _npdRender();
             if(window._inclNPD && STATE.projectionData && STATE.projectionData.length){ buildProjection(); if(document.getElementById('proj-table')) renderProjection(); }
