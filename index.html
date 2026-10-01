@@ -3746,6 +3746,7 @@ function _applyRealtimeChanges(keys) {
               if(_hasLocalOnly){ try { cloudSave('npd_data', JSON.stringify(_merged)); } catch(e){} }
             }
             try{ localStorage.setItem('npd_data', JSON.stringify(STATE.npdData)); }catch(e){}
+            try{ if(typeof _npdIdbSave==='function') _npdIdbSave(STATE.npdData); }catch(e){} // jaga IDB lokal tetap terkini
             if(document.getElementById('npd-table')) _npdRender();
             if(window._inclNPD && STATE.projectionData && STATE.projectionData.length){ buildProjection(); if(document.getElementById('proj-table')) renderProjection(); }
           } catch(e) {} break;
@@ -3885,6 +3886,26 @@ function appStart() {
         }
       }
     } catch(e){ console.warn('[boot] restore npd dari cloud gagal:', e.message); }
+    // ── Rekonsiliasi dari IndexedDB (jaring pengaman utama) ────────────────────
+    // IndexedDB menyimpan editan TERAKHIR di device ini, selamat walau localStorage penuh &
+    // Firestore error. Kalau _rev-nya lebih baru dari STATE (cloud bisa basi gara-gara QUIC),
+    // pakai IDB & sembuhkan cloud. Async — update begitu siap.
+    try {
+      if(typeof _npdIdbLoad === 'function'){
+        _npdIdbLoad(function(idb){
+          if(!idb || !idb.fgs || !idb.fgs.length) return;
+          var _srev = (STATE.npdData && STATE.npdData._rev) || 0;
+          var _snfg = (STATE.npdData && STATE.npdData.fgs) ? STATE.npdData.fgs.length : 0;
+          if(_snfg === 0 || (idb._rev||0) > _srev){
+            STATE.npdData = idb;
+            try { localStorage.setItem('npd_data', JSON.stringify(idb)); } catch(_e){}
+            try { cloudSave('npd_data', JSON.stringify(idb)); } catch(_e){} // sembuhkan cloud yg basi
+            if(document.getElementById('npd-table') && typeof _npdRender==='function'){ try{ _npdRender(); }catch(_e){} }
+            console.log('[boot] npd_data dipulihkan dari IndexedDB:', idb.fgs.length, 'FG (_rev '+(idb._rev||0)+' > '+_srev+')');
+          }
+        });
+      }
+    } catch(e){ console.warn('[boot] restore npd dari IndexedDB gagal:', e.message); }
     removeSplash(); // always remove splash
     // Auto-load Sheets jika data belum ada tapi URL sudah ada di cloud
     setTimeout(function(){
@@ -4520,9 +4541,12 @@ function _npdSave(data) {
     console.warn('[npd] ukuran '+_json.length+' byte > ~950KB (batas Firestore 1MB)');
   }
   try { cloudSave('npd_data', _json); } catch(e){ console.warn('[npd] cloudSave gagal:', e && e.message); }
-  // localStorage best-effort (quota-safe). Gagal pun data tetap aman di cloud + STATE.
+  // ⭐ IndexedDB: penyimpanan lokal TAHAN BANTING (ratusan MB) — selamat walau localStorage
+  // penuh DAN Firestore error (QUIC). Ini jaring pengaman utama saat refresh.
+  try { _npdIdbSave(data); } catch(e){ console.warn('[npd] IndexedDB save gagal:', e && e.message); }
+  // localStorage best-effort (quota-safe). Gagal pun data tetap aman di cloud + IndexedDB.
   try { localStorage.setItem('npd_data', _json); }
-  catch(e){ console.warn('[npd] localStorage penuh — npd_data tidak tersimpan lokal, tapi AMAN di cloud'); if(typeof toast==='function') toast('Penyimpanan lokal penuh — data NPD disimpan ke cloud ✓','ok'); }
+  catch(e){ console.warn('[npd] localStorage penuh — npd_data tidak tersimpan lokal, tapi AMAN di cloud + IndexedDB'); }
   // Snapshot SETELAH simpan utama (biar tidak merebut kuota dari npd_data).
   try{ var _prev2=STATE.npdData; if(_prev2 && !_npdIsEmpty(_prev2)) _npdSnapshotPush(_prev2); }catch(e){}
   if(window._inclNPD){
@@ -16470,7 +16494,7 @@ function _fcRekapCheckACC() {
 var PR_SNAPSHOT_MAX = 15; // simpan maksimal 15 snapshot terakhir, yang lama otomatis kehapus
 
 function _prSnapIdbOpen(cb) {
-  var req = indexedDB.open('mrp_db', 4);
+  var req = indexedDB.open('mrp_db', 5);
   req.onupgradeneeded = function(e) {
     var db2 = e.target.result;
     if(!db2.objectStoreNames.contains('bom')) db2.createObjectStore('bom', {keyPath:'id'});
@@ -16478,6 +16502,7 @@ function _prSnapIdbOpen(cb) {
     if(!db2.objectStoreNames.contains('mps')) db2.createObjectStore('mps', {keyPath:'id'});
     if(!db2.objectStoreNames.contains('pr_snapshots')) db2.createObjectStore('pr_snapshots', {keyPath:'id'});
     if(!db2.objectStoreNames.contains('grpo_histori')) db2.createObjectStore('grpo_histori', {keyPath:'id'});
+    if(!db2.objectStoreNames.contains('npd')) db2.createObjectStore('npd', {keyPath:'id'});
   };
   req.onsuccess = function(e) { cb(e.target.result); };
   req.onerror   = function()  { cb(null); };
@@ -18420,7 +18445,7 @@ function _mrpFallbackCopy(text, count) {
 
 // ── IndexedDB helpers for BOM (large data, local only) ────────────────────────
 function _mrpIdbOpen(cb) {
-  var req = indexedDB.open('mrp_db', 4);
+  var req = indexedDB.open('mrp_db', 5);
   req.onupgradeneeded = function(e) {
     var db2 = e.target.result;
     if(!db2.objectStoreNames.contains('bom')) db2.createObjectStore('bom', {keyPath:'id'});
@@ -18428,9 +18453,32 @@ function _mrpIdbOpen(cb) {
     if(!db2.objectStoreNames.contains('mps')) db2.createObjectStore('mps', {keyPath:'id'});
     if(!db2.objectStoreNames.contains('pr_snapshots')) db2.createObjectStore('pr_snapshots', {keyPath:'id'});
     if(!db2.objectStoreNames.contains('grpo_histori')) db2.createObjectStore('grpo_histori', {keyPath:'id'});
+    if(!db2.objectStoreNames.contains('npd')) db2.createObjectStore('npd', {keyPath:'id'});
   };
   req.onsuccess = function(e) { cb(e.target.result); };
   req.onerror   = function()  { cb(null); };
+}
+// ── NPD di IndexedDB (kapasitas ratusan MB — tahan walau localStorage penuh & Firestore down) ──
+function _npdIdbSave(data){
+  try {
+    _mrpIdbOpen(function(db){
+      if(!db || !db.objectStoreNames.contains('npd')) return;
+      try { db.transaction('npd','readwrite').objectStore('npd').put({ id:'npd_data', data:data, ts:new Date().toISOString() }); } catch(e){}
+    });
+  } catch(e){}
+}
+function _npdIdbLoad(cb){
+  cb = cb || function(){};
+  try {
+    _mrpIdbOpen(function(db){
+      if(!db || !db.objectStoreNames.contains('npd')){ cb(null); return; }
+      try {
+        var r = db.transaction('npd','readonly').objectStore('npd').get('npd_data');
+        r.onsuccess = function(e){ var v=e.target.result; cb(v && v.data ? v.data : null); };
+        r.onerror   = function(){ cb(null); };
+      } catch(e){ cb(null); }
+    });
+  } catch(e){ cb(null); }
 }
 function _mrpIdbSaveBom(data) {
   _mrpIdbOpen(function(db) {
