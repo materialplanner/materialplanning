@@ -3709,7 +3709,13 @@ function _applyRealtimeChanges(keys) {
           try {
             var _nd = JSON.parse(val || 'null');
             var _ndEmpty = !_nd || !_nd.fgs || !_nd.fgs.length;
-            var _curLocal = (function(){ try{ return JSON.parse(localStorage.getItem('npd_data')||'null'); }catch(e){ return null; } })();
+            // ⭐ SISI LOKAL = STATE (MEMORI), BUKAN localStorage!
+            // Bug fatal sebelumnya: localStorage penuh → isinya BEKU di data lama → merge
+            // memakai data beku sebagai "lokal" → menimpa memori → FG yang baru diketik
+            // lenyap di tempat setiap ada push dari laptop lain. Memori selalu terkini.
+            var _curLocal = (STATE.npdData && STATE.npdData.fgs && STATE.npdData.fgs.length)
+              ? STATE.npdData
+              : (function(){ try{ return JSON.parse(localStorage.getItem('npd_data')||'null'); }catch(e){ return null; } })();
             var _curEmpty = !_curLocal || !_curLocal.fgs || !_curLocal.fgs.length;
             // LINDUNGI: update cloud yang KOSONG tidak boleh menimpa data lokal yang ADA isinya
             if(_ndEmpty && !_curEmpty){ console.warn('[npd] update cloud kosong diabaikan (data lokal dipertahankan)'); break; }
@@ -3804,11 +3810,34 @@ function _applyRealtimeChanges(keys) {
 
 // ── localStorage cloud sync — patch native setItem to auto-sync to Firebase ──
 var _origSetItem = Storage.prototype.setItem;
+// ⭐ AUTO-BERSIH saat kuota penuh: buang cache regenerable (sap_cache_*, proj_snapshots —
+// semua ada di cloud / bisa dibuat ulang via Refresh SAP), lalu COBA TULIS ULANG.
+// Tanpa ini localStorage "beku di masa lalu" dan jadi sumber rollback data (NPD/jadwal hilang).
+var _quotaAutoCleaned = false;
+function _quotaAutoClean(){
+  if(_quotaAutoCleaned) return false;
+  _quotaAutoCleaned = true;
+  var purged = [];
+  ['sap_cache_stock','sap_cache_po','sap_cache_grpo','sap_cache_ospr','proj_snapshots'].forEach(function(k){
+    try { if(localStorage.getItem(k)!=null){ localStorage.removeItem(k); purged.push(k); } } catch(e){}
+  });
+  try { console.warn('[localStorage penuh] AUTO-BERSIH cache regenerable:', purged); } catch(e){}
+  try { if(typeof toast==='function' && purged.length) toast('Penyimpanan lokal penuh — cache SAP dibersihkan otomatis ✓ (aman, ada di cloud)', 'ok'); } catch(e){}
+  return purged.length > 0;
+}
 Storage.prototype.setItem = function(k, v) {
   // Quota-safe: kalau localStorage penuh, JANGAN lempar error (dulu ini bikin removeSchedItem
   // & fungsi lain berhenti di tengah → hapus jadwal "tidak jalan"). Data tetap tersimpan ke cloud.
   try { _origSetItem.call(this, k, v); }
-  catch(e){ if(e && e.name === 'QuotaExceededError') { try { console.warn('[localStorage penuh] skip cache lokal:', k); } catch(_){} } else { throw e; } }
+  catch(e){
+    if(e && e.name === 'QuotaExceededError') {
+      // Auto-bersih sekali per sesi, lalu RETRY supaya data penting tetap tersimpan lokal
+      var freed = _quotaAutoClean();
+      var ok = false;
+      if(freed){ try { _origSetItem.call(this, k, v); ok = true; } catch(_e){} }
+      if(!ok){ try { console.warn('[localStorage penuh] skip cache lokal:', k); } catch(_){} }
+    } else { throw e; }
+  }
   if(CLOUD_KEYS.indexOf(k) >= 0) cloudSave(k, v);
 };
 
@@ -3860,11 +3889,23 @@ function appStart() {
     try {
       if(cloudData && cloudData['schedule']) {
         var _cs = JSON.parse(cloudData['schedule'] || '[]');
-        if(_cs && _cs.length && (!STATE.scheduleData || !STATE.scheduleData.length)) {
-          STATE.scheduleData = _cs;
+        if(_cs && _cs.length) {
+          // UNION-MERGE dengan cloud — jangan skip hanya karena STATE "tidak kosong":
+          // kalau localStorage penuh, STATE terisi data BEKU (lama) dan skip = kartu baru hilang.
+          // Union per (supplier|tanggal), status lebih tinggi menang — sama dgn merge realtime.
+          var _bRank = {pending:0, partial:1, confirmed:2};
+          var _bByKey = {};
+          (STATE.scheduleData||[]).forEach(function(c){ _bByKey[(c.supName||'')+'|||'+(c.date||'')] = c; });
+          _cs.forEach(function(c){
+            var k = (c.supName||'')+'|||'+(c.date||''); var l = _bByKey[k];
+            if(!l){ _bByKey[k] = c; return; }
+            if((_bRank[c.status]||0) > (_bRank[l.status]||0)) _bByKey[k] = c;
+          });
+          STATE.scheduleData = Object.keys(_bByKey).map(function(k){ return _bByKey[k]; });
+          try { localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData)); } catch(_e){}
           if(typeof renderSchedule === 'function') { try { renderSchedule(); } catch(_e){} }
           if(typeof updateDashStats === 'function') { try { updateDashStats(); } catch(_e){} }
-          console.log('[boot] schedule dipulihkan dari cloud (localStorage penuh):', _cs.length, 'kartu');
+          console.log('[boot] schedule di-union dengan cloud:', _cs.length, 'kartu cloud →', STATE.scheduleData.length, 'total');
         }
       }
     } catch(e){ console.warn('[boot] restore schedule dari cloud gagal:', e.message); }
