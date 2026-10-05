@@ -14309,7 +14309,12 @@ function _calcForecast(code, ospoIdx) {
       // ospo[fm2] sudah mencerminkan override (di-set di bagian ospo build).
       forecastOspo[fm2] = ospo[fm2] || 0;
     } else {
-      var minStF = req_f > 0 ? req_f * (fm_DOI / WD) : 0;
+      // Stok minimal versi mesin DOI (rate smoothed 3 bln) — konsisten dgn Generate.
+      // Dulu pakai req bulan ini × DOI/WD → bulan yg propose-nya tersimpan terlihat
+      // "cukup" padahal DOI tampilan < target, sehingga PO diparkir ke bulan belakang
+      // (kasus Permethyl Okt'26: PO 200 malah ke Nov/Des, DOI Okt 27 < target 30).
+      var _rF    = _doiMonthlyRate(fm2);
+      var minStF = req_f > 0 ? (_rF > 0 ? fm_DOI * _rF / WD : req_f * (fm_DOI / WD)) : 0;
       // FIX dobel-hitung: Propose PR yg sudah tersimpan utk bulan ini IKUT dikurangkan
       // dari kebutuhan. Dulu tidak → pool OSPO ditarik 1.000 padahal propose 1.000 sudah
       // menutup kebutuhan yg sama → stock & DOI melambung tidak masuk akal.
