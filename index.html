@@ -3866,8 +3866,24 @@ function appStart() {
   }
 
   function afterLoad(cloudData) {
+    // Timestamp cache SAP lokal DIBACA SEBELUM ditimpa cloud — dipakai _appInit utk
+    // menentukan sumber cache SAP (cloud vs lokal) yang lebih baru.
+    try { window._bootSapLocalTs = localStorage.getItem('sap_cache_ts') || ''; } catch(e){ window._bootSapLocalTs = ''; }
+    window._bootCloudData = cloudData || {};
     Object.keys(cloudData||{}).forEach(function(k){
-      var v=cloudData[k]; if(v!=null){ try{ _origSetItem.call(localStorage, k, v); }catch(e){console.warn('[boot] setItem fail:',k,e.message);} }
+      var v=cloudData[k]; if(v!=null){
+        try{ _origSetItem.call(localStorage, k, v); }
+        catch(e){
+          // localStorage penuh → auto-bersih cache regenerable SEKALI, lalu retry.
+          // Dulu jalur boot ini bypass shim quota-safe → tulisan cloud gagal diam-diam
+          // dan localStorage tetap BEKU berisi data lama (stock/PO/PR ngaco saat refresh).
+          var _ok = false;
+          if(e && e.name === 'QuotaExceededError' && typeof _quotaAutoClean === 'function' && _quotaAutoClean()){
+            try { _origSetItem.call(localStorage, k, v); _ok = true; } catch(_e){}
+          }
+          if(!_ok) console.warn('[boot] setItem fail:',k,e.message);
+        }
+      }
     });
     // Update _adminCreds dari localStorage yg sudah ter-update dari cloud
     // Tanpa ini, laptop baru selalu pakai credentials default meski cloud sudah punya yg baru
@@ -6761,14 +6777,23 @@ async function syncAll() {
         return {d:o.docNum,i:o.itemCode,n:o.itemName,s:o.supplierName,q:o.openQty,u:o.uom,r:o.prReqDate,t:o.site};
       }));
       console.log('[syncAll] Cache sizes — stock:', Math.round(sStock.length/1024)+'KB, po:', Math.round(sPO.length/1024)+'KB, grpo:', Math.round(sGRPO.length/1024)+'KB');
+      // ⚠ Firestore max ±1MB per dokumen — payload lebih besar GAGAL tersimpan ke cloud.
+      // Kasih tahu user supaya tidak diam-diam mengandalkan cloud yang basi.
+      var _oversize = [['stock',sStock],['po',sPO],['grpo',sGRPO],['ospr',sOSPR]].filter(function(kv){ return (kv[1]||'').length > 950*1024; });
+      if(_oversize.length) {
+        console.error('[syncAll] Cache > 950KB, TIDAK muat ke Firestore:', _oversize.map(function(kv){return kv[0]+' ('+Math.round(kv[1].length/1024)+'KB)';}).join(', '));
+        toast('⚠ Cache '+_oversize.map(function(kv){return kv[0];}).join(', ')+' terlalu besar untuk cloud — hanya tersimpan lokal di laptop ini', 'err');
+      }
       // ⭐ CLOUD DULU (durable, tak kena kuota localStorage) — bypass shim
+      var _sapTs = new Date().toISOString();
       cloudSave('sap_cache_stock', sStock);
       cloudSave('sap_cache_po',    sPO);
       cloudSave('sap_cache_grpo',  sGRPO);
       cloudSave('sap_cache_ospr',  sOSPR);
+      cloudSave('sap_cache_ts',    _sapTs); // penanda kesegaran — dipakai boot utk pilih sumber
       // localStorage best-effort PER-KEY (quota-safe). Gagal satu tidak membatalkan yg lain
       // maupun cloudSave. Cache SAP regenerable + sudah di cloud, jadi aman kalau tak tersimpan lokal.
-      [['sap_cache_stock',sStock],['sap_cache_po',sPO],['sap_cache_grpo',sGRPO],['sap_cache_ospr',sOSPR]].forEach(function(kv){
+      [['sap_cache_stock',sStock],['sap_cache_po',sPO],['sap_cache_grpo',sGRPO],['sap_cache_ospr',sOSPR],['sap_cache_ts',_sapTs]].forEach(function(kv){
         try { localStorage.setItem(kv[0], kv[1]); } catch(e){ console.warn('[syncAll] localStorage penuh, skip '+kv[0]+' (aman di cloud)'); }
       });
       console.log('[syncAll] ✓ Cache pushed to Firebase (+localStorage best-effort)');
@@ -12822,10 +12847,25 @@ function _appInit() {
 
   // ── Restore SAP data dari cache (Firebase) — boot instan tanpa SAP API ─────
   try {
-    var cachedStock = localStorage.getItem('sap_cache_stock');
-    var cachedPO    = localStorage.getItem('sap_cache_po');
-    var cachedGRPO  = localStorage.getItem('sap_cache_grpo');
-    var cachedOSPR  = localStorage.getItem('sap_cache_ospr');
+    // ⭐ Pilih sumber TERBARU antara cloud dan lokal via sap_cache_ts.
+    // Dulu hanya baca localStorage → saat kuota penuh dia beku berisi data lama
+    // → stock/PO/PR ngaco setiap refresh walau cloud punya hasil sync terakhir.
+    var _cbd = window._bootCloudData || {};
+    var _locTs = window._bootSapLocalTs || '';
+    var _cldTs = _cbd['sap_cache_ts'] || '';
+    // ISO string → perbandingan leksikal = kronologis. Tanpa ts lokal → cloud menang
+    // (syncAll selalu menulis cloud duluan). Cloud kosong → fallback lokal.
+    var _useCloud = !!_cldTs && (_cldTs >= _locTs || !_locTs);
+    function _sapSrc(k){
+      if(_useCloud && _cbd[k] != null) return _cbd[k];
+      var _lv = null; try { _lv = localStorage.getItem(k); } catch(e){}
+      return _lv != null ? _lv : (_cbd[k] != null ? _cbd[k] : null);
+    }
+    console.log('[boot] SAP cache source:', _useCloud ? 'CLOUD' : 'localStorage', '(cloud ts:', _cldTs||'-', '| local ts:', _locTs||'-', ')');
+    var cachedStock = _sapSrc('sap_cache_stock');
+    var cachedPO    = _sapSrc('sap_cache_po');
+    var cachedGRPO  = _sapSrc('sap_cache_grpo');
+    var cachedOSPR  = _sapSrc('sap_cache_ospr');
     if(cachedStock) STATE.stockData = JSON.parse(cachedStock);
     // Decompress PO: short keys → full keys
     if(cachedPO) {
@@ -15058,7 +15098,7 @@ function _fcRenderDetail(el, items, fcData, fRows) {
     var fc     = fcData[code];
     var m      = STATE.masterData[code] || {};
     var iType  = /^1[12]/.test(code)?'FG':(/^3/.test(code)?'RM':'PM');
-    var badge  = iType==='RM'?'<span class="badge b-blue" style="font-size:8px">RM</span>':'<span class="badge b-purple" style="font-size:8px">PM</span>';
+    var badge  = iType==='RM'?'<span class="badge b-blue" style="font-size:8px">RM</span>':iType==='FG'?'<span class="badge b-green" style="font-size:8px">FG</span>':'<span class="badge b-purple" style="font-size:8px">PM</span>';
     var name   = (_isAdmin && (STATE.realNameData||{})[code]) ? '<span style="color:var(--teal)">'+(STATE.realNameData[code])+'</span>' : (m.desc||'—');
     var abc    = m.abc || '';
     var abcColor = abc==='A'?'var(--red)':abc==='B'?'var(--amber)':abc==='C'?'var(--green)':'var(--muted)';
@@ -17080,7 +17120,7 @@ function _fcRenderSupplier(el, items, fcData) {
     var fc     = fcData[code];
     var m      = STATE.masterData[code] || {};
     var iType  = /^1[12]/.test(code)?'FG':(/^3/.test(code)?'RM':'PM');
-    var badge  = iType==='RM'?'<span class="badge b-blue" style="font-size:8px">RM</span>':'<span class="badge b-purple" style="font-size:8px">PM</span>';
+    var badge  = iType==='RM'?'<span class="badge b-blue" style="font-size:8px">RM</span>':iType==='FG'?'<span class="badge b-green" style="font-size:8px">FG</span>':'<span class="badge b-purple" style="font-size:8px">PM</span>';
     var name   = (_isAdmin && (STATE.realNameData||{})[code]) ? '<span style="color:var(--teal)">'+(STATE.realNameData[code])+'</span>' : (m.desc||'—');
     var bgBase = itemIdx%2===0?'':'background:rgba(30,37,53,.2)';
 
