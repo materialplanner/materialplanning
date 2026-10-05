@@ -3869,6 +3869,10 @@ function appStart() {
     // Timestamp cache SAP lokal DIBACA SEBELUM ditimpa cloud — dipakai _appInit utk
     // menentukan sumber cache SAP (cloud vs lokal) yang lebih baru.
     try { window._bootSapLocalTs = localStorage.getItem('sap_cache_ts') || ''; } catch(e){ window._bootSapLocalTs = ''; }
+    // mrp_data lokal juga dibaca SEBELUM ditimpa cloud — kalau lokal lebih baru
+    // (cloudSave sempat gagal saat Terapkan), _appInit pakai lokal & sembuhkan cloud.
+    try { window._bootMrpLocalTs = parseInt(localStorage.getItem('mrp_data_ts')||'0',10)||0; } catch(e){ window._bootMrpLocalTs = 0; }
+    try { window._bootMrpLocalData = localStorage.getItem('mrp_data'); } catch(e){ window._bootMrpLocalData = null; }
     window._bootCloudData = cloudData || {};
     Object.keys(cloudData||{}).forEach(function(k){
       var v=cloudData[k]; if(v!=null){
@@ -12784,7 +12788,28 @@ function _appInit() {
   }
   // Re-read STATE from (possibly cloud-updated) localStorage
   try {
-  STATE.mrpData          = JSON.parse(localStorage.getItem('mrp_data')       || 'null');
+  // ⭐ mrp_data: pilih sumber TERBARU antara cloud dan lokal via mrp_data_ts.
+  // Hasil "Terapkan MRP" dulu bisa hilang setelah refresh kalau localStorage beku
+  // (kuota penuh) atau cloudSave sempat gagal — user harus Terapkan ulang terus.
+  (function(){
+    var _cbdM   = window._bootCloudData || {};
+    var _cldTsM = parseInt(_cbdM['mrp_data_ts']||'0',10)||0;
+    var _locTsM = window._bootMrpLocalTs || 0;
+    var _locM   = (window._bootMrpLocalData != null) ? window._bootMrpLocalData
+                : (function(){ try{ return localStorage.getItem('mrp_data'); }catch(e){ return null; } })();
+    var _pickCloud = _cbdM['mrp_data'] != null && _cldTsM >= _locTsM;
+    var _srcM = _pickCloud ? _cbdM['mrp_data'] : (_locM != null ? _locM : (_cbdM['mrp_data'] || null));
+    try { STATE.mrpData = _srcM ? JSON.parse(_srcM) : null; } catch(e){ STATE.mrpData = null; }
+    window._mrpDataTs = Math.max(_cldTsM, _locTsM);
+    if(!_pickCloud && _locM != null && _locTsM > _cldTsM){
+      // Lokal lebih baru → tulis balik ke localStorage (dump cloud tadi menimpanya) & sembuhkan cloud
+      try { localStorage.setItem('mrp_data', _locM); localStorage.setItem('mrp_data_ts', String(_locTsM)); } catch(e){}
+      try { cloudSave('mrp_data', _locM); cloudSave('mrp_data_ts', String(_locTsM)); } catch(e){}
+      console.log('[boot] mrp_data LOKAL lebih baru dari cloud (ts '+_locTsM+' > '+_cldTsM+') → dipakai & cloud disembuhkan');
+    } else {
+      console.log('[boot] mrp_data source:', _pickCloud ? 'CLOUD' : 'localStorage', '(ts cloud '+_cldTsM+' | lokal '+_locTsM+')');
+    }
+  })();
   STATE.matcomData       = JSON.parse(localStorage.getItem('matcom_data')     || 'null');
   STATE.matcomMonthly    = JSON.parse(localStorage.getItem('matcom_monthly')  || 'null');
   STATE.realNameData     = JSON.parse(localStorage.getItem('realname_data')   || '{}');
