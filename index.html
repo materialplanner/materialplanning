@@ -6800,6 +6800,8 @@ async function syncAll() {
       [['sap_cache_stock',sStock],['sap_cache_po',sPO],['sap_cache_grpo',sGRPO],['sap_cache_ospr',sOSPR],['sap_cache_ts',_sapTs]].forEach(function(kv){
         try { localStorage.setItem(kv[0], kv[1]); } catch(e){ console.warn('[syncAll] localStorage penuh, skip '+kv[0]+' (aman di cloud)'); }
       });
+      // ⭐ IndexedDB — jaring pengaman: selamat walau localStorage penuh & Firestore gagal
+      if(typeof _stateIdbSave === 'function') _stateIdbSave('sap_cache_state', {stock:sStock, po:sPO, grpo:sGRPO, ospr:sOSPR, ts:_sapTs});
       console.log('[syncAll] ✓ Cache pushed to Firebase (+localStorage best-effort)');
     } catch(e) { console.warn('[syncAll] Cache FAILED:', e.message); }
   }
@@ -12810,6 +12812,26 @@ function _appInit() {
       console.log('[boot] mrp_data source:', _pickCloud ? 'CLOUD' : 'localStorage', '(ts cloud '+_cldTsM+' | lokal '+_locTsM+')');
     }
   })();
+  // Rekonsiliasi mrp_data dari IndexedDB — jaring pengaman terakhir (localStorage
+  // penuh + Firestore gagal sekaligus): hasil Terapkan TERAKHIR di laptop ini.
+  try {
+    if(typeof _stateIdbLoad === 'function') _stateIdbLoad('mrp_applied', function(rec){
+      if(!rec || !rec.ts || !rec.data) return;
+      var _cur = window._mrpDataTs || 0;
+      if(rec.ts <= _cur) return;
+      try {
+        STATE.mrpData = JSON.parse(rec.data);
+        window._mrpDataTs = rec.ts;
+        try { localStorage.setItem('mrp_data', rec.data); localStorage.setItem('mrp_data_ts', String(rec.ts)); } catch(_e){}
+        try { cloudSave('mrp_data', rec.data); cloudSave('mrp_data_ts', String(rec.ts)); } catch(_e){}
+        console.log('[boot] mrp_data dipulihkan dari IndexedDB (ts '+rec.ts+' > '+_cur+') — cloud/lokal disembuhkan');
+        if(document.getElementById('fc-table') && typeof renderForecast === 'function') { try { renderForecast(); } catch(_e){} }
+        if(STATE.masterData && typeof buildProjection === 'function') {
+          try { buildProjection(); if(document.getElementById('proj-table') && typeof renderProjection === 'function') renderProjection(); } catch(_e){}
+        }
+      } catch(_e){ console.warn('[boot] rekonsiliasi mrp IndexedDB gagal:', _e.message); }
+    });
+  } catch(e){}
   STATE.matcomData       = JSON.parse(localStorage.getItem('matcom_data')     || 'null');
   STATE.matcomMonthly    = JSON.parse(localStorage.getItem('matcom_monthly')  || 'null');
   STATE.realNameData     = JSON.parse(localStorage.getItem('realname_data')   || '{}');
@@ -12887,50 +12909,77 @@ function _appInit() {
       return _lv != null ? _lv : (_cbd[k] != null ? _cbd[k] : null);
     }
     console.log('[boot] SAP cache source:', _useCloud ? 'CLOUD' : 'localStorage', '(cloud ts:', _cldTs||'-', '| local ts:', _locTs||'-', ')');
-    var cachedStock = _sapSrc('sap_cache_stock');
-    var cachedPO    = _sapSrc('sap_cache_po');
-    var cachedGRPO  = _sapSrc('sap_cache_grpo');
-    var cachedOSPR  = _sapSrc('sap_cache_ospr');
-    if(cachedStock) STATE.stockData = JSON.parse(cachedStock);
-    // Decompress PO: short keys → full keys
-    if(cachedPO) {
-      var raw = JSON.parse(cachedPO);
-      STATE.poData = _filterPOBlacklist(raw.map(function(p){
-        // Support both compressed {d,i,n,...} and full {docNum,itemCode,...}
-        // PENTING: lineNum (l) HARUS ikut di-restore — kalau tidak, _poKey() jatuh ke
-        // format lama (docNum_itemCode) dan semua tgl request/konfirmasi yang tersimpan
-        // di key baru (docNum_lineNum_itemCode) tidak ketemu sampai user klik Refresh SAP.
-        if(p.d !== undefined) return {docNum:p.d,itemCode:p.i,itemName:p.n,supplierName:p.s,openQty:p.q,uom:p.u,prReqDate:fmtSAPDate(p.r),site:p.t,lineNum:(p.l!=null?parseInt(p.l):null)};
-        return p;
-      }));
-    }
-    if(cachedGRPO) {
-      var rawG = JSON.parse(cachedGRPO);
-      STATE.grpoData = rawG.map(function(g){
-        if(g.d !== undefined) return {grpoDate:fmtSAPDate(g.d),itemCode:g.i,itemName:g.n,supplierName:g.s,qty:g.q,uom:g.u,site:g.t};
-        return g;
-      });
-    }
-    if(cachedOSPR && !_OSPR_DISABLED) {
-      var rawO = JSON.parse(cachedOSPR);
-      STATE.osprData = rawO.map(function(o){
-        if(o.d !== undefined) return {docNum:o.d,itemCode:o.i,itemName:o.n,supplierName:o.s,openQty:o.q,uom:o.u,prReqDate:fmtSAPDate(o.r),site:o.t};
-        return o;
-      });
-    }
-    // Rebuild osprByItem from restored osprData (skip kalau OSPR diputus)
-    if(!_OSPR_DISABLED && STATE.osprData && STATE.osprData.length) {
-      STATE.osprByItem = {};
-      STATE.osprData.forEach(function(r) {
-        if(!STATE.osprByItem[r.itemCode]) STATE.osprByItem[r.itemCode] = 0;
-        STATE.osprByItem[r.itemCode] += (r.openQty || 0);
-      });
-    } else if(_OSPR_DISABLED) {
-      STATE.osprData = []; STATE.osprByItem = {};
-    }
-    if(STATE.poData && STATE.poData.length) loadOSPO();
+    window._bootSapUsedTs = _useCloud ? _cldTs : _locTs;
+    // Util apply — dipakai boot DAN rekonsiliasi IndexedDB di bawah
+    window._applySapCacheStrings = function(cachedStock, cachedPO, cachedGRPO, cachedOSPR) {
+      if(cachedStock) STATE.stockData = JSON.parse(cachedStock);
+      // Decompress PO: short keys → full keys
+      if(cachedPO) {
+        var raw = JSON.parse(cachedPO);
+        STATE.poData = _filterPOBlacklist(raw.map(function(p){
+          // Support both compressed {d,i,n,...} and full {docNum,itemCode,...}
+          // PENTING: lineNum (l) HARUS ikut di-restore — kalau tidak, _poKey() jatuh ke
+          // format lama (docNum_itemCode) dan semua tgl request/konfirmasi yang tersimpan
+          // di key baru (docNum_lineNum_itemCode) tidak ketemu sampai user klik Refresh SAP.
+          if(p.d !== undefined) return {docNum:p.d,itemCode:p.i,itemName:p.n,supplierName:p.s,openQty:p.q,uom:p.u,prReqDate:fmtSAPDate(p.r),site:p.t,lineNum:(p.l!=null?parseInt(p.l):null)};
+          return p;
+        }));
+      }
+      if(cachedGRPO) {
+        var rawG = JSON.parse(cachedGRPO);
+        STATE.grpoData = rawG.map(function(g){
+          if(g.d !== undefined) return {grpoDate:fmtSAPDate(g.d),itemCode:g.i,itemName:g.n,supplierName:g.s,qty:g.q,uom:g.u,site:g.t};
+          return g;
+        });
+      }
+      if(cachedOSPR && !_OSPR_DISABLED) {
+        var rawO = JSON.parse(cachedOSPR);
+        STATE.osprData = rawO.map(function(o){
+          if(o.d !== undefined) return {docNum:o.d,itemCode:o.i,itemName:o.n,supplierName:o.s,openQty:o.q,uom:o.u,prReqDate:fmtSAPDate(o.r),site:o.t};
+          return o;
+        });
+      }
+      // Rebuild osprByItem from restored osprData (skip kalau OSPR diputus)
+      if(!_OSPR_DISABLED && STATE.osprData && STATE.osprData.length) {
+        STATE.osprByItem = {};
+        STATE.osprData.forEach(function(r) {
+          if(!STATE.osprByItem[r.itemCode]) STATE.osprByItem[r.itemCode] = 0;
+          STATE.osprByItem[r.itemCode] += (r.openQty || 0);
+        });
+      } else if(_OSPR_DISABLED) {
+        STATE.osprData = []; STATE.osprByItem = {};
+      }
+      if(STATE.poData && STATE.poData.length) loadOSPO();
+    };
+    window._applySapCacheStrings(_sapSrc('sap_cache_stock'), _sapSrc('sap_cache_po'), _sapSrc('sap_cache_grpo'), _sapSrc('sap_cache_ospr'));
     console.log('[boot] SAP cache restored — stock:', Object.keys(STATE.stockData||{}).length, 'po:', (STATE.poData||[]).length);
   } catch(e) { console.warn('[boot] SAP cache restore error:', e.message); }
+
+  // ── Rekonsiliasi cache SAP dari IndexedDB (jaring pengaman terakhir) ────────
+  // Kasus: localStorage penuh + Firestore gagal (QUIC) → cloud & lokal dua-duanya
+  // basi, tapi IndexedDB selalu punya hasil sync TERAKHIR di laptop ini.
+  try {
+    if(typeof _stateIdbLoad === 'function') _stateIdbLoad('sap_cache_state', function(rec){
+      if(!rec || !rec.ts) return;
+      var _used = window._bootSapUsedTs || '';
+      if(_used && rec.ts <= _used) return; // sumber boot sudah sama/lebih baru
+      try {
+        window._applySapCacheStrings(rec.stock, rec.po, rec.grpo, rec.ospr);
+        console.log('[boot] SAP cache dipulihkan dari IndexedDB (ts '+rec.ts+' > '+(_used||'-')+') — cloud/lokal disembuhkan');
+        try {
+          cloudSave('sap_cache_stock', rec.stock); cloudSave('sap_cache_po', rec.po);
+          cloudSave('sap_cache_grpo', rec.grpo);   cloudSave('sap_cache_ospr', rec.ospr);
+          cloudSave('sap_cache_ts', rec.ts);
+        } catch(_e){}
+        [['sap_cache_stock',rec.stock],['sap_cache_po',rec.po],['sap_cache_grpo',rec.grpo],['sap_cache_ospr',rec.ospr],['sap_cache_ts',rec.ts]].forEach(function(kv){
+          try { if(kv[1] != null) localStorage.setItem(kv[0], kv[1]); } catch(_e){}
+        });
+        if(STATE.mrpData && typeof buildProjection === 'function') buildProjection();
+        if(typeof updateDashStats === 'function') { try { updateDashStats(); } catch(_e){} }
+        if(document.getElementById('proj-table') && typeof renderProjection === 'function') { try { renderProjection(); } catch(_e){} }
+      } catch(_e){ console.warn('[boot] rekonsiliasi SAP IndexedDB gagal:', _e.message); }
+    });
+  } catch(e){}
 
   CFG.url      = localStorage.getItem('sap_url')   || CFG.url;
   CFG.user     = localStorage.getItem('sap_user')  || CFG.user;
@@ -18452,11 +18501,14 @@ function _mrpApplyToState(result) {
   STATE.mrpData = mrpData;
   var _mrpTs = Date.now();
   window._mrpDataTs = _mrpTs;
-  localStorage.setItem('mrp_data', JSON.stringify(mrpData));
+  var _mrpJson = JSON.stringify(mrpData);
+  localStorage.setItem('mrp_data', _mrpJson);
   localStorage.setItem('mrp_data_ts', String(_mrpTs));
   // Auto-sync ke Firebase supaya laptop lain langsung update
-  cloudSave('mrp_data', JSON.stringify(mrpData));
+  cloudSave('mrp_data', _mrpJson);
   cloudSave('mrp_data_ts', String(_mrpTs));
+  // ⭐ IndexedDB — jaring pengaman: selamat walau localStorage penuh & Firestore gagal
+  if(typeof _stateIdbSave === 'function') _stateIdbSave('mrp_applied', {data:_mrpJson, ts:_mrpTs});
   localStorage.setItem('mrp_source', 'mps'); // flag: jangan overwrite dari GSheet
   cloudSave('mrp_source', 'mps');
   // Refresh forecast & projection — selalu rebuild, tidak peduli halaman aktif
@@ -18797,6 +18849,34 @@ function _autoLoadBomFromSheet() {
   }).catch(function(){
     if(el) { el.textContent = '⚠ BOM belum termuat — buka Data Source → Muat BOM'; el.style.color = 'var(--amber)'; }
   });
+}
+
+// ── Simpan/baca record state di IndexedDB (store 'mrp', id khusus) ────────────
+// Jaring pengaman utk data terapan (cache SAP, mrp_data): selamat walau
+// localStorage penuh DAN Firestore gagal (QUIC) sekaligus. Pakai store 'mrp'
+// yang sudah ada supaya TIDAK perlu naik versi DB (dua _*IdbOpen wajib sinkron).
+function _stateIdbSave(id, obj) {
+  try {
+    _mrpIdbOpen(function(db){
+      if(!db) return;
+      try {
+        var tx = db.transaction('mrp','readwrite');
+        obj.id = id;
+        tx.objectStore('mrp').put(obj);
+      } catch(e){ console.warn('[stateIdb] save gagal:', id, e.message); }
+    });
+  } catch(e){}
+}
+function _stateIdbLoad(id, cb) {
+  try {
+    _mrpIdbOpen(function(db){
+      if(!db){ cb(null); return; }
+      try {
+        var tx = db.transaction('mrp','readonly');
+        tx.objectStore('mrp').get(id).onsuccess = function(e){ cb(e.target.result || null); };
+      } catch(e){ cb(null); }
+    });
+  } catch(e){ cb(null); }
 }
 
 function _mrpIdbLoad() {
