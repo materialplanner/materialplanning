@@ -14380,11 +14380,18 @@ function _calcForecast(code, ospoIdx) {
       // (kasus Permethyl Okt'26: PO 200 malah ke Nov/Des, DOI Okt 27 < target 30).
       var _rF    = _doiMonthlyRate(fm2);
       var minStF = req_f > 0 ? (_rF > 0 ? fm_DOI * _rF / WD : req_f * (fm_DOI / WD)) : 0;
-      // FIX dobel-hitung: Propose PR yg sudah tersimpan utk bulan ini IKUT dikurangkan
-      // dari kebutuhan. Dulu tidak → pool OSPO ditarik 1.000 padahal propose 1.000 sudah
-      // menutup kebutuhan yg sama → stock & DOI melambung tidak masuk akal.
-      var needF  = Math.max(0, minStF + req_f - prevStFc - ospr_f - prop_f);
+      // ⭐ PO DULU, propose belakangan — urutan yang sama dgn mesin Generate (Step 1
+      // tarik OSPO sampai target, Step 2 propose sisanya). Kebutuhan dihitung TANPA
+      // mengurangi propose tersimpan, supaya PO yang ada ditarik ke bulan defisit
+      // paling awal (Permethyl: 200 semua ke Okt, bukan 150 Okt + 50 Des).
+      // Catatan dobel-hitung lama (Liponate): akarnya minStF berbasis req bulan ini yg
+      // menggelembung di bulan spike — sudah diganti rate-based di atas. Propose hasil
+      // Generate baru dihitung SETELAH tarik PO, jadi PO + propose saling melengkapi;
+      // propose lama/manual yg tumpang-tindih beres dengan klik Generate ulang.
+      var needF  = Math.max(0, minStF + req_f - prevStFc - ospr_f);
       var fromPool = Math.min(needF > 0 ? Math.max(moq, Math.ceil(needF/_step)*_step) : 0, ospoPoolFc);
+      // Sisa pool < 1 kelipatan tak bisa dialokasikan rapi ke bulan lain — sapu sekalian
+      if(fromPool > 0 && (ospoPoolFc - fromPool) > 0 && (ospoPoolFc - fromPool) < _step) fromPool = ospoPoolFc;
       ospoPoolFc -= fromPool;
       forecastOspo[fm2] = fromPool;
     }
