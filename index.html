@@ -3977,7 +3977,7 @@ function appStart() {
       } else if(_haveLocal && !window._mpsCloudBundle && _fbReady && _db) {
         // Device utama punya MPS lokal tapi cloud belum ada → seed sekali (tanpa upload ulang)
         try {
-          var _seed = JSON.stringify({ data:_mpsData, months:_mpsActiveMonths, fgDescs:_fgDescFromMps||{}, ts:new Date().toISOString() });
+          var _seed = JSON.stringify({ data:_mpsData, months:_mpsActiveMonths, fgDescs:_fgDescFromMps||{}, fgFc:_mpsFgFc||{}, ts:new Date().toISOString() });
           if(_seed.length <= 950000) { cloudSave('mps_data_full', _seed); window._mpsCloudBundle = _seed; }
         } catch(e){}
       }
@@ -14089,26 +14089,30 @@ function _calcForecast(code, ospoIdx) {
       forecastRaw.forEach(function(v){ if(v > 0){ sum += v; cnt++; } });
       return cnt > 0 ? sum / cnt : 0;
     })();
+    // Kebutuhan bulan j utk rate DOI = MRP asli + NPD (npdAddArr otomatis 0 saat
+    // "Sertakan NPD" mati). Tanpa ini DOI tampil terlalu optimis di bulan ber-NPD,
+    // tidak konsisten dgn Requirement & Propose yg sudah menghitung NPD.
+    var _rawN = function(j){ return (forecastRaw[j] || 0) + ((typeof npdAddArr !== 'undefined' && npdAddArr && npdAddArr[j]) ? npdAddArr[j] : 0); };
     return FC_MONTHS.map(function(_, i) {
       var s = stockArr[i]; if(s <= 0) return 0;
       var moNum     = FC_MONTH_NUMS[i];
       var prevMoNum = moNum === 1 ? 12 : moNum - 1;
 
-      // matcomEff: bulan lalu sudah selesai → pakai actual, belum → pakai forecast
+      // matcomEff: bulan lalu sudah selesai → pakai actual, belum → pakai forecast (+NPD)
       var matcomEff;
       if(prevMoNum < _currMoNum) {
         // Bulan lalu sudah selesai — pakai matcom aktual SAP, konversi unit jika perlu
         matcomEff = (_mc[prevMoNum] || 0) * _matcomFactor;
       } else {
-        // Bulan lalu sedang berjalan atau belum terjadi — pakai forecastRaw (MRP asli)
-        matcomEff = (i > 0 && forecastRaw[i-1] != null) ? (forecastRaw[i-1] || 0) : _avgReqRaw;
+        // Bulan lalu sedang berjalan atau belum terjadi — pakai forecastRaw + NPD
+        matcomEff = (i > 0 && forecastRaw[i-1] != null) ? _rawN(i-1) : _avgReqRaw;
       }
 
-      // Forward forecast: forecastRaw bulan depan, avgReqRaw kalau horizon habis
-      var fwdFc = (forecastRaw[i+1] != null && forecastRaw[i+1] > 0) ? forecastRaw[i+1] : _avgReqRaw;
+      // Forward forecast: forecastRaw + NPD bulan depan, avgReqRaw kalau horizon habis
+      var fwdFc = (forecastRaw[i+1] != null && _rawN(i+1) > 0) ? _rawN(i+1) : _avgReqRaw;
 
-      // Rate = average 3 komponen — semua pakai forecastRaw (MRP asli tanpa pengurangan matcom)
-      var rate = (matcomEff + (forecastRaw[i] || 0) + fwdFc) / 3;
+      // Rate = average 3 komponen — MRP asli + NPD (konsisten dgn Requirement/Propose)
+      var rate = (matcomEff + _rawN(i) + fwdFc) / 3;
 
       if(rate <= 0) return s > 0 ? 999 : 0;
       return Math.round(s / (rate / WD));
@@ -15025,7 +15029,7 @@ function _fcRenderDetail(el, items, fcData, fRows) {
   items.forEach(function(code) {
     var fc     = fcData[code];
     var m      = STATE.masterData[code] || {};
-    var iType  = /^3/.test(code)?'RM':'PM';
+    var iType  = /^1[12]/.test(code)?'FG':(/^3/.test(code)?'RM':'PM');
     var badge  = iType==='RM'?'<span class="badge b-blue" style="font-size:8px">RM</span>':'<span class="badge b-purple" style="font-size:8px">PM</span>';
     var name   = (_isAdmin && (STATE.realNameData||{})[code]) ? '<span style="color:var(--teal)">'+(STATE.realNameData[code])+'</span>' : (m.desc||'—');
     var abc    = m.abc || '';
@@ -15083,7 +15087,7 @@ function _fcRenderDetail(el, items, fcData, fRows) {
 // ─── Expanded detail row ──────────────────────────────────────────────────────
 function _fcDetailRow(code, fc, master) {
   var yr2  = String(new Date().getFullYear()).slice(-2);
-  var iType= /^3/.test(code)?'RM':'PM';
+  var iType= /^1[12]/.test(code)?'FG':(/^3/.test(code)?'RM':'PM');
   var rn   = (_isAdmin && (STATE.realNameData||{})[code]) ? (STATE.realNameData[code]) : '';
   var abc  = master.abc || '';
   var abcColor = abc==='A'?'var(--red)':abc==='B'?'var(--amber)':abc==='C'?'var(--green)':'var(--muted)';
@@ -16031,7 +16035,7 @@ function _fcRenderAnalisis(el, items, fcData) {
     var master = (STATE.masterData||{})[code] || {};
     var name = _isAdmin && _rmDisplayMode==='realname' && (STATE.realNameData||{})[code]
       ? STATE.realNameData[code] : (master.desc||code);
-    var iType = /^3/.test(code)?'RM':'PM';
+    var iType = /^1[12]/.test(code)?'FG':(/^3/.test(code)?'RM':'PM');
 
     // Cek setiap bulan
     (fc.doi||[]).forEach(function(doi, am) {
@@ -16086,7 +16090,7 @@ function _fcRenderAnalisis(el, items, fcData) {
     var master = (STATE.masterData||{})[code] || {};
     var name2 = _isAdmin && _rmDisplayMode==='realname' && (STATE.realNameData||{})[code]
       ? STATE.realNameData[code] : (master.desc||code);
-    var iType2 = /^3/.test(code)?'RM':'PM';
+    var iType2 = /^1[12]/.test(code)?'FG':(/^3/.test(code)?'RM':'PM');
     var moq = fc.moq || master.moq || 0;
     (fc.propose||[]).forEach(function(propQty, am) {
       if(!propQty || propQty <= 0 || seenMoq[code]) return;
@@ -16122,6 +16126,8 @@ function _fcRenderAnalisis(el, items, fcData) {
     var rows = unique.map(function(r, idx) {
       var badge = r.iType==='RM'
         ? '<span class="badge b-blue" style="font-size:9px">RM</span>'
+        : r.iType==='FG'
+        ? '<span class="badge b-green" style="font-size:9px">FG</span>'
         : '<span class="badge b-purple" style="font-size:9px">PM</span>';
       var doiColor = r.doi === 0 ? 'var(--red)' : r.doi < 7 ? 'var(--red)' : 'var(--amber)';
       var bg = idx%2===0 ? '' : 'background:var(--bg3)';
@@ -16163,7 +16169,7 @@ function _fcRenderAnalisis(el, items, fcData) {
       + '<div style="font-size:12px;color:var(--muted)">DOI setelah PR melebihi '+(maxDOI*3)+' hari (3x target). Pertimbangkan negosiasi MOQ atau tahan PR.</div>'
       + '</div>';
     var rows2 = moqFlags.map(function(r,idx2){
-      var badge2 = r.iType==='RM'?'<span class="badge b-blue" style="font-size:9px">RM</span>':'<span class="badge b-purple" style="font-size:9px">PM</span>';
+      var badge2 = r.iType==='RM'?'<span class="badge b-blue" style="font-size:9px">RM</span>':r.iType==='FG'?'<span class="badge b-green" style="font-size:9px">FG</span>':'<span class="badge b-purple" style="font-size:9px">PM</span>';
       var bg2 = idx2%2===0?'':'background:rgba(124,58,237,.04)';
       return '<tr style="border-bottom:1px solid var(--border);'+bg2+'">'
         +'<td style="padding:8px 10px;font-size:11px;font-family:var(--mono);white-space:nowrap">'+r.code+' '+badge2+'</td>'
@@ -16204,7 +16210,7 @@ function _fcRenderRekap(el, items, fcData, fStatus) {
     var fc     = fcData[code];
     var master = STATE.masterData[code] || {};
     var mrp    = STATE.mrpData[code] || {};
-    var iType  = /^3/.test(code)?'RM':'PM';
+    var iType  = /^1[12]/.test(code)?'FG':(/^3/.test(code)?'RM':'PM');
     var realN  = _isAdmin && _rmDisplayMode === 'realname' && (STATE.realNameData||{})[code];
     var name   = realN ? STATE.realNameData[code] : (master.desc || mrp.desc || '');
     var site   = (STATE.stockData && STATE.stockData[code])
@@ -16823,7 +16829,7 @@ function _fcPrintLampiranPR(selByCodeOverride, displayProposeByCode) {
     var master = STATE.masterData[code] || {};
     var realN  = _isAdmin && _rmDisplayMode === 'realname' && (STATE.realNameData||{})[code];
     var name   = realN ? STATE.realNameData[code] : (master.desc || (STATE.mrpData[code]||{}).desc || '');
-    var iType  = /^3/.test(code) ? 'RM' : 'PM';
+    var iType  = /^1[12]/.test(code)?'FG':(/^3/.test(code)?'RM':'PM');
 
     // Normalisasi UOM — item GR/G/gram, nilai kalkulasi sudah dalam KG
     var _isGramUom = /^(g|gr|gram)$/i.test((master.uom||'').trim());
@@ -17045,7 +17051,7 @@ function _fcRenderSupplier(el, items, fcData) {
   fcItems.forEach(function(code, itemIdx) {
     var fc     = fcData[code];
     var m      = STATE.masterData[code] || {};
-    var iType  = /^3/.test(code)?'RM':'PM';
+    var iType  = /^1[12]/.test(code)?'FG':(/^3/.test(code)?'RM':'PM');
     var badge  = iType==='RM'?'<span class="badge b-blue" style="font-size:8px">RM</span>':'<span class="badge b-purple" style="font-size:8px">PM</span>';
     var name   = (_isAdmin && (STATE.realNameData||{})[code]) ? '<span style="color:var(--teal)">'+(STATE.realNameData[code])+'</span>' : (m.desc||'—');
     var bgBase = itemIdx%2===0?'':'background:rgba(30,37,53,.2)';
@@ -17528,6 +17534,7 @@ function _fcExportRekap() {
 
 // ─── MPS → MRP ────────────────────────────────────────────────────────────────
 var _mpsData = null;         // { itemNo: { Apr:x, May:x, ... } }
+var _mpsFgFc = {};           // { fgCode(11/12): {Jan:x,...} } — forecast FG LANGSUNG dari kolom FC MPS
 var _fgDescFromMps = {};     // { itemNo: description } from MPS upload
 var _bomData = null;         // [ { fg, rm, qtyPerPcs } ]
 var _mrpResult = null;       // { rmCode: { Apr:x, May:x, ... } }
@@ -17638,6 +17645,18 @@ function _mpsUpload(input) {
         planIdxs[m] = idx;
       });
 
+      // Kolom FC (forecast FG) — KHUSUS item kode 11/12: Requirement diambil LANGSUNG
+      // dari kolom ini (bukan plan×BOM). Header: "FC Okt", "FC Nov", "FC Des",
+      // "FC Jan_1", "FC Feb_1", ... (suffix _1 = tahun berikutnya; cukup nama bulannya).
+      var _FC_MON_TOK = { jan:'Jan', feb:'Feb', mar:'Mar', apr:'Apr', mei:'May', may:'May', jun:'Jun', jul:'Jul', agu:'Aug', agt:'Aug', ags:'Aug', aug:'Aug', sep:'Sep', okt:'Oct', oct:'Oct', nov:'Nov', nop:'Nov', des:'Dec', dec:'Dec' };
+      var fcIdxs = {}; // bulan shortEN -> index kolom FC
+      headers.forEach(function(h, _hi){
+        var mFc = /^FC[\s_]+([A-Za-z]{3,4})(?:[\s_]*\d+)?$/i.exec(String(h).trim());
+        if(!mFc) return;
+        var en = _FC_MON_TOK[mFc[1].toLowerCase().slice(0,3)];
+        if(en && fcIdxs[en] === undefined) fcIdxs[en] = _hi; // horizon ≤ 12 bln → kolom pertama menang
+      });
+
       // Bulan yang punya KOLOM Plan (belum tentu ada angkanya — dicek setelah parse data)
       var _colMonths = MRP_MONTHS.filter(function(m) { return planIdxs[m] >= 0; });
       if(!_colMonths.length) _colMonths = ['Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -17672,6 +17691,7 @@ function _mpsUpload(input) {
 
       _mpsData = {};
       _fgDescFromMps = {};
+      _mpsFgFc = {};
       var count = 0;
       for(var r=hdrIdx+1; r<rows.length; r++) {
         var row = rows[r];
@@ -17682,6 +17702,15 @@ function _mpsUpload(input) {
           plans[m] = planIdxs[m] >= 0 ? (parseFloat(row[planIdxs[m]]) || 0) : 0;
         });
         _mpsData[code] = plans;
+        // Item FG (kode 11/12): simpan angka forecast dari kolom FC apa adanya
+        if(/^1[12]/.test(code)) {
+          var _fgfc = {}, _hasFc = false;
+          Object.keys(fcIdxs).forEach(function(m){
+            var v = parseFloat(row[fcIdxs[m]]) || 0;
+            _fgfc[m] = v; if(v > 0) _hasFc = true;
+          });
+          if(_hasFc) _mpsFgFc[code] = _fgfc;
+        }
         if(descCol >= 0 && row[descCol]) _fgDescFromMps[code] = String(row[descCol]).trim();
         count++;
       }
@@ -18235,7 +18264,7 @@ function _mrpShowResult() {
 
   sorted.forEach(function(code, i) {
     var m = master[code] || mrpMaster[code] || {};
-    var iT = /^3/.test(code)?'RM':'PM';
+    var iT = /^1[12]/.test(code)?'FG':(/^3/.test(code)?'RM':'PM');
     var clr = iT==='RM'?'var(--teal)':'var(--purple)';
     var rowDesc = (_isAdmin && _rmDisplayMode === 'realname' && (STATE.realNameData||{})[code])
       ? STATE.realNameData[code]
@@ -18297,6 +18326,28 @@ function _mrpApplyToState(result) {
     var existing = (STATE.mrpData || {})[code] || {};
     mrpData[code].max3MRP  = existing.max3MRP  || 0;
     mrpData[code].actualMRP = existing.actualMRP || 0;
+  });
+  // ── Item FG (kode 11/12): Requirement LANGSUNG dari kolom FC MPS ───────────
+  // Bukan hasil explosion plan×BOM (explosion hanya menghasilkan RM/PM kode 3/4).
+  // Mapping bulan → FC_MONTHS sama persis dengan explosion di atas.
+  Object.keys(_mpsFgFc || {}).forEach(function(code) {
+    if(mrpData[code]) return; // jangan timpa hasil explosion (tidak terjadi utk 11/12)
+    var m1 = (STATE.masterData||{})[code] || {};
+    var ent = { desc: m1.desc || (_fgDescFromMps||{})[code] || code, months: {} };
+    var hasVal = false;
+    MRP_MONTHS.forEach(function(mn) {
+      var moNum = _MRP_MONTH_NUM[mn];
+      var fcIdx = FC_MONTH_NUMS.indexOf(moNum);
+      if(fcIdx < 0) return;
+      var v = (_mpsFgFc[code]||{})[mn];
+      ent.months[FC_MONTHS[fcIdx]] = v != null ? Math.round(v * 1000) / 1000 : 0;
+      if(v) hasVal = true;
+    });
+    if(!hasVal) return;
+    var ex1 = (STATE.mrpData || {})[code] || {};
+    ent.max3MRP   = ex1.max3MRP   || 0;
+    ent.actualMRP = ex1.actualMRP || 0;
+    mrpData[code] = ent;
   });
   STATE.mrpData = mrpData;
   var _mrpTs = Date.now();
@@ -18420,7 +18471,7 @@ function _mrpExportRekap(fmt) {
   var codes = Object.keys(_mrpResult).sort(function(a,b){ return a.localeCompare(b); });
   codes.forEach(function(code) {
     var m   = master[code] || mrpM[code] || {};
-    var iT  = /^3/.test(code)?'RM':'PM';
+    var iT  = /^1[12]/.test(code)?'FG':(/^3/.test(code)?'RM':'PM');
     var mDesc = m.desc || ((STATE.matcomData||{})[code] && (STATE.matcomData||{})[code].sapName) || '';
     var mSup  = m.supplier || '';
     var row = [code, mDesc, m.abc||'', mSup, m.uom||'', iT];
@@ -18532,13 +18583,13 @@ function _mrpIdbSaveMps(data, months) {
   _mrpIdbOpen(function(db) {
     if(!db) return;
     var tx = db.transaction('mps', 'readwrite');
-    tx.objectStore('mps').put({ id:'mps_data', data: data, months: months, fgDescs: _fgDescFromMps||{}, ts: new Date().toISOString() });
+    tx.objectStore('mps').put({ id:'mps_data', data: data, months: months, fgDescs: _fgDescFromMps||{}, fgFc: _mpsFgFc||{}, ts: new Date().toISOString() });
   });
   // Sync ke cloud (Firestore) supaya device lain bisa buka rincian FG tanpa upload ulang.
   // Hanya cloud/IndexedDB — TIDAK menyentuh localStorage (hindari kuota).
   try {
     if(typeof cloudSave === 'function') {
-      var _mpsBundle = JSON.stringify({ data: data, months: months, fgDescs: _fgDescFromMps || {}, ts: new Date().toISOString() });
+      var _mpsBundle = JSON.stringify({ data: data, months: months, fgDescs: _fgDescFromMps || {}, fgFc: _mpsFgFc || {}, ts: new Date().toISOString() });
       // Firestore batas 1 dokumen ~1MB. Kalau MPS terlalu besar, lewati (device lain
       // tetap bisa upload manual). Ambang aman 950 KB.
       if(_mpsBundle.length <= 950000) {
@@ -18558,6 +18609,7 @@ function _mpsApplyBundle(str) {
     if(!b || !b.data || !Object.keys(b.data).length) return false;
     _mpsData = b.data;
     if(b.fgDescs) _fgDescFromMps = b.fgDescs;
+    if(b.fgFc) _mpsFgFc = b.fgFc;
     if(b.months && typeof _mpsRecomputeActiveMonths === 'function') {
       _mpsActiveMonths = _mpsRecomputeActiveMonths(b.months);
       if(typeof _syncFcMonthsToMps === 'function') _syncFcMonthsToMps();
@@ -18567,7 +18619,7 @@ function _mpsApplyBundle(str) {
       // panggil versi IDB-only tanpa re-cloudSave: tulis langsung
       _mrpIdbOpen(function(db){
         if(!db) return;
-        try { db.transaction('mps','readwrite').objectStore('mps').put({ id:'mps_data', data:_mpsData, months:(b.months||_mpsActiveMonths), fgDescs:_fgDescFromMps||{}, ts:new Date().toISOString() }); } catch(e){}
+        try { db.transaction('mps','readwrite').objectStore('mps').put({ id:'mps_data', data:_mpsData, months:(b.months||_mpsActiveMonths), fgDescs:_fgDescFromMps||{}, fgFc:_mpsFgFc||{}, ts:new Date().toISOString() }); } catch(e){}
       });
     }
     var el3 = document.getElementById('mps-status');
@@ -18684,6 +18736,7 @@ function _mrpIdbLoad() {
         if(e3.target.result) {
           _mpsData = e3.target.result.data;
           if(e3.target.result.fgDescs)  _fgDescFromMps   = e3.target.result.fgDescs;
+          if(e3.target.result.fgFc)     _mpsFgFc        = e3.target.result.fgFc;
           // Hitung ulang bulan aktif dari isi data (buang bulan berkolom-nol seperti Mar/Apr),
           // pakai months tersimpan sebagai kandidat awal. Tidak perlu upload MPS ulang.
           _mpsActiveMonths = _mpsRecomputeActiveMonths(e3.target.result.months);
@@ -19619,7 +19672,7 @@ function _fcBuildRows(target) {
     var rows = [['Item No.','Item Description','ABC','Whse','Required Qty','UoM','Required Date','Tgl Create PR','Tipe','Status']];
     items.forEach(function(code) {
       var m=STATE.masterData[code]||{}, fc=fcD[code];
-      var iT=/^3/.test(code)?'RM':'PM';
+      var iT=/^1[12]/.test(code)?'FG':(/^3/.test(code)?'RM':'PM');
       var site=(STATE.stockData&&STATE.stockData[code])
         ? ([STATE.stockData[code].btg>0?'BITUNG':null,STATE.stockData[code].sng>0?'SANGIANG':null,STATE.stockData[code].jtk>0?'JATIRANGON':null,STATE.stockData[code].pjt>0?'GTPJ':null].filter(Boolean).join(' & ')) : '';
       fc.suggestions.forEach(function(s){
