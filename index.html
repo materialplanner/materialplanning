@@ -1960,7 +1960,7 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
         <tr><td>Schedule, PO overrides, konfirmasi supplier, comment</td><td>Operasional harian</td></tr>
         <tr><td>SAP credentials, Fonnte, parameter sistem, Sheet URLs</td><td>Konfigurasi</td></tr>
         <tr><td>Cache SAP (stock, PO, GRPO, OSPR), master data, MRP</td><td>Sync antar perangkat tanpa harus tarik ulang dari SAP</td></tr>
-        <tr><td style="color:var(--red)">proj_history</td><td>❌ <strong>Lokal saja</strong> — ukuran bisa &gt;1MB, melebihi batas Firestore per dokumen</td></tr>
+        <tr><td style="color:var(--red)">proj_history</td><td>❌ <strong>Lokal saja (IndexedDB)</strong> — ukuran bisa &gt;1MB, melebihi batas Firestore per dokumen</td></tr>
       </table>
       <p>Indikator status sync muncul di pojok bawah: <strong>⏳ menyimpan → ☁ Tersimpan</strong>. Jika gagal: <strong>⚠ Gagal sync</strong> — cek koneksi atau Firebase di Settings.</p>
       <h4>Maintenance</h4>
@@ -3330,13 +3330,23 @@ function cloudSave(key, value) {
 // ── Cloud load: baca semua dokumen di koleksi 'kv' ───────────────────────────
 function cloudLoad(callback) {
   if(!_fbReady || !_db){ callback({}); return; }
-  _db.collection('kv').get()
-    .then(function(snapshot){
-      var data = {};
-      snapshot.forEach(function(doc){ data[doc.id] = doc.data().v; });
-      callback(data);
-    })
-    .catch(function(e){ console.warn('Cloud load failed:',e.message); callback({}); });
+  // Retry s/d 3× — di jaringan ber-QUIC-error, request pertama sering putus;
+  // tanpa retry boot jalan dengan data kosong dan tampilan jatuh ke localStorage beku.
+  var _attempt = 0;
+  (function _go(){
+    _attempt++;
+    _db.collection('kv').get()
+      .then(function(snapshot){
+        var data = {};
+        snapshot.forEach(function(doc){ data[doc.id] = doc.data().v; });
+        callback(data);
+      })
+      .catch(function(e){
+        console.warn('Cloud load failed (attempt '+_attempt+'/3):', e.message);
+        if(_attempt < 3) setTimeout(_go, 1500 * _attempt);
+        else callback({});
+      });
+  })();
 }
 
 // ── Real-time sync: onSnapshot listener ──────────────────────────────────────
@@ -3353,6 +3363,7 @@ function cloudStartRealtime() {
     if(_rtFirstSnap) { _rtFirstSnap = false; console.log('[realtime] Initial snapshot skipped'); return; }
 
     var changed = [];
+    var changedVals = {};
     snapshot.docChanges().forEach(function(change) {
       if(change.type === 'added' || change.type === 'modified') {
         var key = change.doc.id;
@@ -3360,12 +3371,16 @@ function cloudStartRealtime() {
         // Skip own write (dalam 5 detik terakhir)
         if(_myLastWrite[key] && (Date.now() - _myLastWrite[key]) < 5000) return;
         // Skip jika value identik
-        if(localStorage.getItem(key) === val) return;
+        try { if(localStorage.getItem(key) === val) return; } catch(e){}
         try { _origSetItem.call(localStorage, key, val); } catch(e){} // bypass cloudSave; quota-safe (disk penuh → skip cache lokal, data tetap dari cloud)
         changed.push(key);
+        // ⭐ Bawa NILAINYA ikut (in-memory). Dulu apply membaca ulang dari localStorage —
+        // saat kuota penuh tulisan di atas gagal diam-diam dan yang diterapkan nilai LAMA
+        // → update dari laptop lain / snapshot susulan tidak pernah tampil ("harus sync ulang").
+        changedVals[key] = val;
       }
     });
-    if(changed.length) { console.log('[realtime] Changes from other laptop:', changed); _applyRealtimeChanges(changed); }
+    if(changed.length) { console.log('[realtime] Changes from other laptop:', changed); _applyRealtimeChanges(changed, changedVals); }
   }, function(err) {
     console.warn('Realtime listener error:', err.message);
     _realtimeActive = false;
@@ -3379,11 +3394,13 @@ function cloudStartRealtime() {
   if(msg) msg.textContent = '☁ Firebase aktif — Real-time sync ● Live';
 }
 
-function _applyRealtimeChanges(keys) {
+function _applyRealtimeChanges(keys, vals) {
   var renderFlags = { proj:false, sched:false, po:false, dash:false };
 
   keys.forEach(function(k) {
-    var val = localStorage.getItem(k);
+    // Nilai in-memory dari snapshot (anti localStorage beku); fallback localStorage
+    // hanya untuk pemanggil lama yang tidak mengirim vals.
+    var val = (vals && Object.prototype.hasOwnProperty.call(vals, k)) ? vals[k] : localStorage.getItem(k);
     try {
       switch(k) {
         case 'schedule': {
@@ -3520,7 +3537,8 @@ function _applyRealtimeChanges(keys) {
           STATE.stockHistory = JSON.parse(val || '{}');
           break;
         case 'proj_history':
-          STATE.projectionHistory = JSON.parse(val || '{}');
+          // Kini di IndexedDB, tidak pernah lewat cloud — jangan timpa state dgn kosong
+          if(val) STATE.projectionHistory = JSON.parse(val);
           break;
         case 'proj_hidden_cols':
           PROJ_HIDDEN_COLS = JSON.parse(val || '[]');
@@ -7660,14 +7678,25 @@ function _toggleProjFreeze() {
   if(STATE.projectionData && STATE.projectionData.length) { renderProjection(); setTimeout(_recalcFreezeLeft, 50); }
 }
 
+// ⭐ proj_history kini disimpan di IndexedDB, BUKAN localStorage.
+// Alasan: riwayat ini penghuni terbesar localStorage (bisa >1MB, lokal-only, tidak bisa
+// dibuat ulang) dan membuat kuota 5MB penuh permanen → semua tulisan lain gagal diam-diam
+// (akar dari serial bug "data hilang/basi"). IndexedDB tidak punya batas sekecil itu.
+function _projHistSave() {
+  try {
+    if(typeof _stateIdbSave === 'function')
+      _stateIdbSave('proj_history', { data: STATE.projectionHistory || {}, ts: Date.now() });
+  } catch(e) { console.warn('[projHist] save gagal:', e.message); }
+}
+
 function cleanupProjHistory() {
   if(!STATE.projectionHistory) STATE.projectionHistory = {};
   var keys = Object.keys(STATE.projectionHistory).sort();
   var before = keys.length;
   while(keys.length > 14) { delete STATE.projectionHistory[keys.shift()]; keys = Object.keys(STATE.projectionHistory).sort(); }
   var after = Object.keys(STATE.projectionHistory).length;
-  try { localStorage.setItem('proj_history', JSON.stringify(STATE.projectionHistory)); } catch(e) {}
-  // proj_history tidak di-cloudSave (>1MB Firestore limit) — cukup lokal
+  _projHistSave();
+  // proj_history tidak di-cloudSave (>1MB Firestore limit) — cukup lokal (IndexedDB)
   toast('History dipangkas: ' + before + ' → ' + after + ' hari. Tersimpan lokal ✓', 'ok');
 }
 
@@ -8774,7 +8803,7 @@ function _doBuildProjection() {
   // Selalu prune ke max 14 hari sebelum save (Firestore limit 1MB per field)
   var _phKeys = Object.keys(STATE.projectionHistory).sort();
   while(_phKeys.length > 14) { delete STATE.projectionHistory[_phKeys.shift()]; _phKeys = Object.keys(STATE.projectionHistory).sort(); }
-  try { localStorage.setItem('proj_history', JSON.stringify(STATE.projectionHistory)); } catch(e) {}
+  _projHistSave(); // → IndexedDB (localStorage tidak dipakai lagi utk proj_history)
 
   var urgentCount = projection.filter(function(p){return p.isUrgent}).length;
   document.getElementById('s-urgent').textContent = urgentCount;
@@ -12978,6 +13007,35 @@ function _appInit() {
         if(typeof updateDashStats === 'function') { try { updateDashStats(); } catch(_e){} }
         if(document.getElementById('proj-table') && typeof renderProjection === 'function') { try { renderProjection(); } catch(_e){} }
       } catch(_e){ console.warn('[boot] rekonsiliasi SAP IndexedDB gagal:', _e.message); }
+    });
+  } catch(e){}
+
+  // ── proj_history → IndexedDB: muat + MIGRASI sekali dari localStorage ──────
+  // Union per tanggal (tidak ada snapshot yang hilang), lalu salinan localStorage
+  // DIHAPUS supaya kuota 5MB lega — ini pencabut akar serial bug "localStorage penuh".
+  try {
+    if(typeof _stateIdbLoad === 'function') _stateIdbLoad('proj_history', function(rec){
+      try {
+        var _legacy = STATE.projectionHistory || {};
+        var _lgCnt  = Object.keys(_legacy).length;
+        var _idbObj = (rec && rec.data) ? rec.data : null;
+        if(_idbObj) {
+          var _merged = {};
+          Object.keys(_legacy).forEach(function(d){ _merged[d] = _legacy[d]; });
+          Object.keys(_idbObj).forEach(function(d){ _merged[d] = _idbObj[d]; }); // IDB (tulisan terakhir) menang
+          STATE.projectionHistory = _merged;
+        }
+        var _hasLegacyLS = false;
+        try { _hasLegacyLS = localStorage.getItem('proj_history') != null; } catch(_e){}
+        if(_hasLegacyLS || (!_idbObj && _lgCnt)) {
+          if(typeof _projHistSave === 'function') _projHistSave(); // tulis gabungan ke IDB dulu
+          try {
+            localStorage.removeItem('proj_history');
+            console.log('[boot] proj_history dimigrasi ke IndexedDB ('+Object.keys(STATE.projectionHistory||{}).length+' hari) — localStorage dilegakan');
+          } catch(_e){}
+        }
+        if(_idbObj && document.getElementById('proj-table') && typeof renderProjection === 'function'){ try { renderProjection(); } catch(_e){} }
+      } catch(_e){ console.warn('[boot] migrasi proj_history gagal:', _e.message); }
     });
   } catch(e){}
 
