@@ -375,6 +375,7 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
   <div class="nav-divider"></div>
   <div class="nav-section">Data</div>
   <div class="ni" data-label="Where Used" onclick="showPage('where-used',this)"><span class="ni-ico">🔍</span><span class="nav-label">Where Used</span><span id="lock-where-used" style="font-size:10px">🔒</span></div>
+  <div class="ni" data-label="Cek by FG" onclick="showPage('cek-fg',this)"><span class="ni-ico">🧪</span><span class="nav-label">Cek by FG</span><span id="lock-cek-fg" style="font-size:10px">🔒</span></div>
   <div class="ni" data-label="GRPO" onclick="showPage('grpo',this)"><span class="ni-ico">✅</span><span class="nav-label">GRPO</span></div>
     <div class="ni" data-label="OSPR" onclick="showPage('ospr',this)"><span class="ni-ico">📝</span><span class="nav-label">OSPR</span></div>
   <div class="ni" data-label="Stock Daily" onclick="showPage('stock-daily',this)"><span class="ni-ico">📅</span><span class="nav-label">Stock Daily</span></div>
@@ -766,6 +767,26 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
   </div>
 
   <div id="wu-result" style="font-size:12px;color:var(--muted);padding:8px 0">Upload BOM terlebih dahulu untuk menggunakan fitur ini.</div>
+</div>
+
+<!-- CEK BY FG — simulasi kecukupan material -->
+<div class="page" id="pg-cek-fg">
+  <div class="ph-l">
+    <h2>🧪 Cek by FG</h2>
+    <p>Simulasi kecukupan material per FG. Requirement awal mengikuti plan MPS — qty bisa diubah bebas untuk cek skenario ("kalau jalan 200k, RM aman?"). <b>Hanya untuk cek</b>: tidak mempengaruhi Forecast/MRP dan tidak disimpan.</p>
+  </div>
+
+  <div style="background:var(--bg3);border-radius:10px;padding:14px 16px;margin-bottom:14px">
+    <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Cari FG — kode atau nama</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <input id="ckfg-search" oninput="_cekFgSearch()" placeholder="contoh: 1201010311 atau sebagian nama FG"
+        style="flex:1;min-width:260px;padding:8px 10px;font-size:12px;font-family:var(--mono);border:1px solid var(--border2);border-radius:6px;background:var(--bg2);color:var(--text)">
+      <button class="btn btn-sm" onclick="document.getElementById('ckfg-search').value='';_cekFgSearch()">✕ Clear</button>
+    </div>
+    <div id="ckfg-matches" style="margin-top:8px"></div>
+  </div>
+
+  <div id="ckfg-result" style="font-size:12px;color:var(--muted)">Cari lalu pilih FG untuk melihat materialnya.</div>
 </div>
 
 <!-- Transfer to SNG -->
@@ -3148,6 +3169,7 @@ function _updateLoginUI() {
   var lockU = document.getElementById('lock-upload');
   var lockW = document.getElementById('lock-where-used');
   var lockN = document.getElementById('lock-npd');
+  var lockC = document.getElementById('lock-cek-fg');
   if(_isAdmin) {
     if(ico) ico.textContent = '🔓';
     if(lbl) lbl.textContent = 'Logout';
@@ -3155,6 +3177,7 @@ function _updateLoginUI() {
     if(lockU) lockU.textContent = '';
     if(lockW) lockW.textContent = '';
     if(lockN) lockN.textContent = '';
+    if(lockC) lockC.textContent = '';
   } else {
     if(ico) ico.textContent = '🔒';
     if(lbl) lbl.textContent = 'Login';
@@ -3162,6 +3185,7 @@ function _updateLoginUI() {
     if(lockU) lockU.textContent = '🔒';
     if(lockW) lockW.textContent = '🔒';
     if(lockN) lockN.textContent = '🔒';
+    if(lockC) lockC.textContent = '🔒';
   }
   // Sembunyikan kolom Real Name dari col menu kalau tidak login
   var colMenuRealname = document.getElementById('col-menu-realname');
@@ -4453,7 +4477,7 @@ var renderProjectionDebounced = debounce(function(){ renderProjection(); }, 180)
 // ─── NAVIGATION ──────────────────────────────────────────────────────────────
 function showPage(name, el) {
   // Gate protected pages
-  if((name === 'settings' || name === 'upload' || name === 'where-used' || name === 'npd') && !_isAdmin) {
+  if((name === 'settings' || name === 'upload' || name === 'where-used' || name === 'npd' || name === 'cek-fg') && !_isAdmin) {
     toast('Login dulu untuk akses halaman ini', 'err');
     showLoginModal();
     return;
@@ -4485,6 +4509,7 @@ function showPage(name, el) {
     ospr: function(){if(!STATE.osprData.length)loadOSPR().then(renderOSPR);else renderOSPR()},
     'stock-daily': function(){initStockDaily()},
     'where-used':  function(){_whereUsedRender()},
+    'cek-fg':      function(){_cekFgInit()},
     'npd':         function(){_npdRender()},
     settings: loadSettingsForm,
     upload: function(){ _restoreSheetUrls(); }
@@ -6724,6 +6749,183 @@ async function loadMatcomSAP() {
     toast('Matcom gagal: ' + e.message, 'err');
     throw e;
   }
+}
+
+// ═══ Cek by FG — simulasi kecukupan material (what-if) ═══════════════════════
+// Requirement = qty plan × qty/pcs BOM (baris type 'N', RM/PM saja) — rumus yang
+// SAMA dengan Hitung MRP, jadi angkanya konsisten. Semua editan hanya hidup di
+// memori halaman ini: TIDAK menyentuh _mpsData, STATE.mrpData, maupun Forecast.
+var _ckfgSel   = null;          // kode FG terpilih
+var _ckfgMonth = '__TOTAL__';   // '__TOTAL__' atau bulan MPS (short EN)
+var _ckfgPlan  = null;          // qty plan skenario (null = ikut MPS)
+var _ckfgOvr   = {};            // override requirement per material {kode: qty}
+var _CKFG_MOID = {Jan:'Jan',Feb:'Feb',Mar:'Mar',Apr:'Apr',May:'Mei',Jun:'Jun',Jul:'Jul',Aug:'Agu',Sep:'Sep',Oct:'Okt',Nov:'Nov',Dec:'Des'};
+
+function _ckfgFmt(v){ return (Math.round((v||0)*100)/100).toLocaleString('id-ID',{maximumFractionDigits:2}); }
+
+function _cekFgInit(){ _cekFgSearch(); if(_ckfgSel) _cekFgTable(); }
+
+function _cekFgSearch(){
+  var box = document.getElementById('ckfg-matches');
+  if(!box) return;
+  var q = ((document.getElementById('ckfg-search')||{}).value || '').trim().toLowerCase();
+  if(!q){ box.innerHTML=''; return; }
+  if(!_bomData || !_bomData.length){
+    box.innerHTML = '<div style="font-size:12px;color:var(--amber)">BOM belum ada di laptop ini — upload di menu MPS → MRP dulu (BOM disimpan lokal per laptop).</div>';
+    return;
+  }
+  var fgd = (typeof _fgDescFromMps !== 'undefined' ? _fgDescFromMps : null) || {};
+  var md  = STATE.masterData || {};
+  var seen = {}, hits = [];
+  // Kandidat: semua FG (1xxx) yang punya baris BOM
+  for(var i=0;i<_bomData.length && hits.length<30;i++){
+    var b=_bomData[i]; var fg=b.fg;
+    if(!fg || seen[fg] || !/^1/.test(fg)) continue;
+    var nm = fgd[fg] || (md[fg]&&md[fg].desc) || b.fgDesc || '';
+    if(fg.toLowerCase().includes(q) || nm.toLowerCase().includes(q)){
+      seen[fg]=true;
+      hits.push({code:fg, name:nm||fg});
+    }
+  }
+  if(!hits.length){ box.innerHTML='<div style="font-size:12px;color:var(--muted)">Tidak ada FG cocok di BOM.</div>'; return; }
+  hits.sort(function(a,b){ return a.code.localeCompare(b.code); });
+  box.innerHTML = hits.map(function(h){
+    var mps=(typeof _mpsData!=='undefined'&&_mpsData)?_mpsData[h.code]:null;
+    var tot=0; if(mps) (_mpsActiveMonths||[]).forEach(function(m){ tot+=(mps[m]||0); });
+    var mpsLbl = mps ? '<span class="badge b-teal" style="font-size:9px;margin-left:6px">MPS '+_ckfgFmt(tot)+'</span>' : '<span class="badge" style="font-size:9px;margin-left:6px;background:var(--bg2);color:var(--muted)">tanpa MPS</span>';
+    var act = h.code===_ckfgSel ? ';outline:1px solid var(--teal)' : '';
+    return '<div onclick="_cekFgPick(\''+h.code+'\')" style="cursor:pointer;padding:6px 10px;border-radius:6px;background:var(--bg2);margin-bottom:4px;font-size:12px'+act+'">'
+      + '<span style="font-family:var(--mono);color:var(--teal)">'+h.code+'</span> — '+String(h.name).replace(/</g,'&lt;') + mpsLbl + '</div>';
+  }).join('');
+}
+
+function _cekFgPick(code){
+  _ckfgSel = code; _ckfgPlan = null; _ckfgOvr = {}; _ckfgMonth = '__TOTAL__';
+  _cekFgSearch(); // refresh highlight
+  _cekFgTable();
+}
+
+function _ckfgPlanDefault(){
+  var mps=(typeof _mpsData!=='undefined'&&_mpsData)?(_mpsData[_ckfgSel]||null):null;
+  if(!mps) return 0;
+  if(_ckfgMonth==='__TOTAL__'){ var t=0; (_mpsActiveMonths||[]).forEach(function(m){ t+=(mps[m]||0); }); return t; }
+  return mps[_ckfgMonth]||0;
+}
+function _cekFgMonthSel(v){ _ckfgMonth=v; _ckfgPlan=null; _ckfgOvr={}; _cekFgTable(); }
+function _cekFgPlanEdit(v){ var n=parseFloat(String(v).replace(',','.')); _ckfgPlan=isNaN(n)?0:n; _ckfgOvr={}; _cekFgTable(); }
+function _cekFgReqEdit(code,v){
+  var s=String(v).trim();
+  if(s===''){ delete _ckfgOvr[code]; } else { var n=parseFloat(s.replace(',','.')); _ckfgOvr[code]=isNaN(n)?0:n; }
+  _cekFgTable();
+}
+function _cekFgReset(){ _ckfgPlan=null; _ckfgOvr={}; _cekFgTable(); }
+
+function _cekFgRows(){
+  // Agregasi BOM: rumus sama dgn _mpsMrpCalculate (type 'N', RM/PM 3xxx/4xxx)
+  var agg={}, names={};
+  (_bomData||[]).forEach(function(b){
+    if(!b || b.fg!==_ckfgSel || b.type!=='N' || !/^[34]/.test(b.rm||'')) return;
+    agg[b.rm]=(agg[b.rm]||0)+(b.qty||0);
+    if(b.rmDesc && !names[b.rm]) names[b.rm]=b.rmDesc;
+  });
+  var md=STATE.masterData||{}, rn=STATE.realNameData||{};
+  var poBy={}; (STATE.poData||[]).forEach(function(p){ if(p.itemCode) poBy[p.itemCode]=(poBy[p.itemCode]||0)+(p.openQty||0); });
+  var plan=(_ckfgPlan!=null)?_ckfgPlan:_ckfgPlanDefault();
+  return Object.keys(agg).map(function(c){
+    var m=md[c]||{};
+    var nm=(_isAdmin && _rmDisplayMode==='realname' && rn[c]) ? rn[c] : (m.desc||names[c]||c);
+    var st=(STATE.stockData||{})[c]||{};
+    var soh=(st.btg||0)+(st.sng||0)+(st.jtk||0)+(st.pjt||0);
+    var po=poBy[c]||0;
+    var pr=(STATE.osprByItem||{})[c]||0;
+    var req=(_ckfgOvr[c]!=null)?_ckfgOvr[c]:plan*agg[c];
+    var avail=soh+po+pr;
+    return {code:c, name:nm, uom:m.uom||'', qtyPc:agg[c], req:req, ovr:(_ckfgOvr[c]!=null), soh:soh, po:po, pr:pr, avail:avail, diff:avail-req};
+  });
+}
+
+function _cekFgTable(){
+  var el=document.getElementById('ckfg-result');
+  if(!el || !_ckfgSel) return;
+  if(!_bomData || !_bomData.length){ el.innerHTML='<div style="color:var(--amber)">BOM belum ada di laptop ini.</div>'; return; }
+  var fgd=(typeof _fgDescFromMps!=='undefined'?_fgDescFromMps:null)||{};
+  var md=STATE.masterData||{};
+  var fgName=fgd[_ckfgSel]||(md[_ckfgSel]&&md[_ckfgSel].desc)||_ckfgSel;
+  var rows=_cekFgRows();
+  if(!rows.length){ el.innerHTML='<div style="color:var(--muted)">FG ini tidak punya RM/PM langsung di BOM (type N).</div>'; return; }
+  var plan=(_ckfgPlan!=null)?_ckfgPlan:_ckfgPlanDefault();
+  var planIsMps=(_ckfgPlan==null);
+  var kurang=rows.filter(function(r){ return r.req>0 && r.diff<0; }).length;
+  // Kurang dulu, lalu kode — supaya yang bermasalah langsung kelihatan
+  rows.sort(function(a,b){
+    var ka=(a.req>0&&a.diff<0)?0:1, kb=(b.req>0&&b.diff<0)?0:1;
+    if(ka!==kb) return ka-kb;
+    return a.code.localeCompare(b.code);
+  });
+  var mps=(typeof _mpsData!=='undefined'&&_mpsData)?(_mpsData[_ckfgSel]||null):null;
+  var mOpts='<option value="__TOTAL__"'+(_ckfgMonth==='__TOTAL__'?' selected':'')+'>Total semua bulan</option>';
+  (_mpsActiveMonths||[]).forEach(function(m){
+    var v=mps?(mps[m]||0):0;
+    mOpts+='<option value="'+m+'"'+(_ckfgMonth===m?' selected':'')+'>'+(_CKFG_MOID[m]||m)+' ('+_ckfgFmt(v)+')</option>';
+  });
+  var h='';
+  h+='<div style="background:var(--bg3);border-radius:10px;padding:12px 16px;margin-bottom:12px">';
+  h+='<div style="font-size:13px;font-weight:700;margin-bottom:8px"><span style="font-family:var(--mono);color:var(--teal)">'+_ckfgSel+'</span> — '+String(fgName).replace(/</g,'&lt;')+'</div>';
+  h+='<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end">';
+  h+='<div><div style="font-size:10.5px;color:var(--muted);margin-bottom:3px">Bulan MPS</div><select onchange="_cekFgMonthSel(this.value)" style="padding:6px 8px;font-size:12px;border:1px solid var(--border2);border-radius:6px;background:var(--bg2);color:var(--text)">'+mOpts+'</select></div>';
+  h+='<div><div style="font-size:10.5px;color:var(--muted);margin-bottom:3px">Qty Plan FG (pcs) — bebas diubah</div><input type="number" step="any" value="'+plan+'" onchange="_cekFgPlanEdit(this.value)" style="width:150px;padding:6px 8px;font-size:12.5px;font-weight:700;font-family:var(--mono);border:1px solid '+(planIsMps?'var(--border2)':'var(--amber)')+';border-radius:6px;background:var(--bg2);color:'+(planIsMps?'var(--text)':'var(--amber)')+'"></div>';
+  h+='<div style="font-size:11px;color:var(--muted)">'+(planIsMps?'= plan MPS':'≠ MPS ('+_ckfgFmt(_ckfgPlanDefault())+') — skenario')+'</div>';
+  h+='<button class="btn btn-sm" onclick="_cekFgReset()" style="font-size:11px">↺ Reset ke MPS</button>';
+  h+='<button class="btn btn-sm" onclick="_cekFgExport()" style="font-size:11px">↓ Export Excel</button>';
+  h+='</div>';
+  h+='<div style="font-size:11px;color:'+(kurang?'var(--red)':'var(--green)')+';margin-top:8px;font-weight:600">'+rows.length+' material · '+(kurang? kurang+' KURANG' : 'semua aman')+'</div>';
+  h+='<div style="font-size:10.5px;color:var(--muted);margin-top:2px">SOH = total semua gudang (BTG+SNG+JTK+GTPJ) · PO/PR = seluruh open qty · Requirement bisa diedit per baris (oranye = hasil edit). Simulasi saja — tidak mengubah Forecast.</div>';
+  h+='</div>';
+  var thS='padding:7px 9px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);background:var(--bg3);border-bottom:2px solid var(--border2);text-align:right;white-space:nowrap';
+  var thL=thS.replace('text-align:right','text-align:left');
+  h+='<div style="overflow:auto;border:1px solid var(--border);border-radius:10px"><table style="width:100%;border-collapse:collapse;min-width:980px">';
+  h+='<thead><tr><th style="'+thL+'">Kode</th><th style="'+thL+'">Nama</th><th style="'+thS+'">Tipe</th><th style="'+thS+'">UoM</th><th style="'+thS+'">Qty/pcs</th><th style="'+thS+'">Requirement</th><th style="'+thS+'">SOH</th><th style="'+thS+'">PO Open</th><th style="'+thS+'">PR Open</th><th style="'+thS+'">Total Avail</th><th style="'+thS+'">Selisih</th><th style="'+thS+'">Status</th></tr></thead><tbody>';
+  var tdR='padding:6px 9px;font-size:11.5px;font-family:var(--mono);text-align:right;border-bottom:1px solid var(--border);white-space:nowrap';
+  var tdL='padding:6px 9px;font-size:11.5px;border-bottom:1px solid var(--border)';
+  rows.forEach(function(r,i){
+    var bg=i%2?'' :'background:var(--bg3)';
+    var tipe=/^3/.test(r.code)?'<span class="badge b-blue" style="font-size:9px">RM</span>':'<span class="badge b-purple" style="font-size:9px">PM</span>';
+    var stt = r.req<=0 ? '<span style="color:var(--muted)">—</span>'
+      : (r.diff>=0 ? '<span class="badge b-green" style="font-size:9.5px">✓ Aman</span>'
+                   : '<span class="badge" style="font-size:9.5px;background:var(--red-bg);color:var(--red)">✗ Kurang '+_ckfgFmt(-r.diff)+'</span>');
+    h+='<tr style="'+bg+'">'
+      +'<td style="'+tdL+';font-family:var(--mono);white-space:nowrap">'+r.code+'</td>'
+      +'<td style="'+tdL+'">'+String(r.name).replace(/</g,'&lt;')+'</td>'
+      +'<td style="'+tdR.replace('text-align:right','text-align:center')+'">'+tipe+'</td>'
+      +'<td style="'+tdR+'">'+r.uom+'</td>'
+      +'<td style="'+tdR+'">'+(Math.round(r.qtyPc*1000000)/1000000)+'</td>'
+      +'<td style="'+tdR+'"><input type="number" step="any" value="'+(Math.round(r.req*100)/100)+'" onchange="_cekFgReqEdit(\''+r.code+'\',this.value)" style="width:110px;text-align:right;padding:3px 6px;font-size:11.5px;font-family:var(--mono);border:1px solid '+(r.ovr?'var(--amber)':'var(--border2)')+';border-radius:5px;background:'+(r.ovr?'var(--amber-bg)':'var(--bg2)')+';color:'+(r.ovr?'var(--amber)':'var(--text)')+'"></td>'
+      +'<td style="'+tdR+'">'+_ckfgFmt(r.soh)+'</td>'
+      +'<td style="'+tdR+';color:var(--accent)">'+(r.po?_ckfgFmt(r.po):'—')+'</td>'
+      +'<td style="'+tdR+';color:var(--teal)">'+(r.pr?_ckfgFmt(r.pr):'—')+'</td>'
+      +'<td style="'+tdR+';font-weight:700">'+_ckfgFmt(r.avail)+'</td>'
+      +'<td style="'+tdR+';font-weight:700;color:'+(r.diff<0?'var(--red)':'var(--green)')+'">'+_ckfgFmt(r.diff)+'</td>'
+      +'<td style="'+tdR.replace('text-align:right','text-align:center')+'">'+stt+'</td>'
+      +'</tr>';
+  });
+  h+='</tbody></table></div>';
+  el.innerHTML=h;
+}
+
+function _cekFgExport(){
+  if(!_ckfgSel){ toast('Pilih FG dulu','err'); return; }
+  if(typeof XLSX==='undefined'){ toast('XLSX library tidak tersedia','err'); return; }
+  var rows=_cekFgRows();
+  var plan=(_ckfgPlan!=null)?_ckfgPlan:_ckfgPlanDefault();
+  var aoa=[['FG',_ckfgSel],['Bulan',_ckfgMonth==='__TOTAL__'?'Total semua bulan':(_CKFG_MOID[_ckfgMonth]||_ckfgMonth)],['Qty Plan',plan],[],
+    ['Kode','Nama','Tipe','UoM','Qty/pcs','Requirement','SOH','PO Open','PR Open','Total Avail','Selisih','Status']];
+  rows.forEach(function(r){
+    aoa.push([r.code,r.name,/^3/.test(r.code)?'RM':'PM',r.uom,r.qtyPc,Math.round(r.req*100)/100,Math.round(r.soh*100)/100,Math.round(r.po*100)/100,Math.round(r.pr*100)/100,Math.round(r.avail*100)/100,Math.round(r.diff*100)/100,r.req<=0?'-':(r.diff>=0?'Aman':'Kurang')]);
+  });
+  var wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Cek by FG');
+  XLSX.writeFile(wb, 'cek_by_fg_'+_ckfgSel+'.xlsx');
+  toast('Export ✓','ok');
 }
 
 function loadOSPO() {
