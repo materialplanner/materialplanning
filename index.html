@@ -777,13 +777,14 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
   </div>
 
   <div style="background:var(--bg3);border-radius:10px;padding:14px 16px;margin-bottom:14px">
-    <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Cari FG — kode atau nama</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Cari FG — kode atau nama. Bisa pilih beberapa FG (mis. semua varian Hydraglaze) → kebutuhan material otomatis di-pivot.</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <input id="ckfg-search" oninput="_cekFgSearch()" placeholder="contoh: 1201010311 atau sebagian nama FG"
+      <input id="ckfg-search" oninput="_cekFgSearch()" placeholder="contoh: hydraglaze / 1201010311 — klik hasil untuk menambah"
         style="flex:1;min-width:260px;padding:8px 10px;font-size:12px;font-family:var(--mono);border:1px solid var(--border2);border-radius:6px;background:var(--bg2);color:var(--text)">
       <button class="btn btn-sm" onclick="document.getElementById('ckfg-search').value='';_cekFgSearch()">✕ Clear</button>
     </div>
     <div id="ckfg-matches" style="margin-top:8px"></div>
+    <div id="ckfg-selected" style="margin-top:10px"></div>
   </div>
 
   <div id="ckfg-result" style="font-size:12px;color:var(--muted)">Cari lalu pilih FG untuk melihat materialnya.</div>
@@ -3767,7 +3768,7 @@ function _applyRealtimeChanges(keys, vals) {
             // oleh update masuk; FG yg sama di kedua sisi → ambil dari blob ber-_rev lebih baru.
             var _ndRev = (_nd && _nd._rev) || 0, _curRev = (_curLocal && _curLocal._rev) || 0;
             if(_curEmpty){
-              STATE.npdData = _nd || {fgs:[]};
+              STATE.npdData = (typeof _npdApplyTombs==='function') ? _npdApplyTombs(_nd || {fgs:[]}) : (_nd || {fgs:[]});
             } else {
               var _cloudNewer = _ndRev >= _curRev;
               var _mergedFgs = [], _seen = {};
@@ -3782,12 +3783,18 @@ function _applyRealtimeChanges(keys, vals) {
               (_nd.fgs||[]).forEach(function(cf){ if(!_seen[cf.id]){ _mergedFgs.push(cf); } });
               var _merged = (_cloudNewer ? _nd : _curLocal) || {};
               _merged = JSON.parse(JSON.stringify(_merged));
-              _merged.fgs = _mergedFgs;
+              // TOMBSTONE: gabungkan daftar hapusan kedua sisi, lalu buang FG yang
+              // sudah dihapus — union murni membuat hapusan tidak pernah menyebar.
+              _merged.del = _npdMergeTombs((_curLocal&&_curLocal.del)||null, (_nd&&_nd.del)||null);
+              _merged.fgs = _mergedFgs.filter(function(f){ return !_merged.del[f.id]; });
               _merged._rev = Math.max(_ndRev, _curRev, Date.now());
-              // Apakah hasil merge punya FG yg TIDAK ada di cloud (mis. FG baru lokal)?
-              // Hanya kalau ya kita push balik — cegah ping-pong re-save antar device.
+              // Push balik hanya kalau hasil merge membawa sesuatu yg belum ada di cloud:
+              // FG lokal-baru, ATAU tombstone yg cloud belum tahu — cegah ping-pong.
               var _cloudIds = {}; (_nd.fgs||[]).forEach(function(x){ _cloudIds[x.id]=1; });
-              var _hasLocalOnly = _mergedFgs.some(function(f){ return !_cloudIds[f.id]; });
+              var _hasLocalOnly = _merged.fgs.some(function(f){ return !_cloudIds[f.id]; });
+              var _cloudDel = (_nd&&_nd.del)||{};
+              var _hasLocalTomb = Object.keys(_merged.del).some(function(k){ return (_cloudDel[k]||0) < _merged.del[k]; });
+              _hasLocalOnly = _hasLocalOnly || _hasLocalTomb;
               _npdSnapshotPush(_curLocal); // snapshot dulu sebelum diubah
               STATE.npdData = _merged;
               try { localStorage.setItem('npd_data', JSON.stringify(_merged)); } catch(e){}
@@ -3981,6 +3988,12 @@ function appStart() {
           var _lrev = (STATE.npdData && STATE.npdData._rev) || 0;
           var _lnfg = (STATE.npdData && STATE.npdData.fgs) ? STATE.npdData.fgs.length : 0;
           if(_lnfg === 0 || (_cn._rev||0) >= _lrev) {
+            // Gabungkan tombstone lokal (hapusan di laptop ini yg mungkin belum sampai cloud)
+            // lalu buang FG yang sudah dihapus — anti bangkit lagi.
+            if(typeof _npdMergeTombs === 'function'){
+              _cn.del = _npdMergeTombs(_cn.del||null, (STATE.npdData&&STATE.npdData.del)||null);
+              _cn.fgs = (_cn.fgs||[]).filter(function(f){ return !_cn.del[f.id]; });
+            }
             STATE.npdData = _cn;
             try { localStorage.setItem('npd_data', JSON.stringify(_cn)); } catch(_e){}
             if(document.getElementById('npd-table') && typeof _npdRender === 'function'){ try{ _npdRender(); }catch(_e){} }
@@ -4000,6 +4013,11 @@ function appStart() {
           var _srev = (STATE.npdData && STATE.npdData._rev) || 0;
           var _snfg = (STATE.npdData && STATE.npdData.fgs) ? STATE.npdData.fgs.length : 0;
           if(_snfg === 0 || (idb._rev||0) > _srev){
+            // Gabungkan tombstone STATE (dari cloud) + IDB, buang FG terhapus
+            if(typeof _npdMergeTombs === 'function'){
+              idb.del = _npdMergeTombs(idb.del||null, (STATE.npdData&&STATE.npdData.del)||null);
+              idb.fgs = (idb.fgs||[]).filter(function(f){ return !idb.del[f.id]; });
+            }
             STATE.npdData = idb;
             try { localStorage.setItem('npd_data', JSON.stringify(idb)); } catch(_e){}
             try { cloudSave('npd_data', JSON.stringify(idb)); } catch(_e){} // sembuhkan cloud yg basi
@@ -4633,6 +4651,9 @@ function _npdSave(data) {
   // Penanda versi: setiap simpan naikkan _rev. Realtime hanya terima cloud yg _rev-nya
   // lebih baru → mencegah device/tab yang ketinggalan menimpa data baru (FG/grup hilang).
   try { data._rev = Math.max(Date.now(), ((STATE.npdData&&STATE.npdData._rev)||0) + 1); } catch(e){ data._rev = Date.now(); }
+  // Gerbang tunggal tombstone: setiap blob yang tersimpan sudah bebas FG terhapus
+  // dan daftar hapusannya terpangkas (>90 hari dibuang).
+  try { if(typeof _npdApplyTombs === 'function') _npdApplyTombs(data); } catch(e){}
   STATE.npdData = data;
   var _json = JSON.stringify(data);
   // ⭐ CLOUD DULU & TERPISAH: data harus sampai ke Firebase walau localStorage PENUH.
@@ -4721,6 +4742,25 @@ function _npdNormalize() {
   return STATE.npdData;
 }
 function _npdUID(){ return 'n'+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
+
+// ── Tombstone FG NPD terhapus: blob.del = {fgId: ts-hapus} ───────────────────
+// Tanpa ini union-merge antar laptop "menyelamatkan" FG yang sudah dihapus →
+// muncul lagi terus (kasus "test tone up"), persis bug tgl konfirmasi PO dulu.
+// id FG unik (timestamp+random, tak pernah dipakai ulang) → tombstone boleh
+// selalu menang. Dipangkas setelah 90 hari supaya blob tidak membengkak.
+function _npdMergeTombs(a,b){
+  var out={};
+  [a,b].forEach(function(m){ if(!m) return; Object.keys(m).forEach(function(k){ out[k]=Math.max(out[k]||0, m[k]||0); }); });
+  var lim=Date.now()-90*86400000;
+  Object.keys(out).forEach(function(k){ if(out[k]<lim) delete out[k]; });
+  return out;
+}
+function _npdApplyTombs(blob){
+  if(!blob) return blob;
+  blob.del=_npdMergeTombs(blob.del||null, null);
+  if(blob.fgs && blob.fgs.length) blob.fgs=blob.fgs.filter(function(f){ return !blob.del[f.id]; });
+  return blob;
+}
 
 // Mat req KG untuk 1 row (butuh plan dari formula)
 // Kode RO Water (air) — hanya dihitung utk penggenap % 100%, semua perhitungan material diabaikan
@@ -5714,7 +5754,7 @@ function _npdAttachPivotFilters(host, cols){
 // ── Aksi FG ──
 function _npdAddFg(){ var nm=prompt('Nama FG NPD (mis. FYNE Extrait Leather):'); if(!nm) return; var d=_npdNormalize(); d.fgs.push({id:_npdUID(),name:nm.trim(),inBom:false,group:'',formulas:[]}); _npdSave(d); _npdRender(); }
 function _npdRenameFg(id){ var d=_npdNormalize(); var fg=d.fgs.filter(function(f){return f.id===id;})[0]; if(!fg)return; var nm=prompt('Rename FG:',fg.name); if(nm){fg.name=nm.trim(); _npdSave(d); _npdRender();} }
-function _npdDeleteFg(id){ var d=_npdNormalize(); var fg=d.fgs.filter(function(f){return f.id===id;})[0]; if(!fg)return; if(!confirm('Hapus FG "'+fg.name+'" beserta semua formula & RM-nya?'))return; d.fgs=d.fgs.filter(function(f){return f.id!==id;}); _npdSave(d); _npdRender(); }
+function _npdDeleteFg(id){ var d=_npdNormalize(); var fg=d.fgs.filter(function(f){return f.id===id;})[0]; if(!fg)return; if(!confirm('Hapus FG "'+fg.name+'" beserta semua formula & RM-nya?'))return; d.fgs=d.fgs.filter(function(f){return f.id!==id;}); d.del=d.del||{}; d.del[id]=Date.now(); /* tombstone: hapusan menyebar ke semua laptop, tidak bangkit lagi */ _npdSave(d); _npdRender(); }
 function _npdToggleFgBom(id,on){ var d=_npdNormalize(); var fg=d.fgs.filter(function(f){return f.id===id;})[0]; if(fg){fg.inBom=on; _npdSave(d); _npdRender();} }
 function _npdOpenFolder(id){ window._npdVFg=id; window._npdVFm=null; window._npdVGroup=null; _npdRender(); }
 function _npdBackToFg(){ window._npdVFg=null; window._npdVFm=null; window._npdVGroup=null; _npdRender(); }
@@ -6751,24 +6791,37 @@ async function loadMatcomSAP() {
   }
 }
 
-// ═══ Cek by FG — simulasi kecukupan material (what-if) ═══════════════════════
-// Requirement = qty plan × qty/pcs BOM (baris type 'N', RM/PM saja) — rumus yang
-// SAMA dengan Hitung MRP, jadi angkanya konsisten. Semua editan hanya hidup di
-// memori halaman ini: TIDAK menyentuh _mpsData, STATE.mrpData, maupun Forecast.
-var _ckfgSel   = null;          // kode FG terpilih
+// ═══ Cek by FG — simulasi kecukupan material (what-if, multi-FG pivot) ═══════
+// Requirement = Σ (qty plan FG × qty/pcs BOM) utk semua FG terpilih — baris BOM
+// type 'N', RM/PM saja: rumus SAMA dengan Hitung MRP, jadi angkanya konsisten.
+// Semua editan hanya hidup di memori halaman ini: TIDAK menyentuh _mpsData,
+// STATE.mrpData, maupun Forecast, dan tidak disimpan.
+var _ckfgSels  = [];            // kode FG terpilih (multi)
 var _ckfgMonth = '__TOTAL__';   // '__TOTAL__' atau bulan MPS (short EN)
-var _ckfgPlan  = null;          // qty plan skenario (null = ikut MPS)
+var _ckfgPlans = {};            // qty plan per FG {kode: qty} (absen = ikut MPS)
 var _ckfgOvr   = {};            // override requirement per material {kode: qty}
+var _ckfgType  = 'ALL';         // filter tabel: ALL | RM | PM
 var _CKFG_MOID = {Jan:'Jan',Feb:'Feb',Mar:'Mar',Apr:'Apr',May:'Mei',Jun:'Jun',Jul:'Jul',Aug:'Agu',Sep:'Sep',Oct:'Okt',Nov:'Nov',Dec:'Des'};
+var _ckfgLastHits = [];         // hasil pencarian terakhir (utk "Tambah semua")
 
 function _ckfgFmt(v){ return (Math.round((v||0)*100)/100).toLocaleString('id-ID',{maximumFractionDigits:2}); }
 
-function _cekFgInit(){ _cekFgSearch(); if(_ckfgSel) _cekFgTable(); }
+function _ckfgFgName(code){
+  var fgd=(typeof _fgDescFromMps!=='undefined'?_fgDescFromMps:null)||{};
+  var md=STATE.masterData||{};
+  if(fgd[code]) return fgd[code];
+  if(md[code]&&md[code].desc) return md[code].desc;
+  for(var i=0;i<(_bomData||[]).length;i++){ var b=_bomData[i]; if(b.fg===code&&b.fgDesc) return b.fgDesc; }
+  return code;
+}
+
+function _cekFgInit(){ _cekFgSelPaint(); if(_ckfgSels.length) _cekFgTable(); }
 
 function _cekFgSearch(){
   var box = document.getElementById('ckfg-matches');
   if(!box) return;
   var q = ((document.getElementById('ckfg-search')||{}).value || '').trim().toLowerCase();
+  _ckfgLastHits = [];
   if(!q){ box.innerHTML=''; return; }
   if(!_bomData || !_bomData.length){
     box.innerHTML = '<div style="font-size:12px;color:var(--amber)">BOM belum ada di laptop ini — upload di menu MPS → MRP dulu (BOM disimpan lokal per laptop).</div>';
@@ -6777,8 +6830,7 @@ function _cekFgSearch(){
   var fgd = (typeof _fgDescFromMps !== 'undefined' ? _fgDescFromMps : null) || {};
   var md  = STATE.masterData || {};
   var seen = {}, hits = [];
-  // Kandidat: semua FG (1xxx) yang punya baris BOM
-  for(var i=0;i<_bomData.length && hits.length<30;i++){
+  for(var i=0;i<_bomData.length && hits.length<40;i++){
     var b=_bomData[i]; var fg=b.fg;
     if(!fg || seen[fg] || !/^1/.test(fg)) continue;
     var nm = fgd[fg] || (md[fg]&&md[fg].desc) || b.fgDesc || '';
@@ -6789,48 +6841,105 @@ function _cekFgSearch(){
   }
   if(!hits.length){ box.innerHTML='<div style="font-size:12px;color:var(--muted)">Tidak ada FG cocok di BOM.</div>'; return; }
   hits.sort(function(a,b){ return a.code.localeCompare(b.code); });
-  box.innerHTML = hits.map(function(h){
-    var mps=(typeof _mpsData!=='undefined'&&_mpsData)?_mpsData[h.code]:null;
+  _ckfgLastHits = hits;
+  var h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
+    +'<div style="font-size:11px;color:var(--muted)">'+hits.length+' FG cocok — klik untuk menambah ke pilihan</div>'
+    +'<button class="btn btn-sm btn-primary" onclick="_cekFgAddAll()" style="font-size:10.5px">➕ Tambah semua ('+hits.length+')</button></div>';
+  h+=hits.map(function(hh){
+    var picked = _ckfgSels.indexOf(hh.code)>=0;
+    var mps=(typeof _mpsData!=='undefined'&&_mpsData)?_mpsData[hh.code]:null;
     var tot=0; if(mps) (_mpsActiveMonths||[]).forEach(function(m){ tot+=(mps[m]||0); });
     var mpsLbl = mps ? '<span class="badge b-teal" style="font-size:9px;margin-left:6px">MPS '+_ckfgFmt(tot)+'</span>' : '<span class="badge" style="font-size:9px;margin-left:6px;background:var(--bg2);color:var(--muted)">tanpa MPS</span>';
-    var act = h.code===_ckfgSel ? ';outline:1px solid var(--teal)' : '';
-    return '<div onclick="_cekFgPick(\''+h.code+'\')" style="cursor:pointer;padding:6px 10px;border-radius:6px;background:var(--bg2);margin-bottom:4px;font-size:12px'+act+'">'
-      + '<span style="font-family:var(--mono);color:var(--teal)">'+h.code+'</span> — '+String(h.name).replace(/</g,'&lt;') + mpsLbl + '</div>';
+    return '<div onclick="_cekFgPick(\''+hh.code+'\')" style="cursor:pointer;padding:6px 10px;border-radius:6px;background:var(--bg2);margin-bottom:4px;font-size:12px'+(picked?';opacity:.5':'')+'">'
+      + (picked?'✓ ':'') + '<span style="font-family:var(--mono);color:var(--teal)">'+hh.code+'</span> — '+String(hh.name).replace(/</g,'&lt;') + mpsLbl + '</div>';
   }).join('');
+  box.innerHTML = h;
 }
 
 function _cekFgPick(code){
-  _ckfgSel = code; _ckfgPlan = null; _ckfgOvr = {}; _ckfgMonth = '__TOTAL__';
-  _cekFgSearch(); // refresh highlight
-  _cekFgTable();
+  if(_ckfgSels.indexOf(code)<0){ _ckfgSels.push(code); _ckfgOvr={}; }
+  // Dropdown langsung hilang setelah pilih
+  var si=document.getElementById('ckfg-search'); if(si) si.value='';
+  var box=document.getElementById('ckfg-matches'); if(box) box.innerHTML='';
+  _ckfgLastHits=[];
+  _cekFgSelPaint(); _cekFgTable();
+}
+function _cekFgAddAll(){
+  _ckfgLastHits.forEach(function(hh){ if(_ckfgSels.indexOf(hh.code)<0) _ckfgSels.push(hh.code); });
+  _ckfgOvr={};
+  var si=document.getElementById('ckfg-search'); if(si) si.value='';
+  var box=document.getElementById('ckfg-matches'); if(box) box.innerHTML='';
+  _ckfgLastHits=[];
+  _cekFgSelPaint(); _cekFgTable();
+}
+function _cekFgRemove(code){
+  _ckfgSels=_ckfgSels.filter(function(c){ return c!==code; });
+  delete _ckfgPlans[code]; _ckfgOvr={};
+  _cekFgSelPaint();
+  if(_ckfgSels.length) _cekFgTable();
+  else { var el=document.getElementById('ckfg-result'); if(el) el.innerHTML='<div style="color:var(--muted)">Cari lalu pilih FG untuk melihat materialnya.</div>'; }
+}
+function _cekFgClearAll(){
+  _ckfgSels=[]; _ckfgPlans={}; _ckfgOvr={};
+  _cekFgSelPaint();
+  var el=document.getElementById('ckfg-result'); if(el) el.innerHTML='<div style="color:var(--muted)">Cari lalu pilih FG untuk melihat materialnya.</div>';
 }
 
-function _ckfgPlanDefault(){
-  var mps=(typeof _mpsData!=='undefined'&&_mpsData)?(_mpsData[_ckfgSel]||null):null;
+function _ckfgPlanDefault(fg){
+  var mps=(typeof _mpsData!=='undefined'&&_mpsData)?(_mpsData[fg]||null):null;
   if(!mps) return 0;
   if(_ckfgMonth==='__TOTAL__'){ var t=0; (_mpsActiveMonths||[]).forEach(function(m){ t+=(mps[m]||0); }); return t; }
   return mps[_ckfgMonth]||0;
 }
-function _cekFgMonthSel(v){ _ckfgMonth=v; _ckfgPlan=null; _ckfgOvr={}; _cekFgTable(); }
-function _cekFgPlanEdit(v){ var n=parseFloat(String(v).replace(',','.')); _ckfgPlan=isNaN(n)?0:n; _ckfgOvr={}; _cekFgTable(); }
+function _ckfgPlanOf(fg){ return (_ckfgPlans[fg]!=null) ? _ckfgPlans[fg] : _ckfgPlanDefault(fg); }
+
+function _cekFgSelPaint(){
+  var el=document.getElementById('ckfg-selected');
+  if(!el) return;
+  if(!_ckfgSels.length){ el.innerHTML=''; return; }
+  var h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
+    +'<div style="font-size:11px;color:var(--muted);font-weight:600">'+_ckfgSels.length+' FG dipilih — qty plan per FG bisa diubah:</div>'
+    +'<button class="btn btn-sm" onclick="_cekFgClearAll()" style="font-size:10.5px">✕ Hapus semua</button></div>';
+  h+=_ckfgSels.map(function(fg){
+    var plan=_ckfgPlanOf(fg);
+    var isMps=(_ckfgPlans[fg]==null);
+    return '<div style="display:flex;align-items:center;gap:8px;padding:5px 10px;border-radius:6px;background:var(--bg2);margin-bottom:4px;font-size:12px;flex-wrap:wrap">'
+      +'<span style="font-family:var(--mono);color:var(--teal);white-space:nowrap">'+fg+'</span>'
+      +'<span style="flex:1;min-width:180px">'+String(_ckfgFgName(fg)).replace(/</g,'&lt;')+'</span>'
+      +'<input type="number" step="any" value="'+plan+'" onchange="_cekFgPlanEdit(\''+fg+'\',this.value)" title="Qty plan FG (pcs)" style="width:120px;text-align:right;padding:4px 7px;font-size:12px;font-weight:700;font-family:var(--mono);border:1px solid '+(isMps?'var(--border2)':'var(--amber)')+';border-radius:5px;background:'+(isMps?'var(--bg3)':'var(--amber-bg)')+';color:'+(isMps?'var(--text)':'var(--amber)')+'">'
+      +'<span style="font-size:10px;color:var(--muted);width:62px">'+(isMps?'= MPS':'≠ MPS '+_ckfgFmt(_ckfgPlanDefault(fg)))+'</span>'
+      +'<span onclick="_cekFgRemove(\''+fg+'\')" style="cursor:pointer;color:var(--red);font-weight:700;padding:0 4px" title="Hapus dari pilihan">✕</span>'
+      +'</div>';
+  }).join('');
+  el.innerHTML=h;
+}
+
+function _cekFgMonthSel(v){ _ckfgMonth=v; _ckfgPlans={}; _ckfgOvr={}; _cekFgSelPaint(); _cekFgTable(); }
+function _cekFgPlanEdit(fg,v){ var n=parseFloat(String(v).replace(',','.')); _ckfgPlans[fg]=isNaN(n)?0:n; _ckfgOvr={}; _cekFgSelPaint(); _cekFgTable(); }
 function _cekFgReqEdit(code,v){
   var s=String(v).trim();
   if(s===''){ delete _ckfgOvr[code]; } else { var n=parseFloat(s.replace(',','.')); _ckfgOvr[code]=isNaN(n)?0:n; }
   _cekFgTable();
 }
-function _cekFgReset(){ _ckfgPlan=null; _ckfgOvr={}; _cekFgTable(); }
+function _cekFgTypeSel(t){ _ckfgType=t; _cekFgTable(); }
+function _cekFgReset(){ _ckfgPlans={}; _ckfgOvr={}; _cekFgSelPaint(); _cekFgTable(); }
 
 function _cekFgRows(){
-  // Agregasi BOM: rumus sama dgn _mpsMrpCalculate (type 'N', RM/PM 3xxx/4xxx)
-  var agg={}, names={};
+  // Agregasi BOM lintas FG terpilih: rumus sama dgn _mpsMrpCalculate (type 'N', RM/PM)
+  var selSet={}; _ckfgSels.forEach(function(c){ selSet[c]=true; });
+  var plans={};  _ckfgSels.forEach(function(c){ plans[c]=_ckfgPlanOf(c); });
+  var agg={}, qtyPc={}, names={}, perFg={};
   (_bomData||[]).forEach(function(b){
-    if(!b || b.fg!==_ckfgSel || b.type!=='N' || !/^[34]/.test(b.rm||'')) return;
-    agg[b.rm]=(agg[b.rm]||0)+(b.qty||0);
+    if(!b || !selSet[b.fg] || b.type!=='N' || !/^[34]/.test(b.rm||'')) return;
+    var add=(plans[b.fg]||0)*(b.qty||0);
+    agg[b.rm]=(agg[b.rm]||0)+add;
+    qtyPc[b.rm]=(qtyPc[b.rm]||0)+(b.qty||0); // bermakna utk 1 FG; multi-FG ditampilkan jumlah FG
+    if(!perFg[b.rm]) perFg[b.rm]={};
+    perFg[b.rm][b.fg]=(perFg[b.rm][b.fg]||0)+add;
     if(b.rmDesc && !names[b.rm]) names[b.rm]=b.rmDesc;
   });
   var md=STATE.masterData||{}, rn=STATE.realNameData||{};
   var poBy={}; (STATE.poData||[]).forEach(function(p){ if(p.itemCode) poBy[p.itemCode]=(poBy[p.itemCode]||0)+(p.openQty||0); });
-  var plan=(_ckfgPlan!=null)?_ckfgPlan:_ckfgPlanDefault();
   return Object.keys(agg).map(function(c){
     var m=md[c]||{};
     var nm=(_isAdmin && _rmDisplayMode==='realname' && rn[c]) ? rn[c] : (m.desc||names[c]||c);
@@ -6838,53 +6947,62 @@ function _cekFgRows(){
     var soh=(st.btg||0)+(st.sng||0)+(st.jtk||0)+(st.pjt||0);
     var po=poBy[c]||0;
     var pr=(STATE.osprByItem||{})[c]||0;
-    var req=(_ckfgOvr[c]!=null)?_ckfgOvr[c]:plan*agg[c];
+    var req=(_ckfgOvr[c]!=null)?_ckfgOvr[c]:agg[c];
     var avail=soh+po+pr;
-    return {code:c, name:nm, uom:m.uom||'', qtyPc:agg[c], req:req, ovr:(_ckfgOvr[c]!=null), soh:soh, po:po, pr:pr, avail:avail, diff:avail-req};
+    var fgs=Object.keys(perFg[c]);
+    var bd=fgs.map(function(f){ return f+': '+_ckfgFmt(perFg[c][f]); }).join('\n');
+    return {code:c, name:nm, uom:m.uom||'', qtyPc:qtyPc[c], fgCnt:fgs.length, breakdown:bd,
+      req:req, ovr:(_ckfgOvr[c]!=null), soh:soh, po:po, pr:pr, avail:avail, diff:avail-req};
   });
 }
 
 function _cekFgTable(){
   var el=document.getElementById('ckfg-result');
-  if(!el || !_ckfgSel) return;
+  if(!el || !_ckfgSels.length) return;
   if(!_bomData || !_bomData.length){ el.innerHTML='<div style="color:var(--amber)">BOM belum ada di laptop ini.</div>'; return; }
-  var fgd=(typeof _fgDescFromMps!=='undefined'?_fgDescFromMps:null)||{};
-  var md=STATE.masterData||{};
-  var fgName=fgd[_ckfgSel]||(md[_ckfgSel]&&md[_ckfgSel].desc)||_ckfgSel;
-  var rows=_cekFgRows();
-  if(!rows.length){ el.innerHTML='<div style="color:var(--muted)">FG ini tidak punya RM/PM langsung di BOM (type N).</div>'; return; }
-  var plan=(_ckfgPlan!=null)?_ckfgPlan:_ckfgPlanDefault();
-  var planIsMps=(_ckfgPlan==null);
+  var multi=_ckfgSels.length>1;
+  var rowsAll=_cekFgRows();
+  if(!rowsAll.length){ el.innerHTML='<div style="color:var(--muted)">FG terpilih tidak punya RM/PM langsung di BOM (type N).</div>'; return; }
+  var rows=rowsAll.filter(function(r){
+    if(_ckfgType==='RM') return /^3/.test(r.code);
+    if(_ckfgType==='PM') return /^4/.test(r.code);
+    return true;
+  });
+  var totalPlan=0; _ckfgSels.forEach(function(fg){ totalPlan+=_ckfgPlanOf(fg); });
   var kurang=rows.filter(function(r){ return r.req>0 && r.diff<0; }).length;
-  // Kurang dulu, lalu kode — supaya yang bermasalah langsung kelihatan
   rows.sort(function(a,b){
     var ka=(a.req>0&&a.diff<0)?0:1, kb=(b.req>0&&b.diff<0)?0:1;
     if(ka!==kb) return ka-kb;
     return a.code.localeCompare(b.code);
   });
-  var mps=(typeof _mpsData!=='undefined'&&_mpsData)?(_mpsData[_ckfgSel]||null):null;
   var mOpts='<option value="__TOTAL__"'+(_ckfgMonth==='__TOTAL__'?' selected':'')+'>Total semua bulan</option>';
   (_mpsActiveMonths||[]).forEach(function(m){
-    var v=mps?(mps[m]||0):0;
-    mOpts+='<option value="'+m+'"'+(_ckfgMonth===m?' selected':'')+'>'+(_CKFG_MOID[m]||m)+' ('+_ckfgFmt(v)+')</option>';
+    mOpts+='<option value="'+m+'"'+(_ckfgMonth===m?' selected':'')+'>'+(_CKFG_MOID[m]||m)+'</option>';
   });
+  var fBtn=function(t,lbl){
+    var on=_ckfgType===t;
+    return '<button class="btn btn-sm'+(on?' btn-primary':'')+'" onclick="_cekFgTypeSel(\''+t+'\')" style="font-size:10.5px">'+lbl+'</button>';
+  };
   var h='';
   h+='<div style="background:var(--bg3);border-radius:10px;padding:12px 16px;margin-bottom:12px">';
-  h+='<div style="font-size:13px;font-weight:700;margin-bottom:8px"><span style="font-family:var(--mono);color:var(--teal)">'+_ckfgSel+'</span> — '+String(fgName).replace(/</g,'&lt;')+'</div>';
+  h+='<div style="font-size:13px;font-weight:700;margin-bottom:8px">'+(multi
+      ? 'Pivot '+_ckfgSels.length+' FG — total plan '+_ckfgFmt(totalPlan)+' pcs'
+      : '<span style="font-family:var(--mono);color:var(--teal)">'+_ckfgSels[0]+'</span> — '+String(_ckfgFgName(_ckfgSels[0])).replace(/</g,'&lt;')+' · plan '+_ckfgFmt(totalPlan)+' pcs')+'</div>';
   h+='<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end">';
   h+='<div><div style="font-size:10.5px;color:var(--muted);margin-bottom:3px">Bulan MPS</div><select onchange="_cekFgMonthSel(this.value)" style="padding:6px 8px;font-size:12px;border:1px solid var(--border2);border-radius:6px;background:var(--bg2);color:var(--text)">'+mOpts+'</select></div>';
-  h+='<div><div style="font-size:10.5px;color:var(--muted);margin-bottom:3px">Qty Plan FG (pcs) — bebas diubah</div><input type="number" step="any" value="'+plan+'" onchange="_cekFgPlanEdit(this.value)" style="width:150px;padding:6px 8px;font-size:12.5px;font-weight:700;font-family:var(--mono);border:1px solid '+(planIsMps?'var(--border2)':'var(--amber)')+';border-radius:6px;background:var(--bg2);color:'+(planIsMps?'var(--text)':'var(--amber)')+'"></div>';
-  h+='<div style="font-size:11px;color:var(--muted)">'+(planIsMps?'= plan MPS':'≠ MPS ('+_ckfgFmt(_ckfgPlanDefault())+') — skenario')+'</div>';
+  h+='<div><div style="font-size:10.5px;color:var(--muted);margin-bottom:3px">Tipe material</div><div style="display:flex;gap:5px">'+fBtn('ALL','RM + PM')+fBtn('RM','RM')+fBtn('PM','PM')+'</div></div>';
   h+='<button class="btn btn-sm" onclick="_cekFgReset()" style="font-size:11px">↺ Reset ke MPS</button>';
   h+='<button class="btn btn-sm" onclick="_cekFgExport()" style="font-size:11px">↓ Export Excel</button>';
   h+='</div>';
-  h+='<div style="font-size:11px;color:'+(kurang?'var(--red)':'var(--green)')+';margin-top:8px;font-weight:600">'+rows.length+' material · '+(kurang? kurang+' KURANG' : 'semua aman')+'</div>';
-  h+='<div style="font-size:10.5px;color:var(--muted);margin-top:2px">SOH = total semua gudang (BTG+SNG+JTK+GTPJ) · PO/PR = seluruh open qty · Requirement bisa diedit per baris (oranye = hasil edit). Simulasi saja — tidak mengubah Forecast.</div>';
+  h+='<div style="font-size:11px;color:'+(kurang?'var(--red)':'var(--green)')+';margin-top:8px;font-weight:600">'+rows.length+' material'+(_ckfgType!=='ALL'?' ('+_ckfgType+')':'')+' · '+(kurang? kurang+' KURANG' : 'semua aman')+'</div>';
+  h+='<div style="font-size:10.5px;color:var(--muted);margin-top:2px">SOH = total semua gudang (BTG+SNG+JTK+GTPJ) · PO/PR = seluruh open qty · Requirement = gabungan semua FG terpilih, bisa diedit per baris (oranye = hasil edit)'+(multi?' · hover kolom #FG utk rincian per FG':'')+'. Simulasi saja — tidak mengubah Forecast.</div>';
   h+='</div>';
   var thS='padding:7px 9px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);background:var(--bg3);border-bottom:2px solid var(--border2);text-align:right;white-space:nowrap';
   var thL=thS.replace('text-align:right','text-align:left');
   h+='<div style="overflow:auto;border:1px solid var(--border);border-radius:10px"><table style="width:100%;border-collapse:collapse;min-width:980px">';
-  h+='<thead><tr><th style="'+thL+'">Kode</th><th style="'+thL+'">Nama</th><th style="'+thS+'">Tipe</th><th style="'+thS+'">UoM</th><th style="'+thS+'">Qty/pcs</th><th style="'+thS+'">Requirement</th><th style="'+thS+'">SOH</th><th style="'+thS+'">PO Open</th><th style="'+thS+'">PR Open</th><th style="'+thS+'">Total Avail</th><th style="'+thS+'">Selisih</th><th style="'+thS+'">Status</th></tr></thead><tbody>';
+  h+='<thead><tr><th style="'+thL+'">Kode</th><th style="'+thL+'">Nama</th><th style="'+thS+'">Tipe</th><th style="'+thS+'">UoM</th>'
+    +(multi?'<th style="'+thS+'">#FG</th>':'<th style="'+thS+'">Qty/pcs</th>')
+    +'<th style="'+thS+'">Requirement</th><th style="'+thS+'">SOH</th><th style="'+thS+'">PO Open</th><th style="'+thS+'">PR Open</th><th style="'+thS+'">Total Avail</th><th style="'+thS+'">Selisih</th><th style="'+thS+'">Status</th></tr></thead><tbody>';
   var tdR='padding:6px 9px;font-size:11.5px;font-family:var(--mono);text-align:right;border-bottom:1px solid var(--border);white-space:nowrap';
   var tdL='padding:6px 9px;font-size:11.5px;border-bottom:1px solid var(--border)';
   rows.forEach(function(r,i){
@@ -6893,12 +7011,15 @@ function _cekFgTable(){
     var stt = r.req<=0 ? '<span style="color:var(--muted)">—</span>'
       : (r.diff>=0 ? '<span class="badge b-green" style="font-size:9.5px">✓ Aman</span>'
                    : '<span class="badge" style="font-size:9.5px;background:var(--red-bg);color:var(--red)">✗ Kurang '+_ckfgFmt(-r.diff)+'</span>');
+    var col5 = multi
+      ? '<td style="'+tdR+'" title="'+String(r.breakdown).replace(/"/g,'&quot;')+'">'+r.fgCnt+'</td>'
+      : '<td style="'+tdR+'">'+(Math.round(r.qtyPc*1000000)/1000000)+'</td>';
     h+='<tr style="'+bg+'">'
       +'<td style="'+tdL+';font-family:var(--mono);white-space:nowrap">'+r.code+'</td>'
       +'<td style="'+tdL+'">'+String(r.name).replace(/</g,'&lt;')+'</td>'
       +'<td style="'+tdR.replace('text-align:right','text-align:center')+'">'+tipe+'</td>'
       +'<td style="'+tdR+'">'+r.uom+'</td>'
-      +'<td style="'+tdR+'">'+(Math.round(r.qtyPc*1000000)/1000000)+'</td>'
+      +col5
       +'<td style="'+tdR+'"><input type="number" step="any" value="'+(Math.round(r.req*100)/100)+'" onchange="_cekFgReqEdit(\''+r.code+'\',this.value)" style="width:110px;text-align:right;padding:3px 6px;font-size:11.5px;font-family:var(--mono);border:1px solid '+(r.ovr?'var(--amber)':'var(--border2)')+';border-radius:5px;background:'+(r.ovr?'var(--amber-bg)':'var(--bg2)')+';color:'+(r.ovr?'var(--amber)':'var(--text)')+'"></td>'
       +'<td style="'+tdR+'">'+_ckfgFmt(r.soh)+'</td>'
       +'<td style="'+tdR+';color:var(--accent)">'+(r.po?_ckfgFmt(r.po):'—')+'</td>'
@@ -6913,18 +7034,23 @@ function _cekFgTable(){
 }
 
 function _cekFgExport(){
-  if(!_ckfgSel){ toast('Pilih FG dulu','err'); return; }
+  if(!_ckfgSels.length){ toast('Pilih FG dulu','err'); return; }
   if(typeof XLSX==='undefined'){ toast('XLSX library tidak tersedia','err'); return; }
-  var rows=_cekFgRows();
-  var plan=(_ckfgPlan!=null)?_ckfgPlan:_ckfgPlanDefault();
-  var aoa=[['FG',_ckfgSel],['Bulan',_ckfgMonth==='__TOTAL__'?'Total semua bulan':(_CKFG_MOID[_ckfgMonth]||_ckfgMonth)],['Qty Plan',plan],[],
-    ['Kode','Nama','Tipe','UoM','Qty/pcs','Requirement','SOH','PO Open','PR Open','Total Avail','Selisih','Status']];
+  var rows=_cekFgRows().filter(function(r){
+    if(_ckfgType==='RM') return /^3/.test(r.code);
+    if(_ckfgType==='PM') return /^4/.test(r.code);
+    return true;
+  });
+  var aoa=[['Bulan',_ckfgMonth==='__TOTAL__'?'Total semua bulan':(_CKFG_MOID[_ckfgMonth]||_ckfgMonth)],['FG terpilih','Qty Plan']];
+  _ckfgSels.forEach(function(fg){ aoa.push([fg+' — '+_ckfgFgName(fg), _ckfgPlanOf(fg)]); });
+  aoa.push([]);
+  aoa.push(['Kode','Nama','Tipe','UoM','#FG','Requirement','SOH','PO Open','PR Open','Total Avail','Selisih','Status','Rincian per FG']);
   rows.forEach(function(r){
-    aoa.push([r.code,r.name,/^3/.test(r.code)?'RM':'PM',r.uom,r.qtyPc,Math.round(r.req*100)/100,Math.round(r.soh*100)/100,Math.round(r.po*100)/100,Math.round(r.pr*100)/100,Math.round(r.avail*100)/100,Math.round(r.diff*100)/100,r.req<=0?'-':(r.diff>=0?'Aman':'Kurang')]);
+    aoa.push([r.code,r.name,/^3/.test(r.code)?'RM':'PM',r.uom,r.fgCnt,Math.round(r.req*100)/100,Math.round(r.soh*100)/100,Math.round(r.po*100)/100,Math.round(r.pr*100)/100,Math.round(r.avail*100)/100,Math.round(r.diff*100)/100,r.req<=0?'-':(r.diff>=0?'Aman':'Kurang'),r.breakdown.replace(/\n/g,' | ')]);
   });
   var wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Cek by FG');
-  XLSX.writeFile(wb, 'cek_by_fg_'+_ckfgSel+'.xlsx');
+  XLSX.writeFile(wb, 'cek_by_fg_'+(_ckfgSels.length>1?_ckfgSels.length+'FG':_ckfgSels[0])+'.xlsx');
   toast('Export ✓','ok');
 }
 
