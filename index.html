@@ -6796,9 +6796,9 @@ async function loadMatcomSAP() {
 // type 'N', RM/PM saja: rumus SAMA dengan Hitung MRP, jadi angkanya konsisten.
 // Semua editan hanya hidup di memori halaman ini: TIDAK menyentuh _mpsData,
 // STATE.mrpData, maupun Forecast, dan tidak disimpan.
-// Dua selisih: Perlu PR = (SOH+PO+PR) − req (kurang → harus BUAT PR baru);
-//              Perlu Datang = SOH − req (kurang → material harus DATANG dulu,
-//              dari PO/PR yang sudah ada — cek jadwal kedatangannya).
+// Status 3 tingkat: Perlu PR  = (SOH+PO+PR) − req < 0 → harus BUAT PR baru;
+//                   Perlu Datang = PR aman tapi SOH − req < 0 → PO/PR harus DATANG;
+//                   Aman = stok fisik saja sudah cukup.
 var _ckfgSels  = [];            // kode FG terpilih (multi)
 var _ckfgMonth = '__TOTAL__';   // '__TOTAL__' atau bulan MPS (short EN)
 var _ckfgPlans = {};            // qty plan per FG {kode: qty} (absen = ikut MPS)
@@ -6806,12 +6806,14 @@ var _ckfgOvr   = {};            // override requirement per material {kode: qty}
 var _ckfgType  = 'ALL';         // filter cepat: ALL | RM | PM
 var _ckfgColSel= {};            // filter per kolom (ala tabel NPD) {colKey:[vals]}
 var _CKFG_MOID = {Jan:'Jan',Feb:'Feb',Mar:'Mar',Apr:'Apr',May:'Mei',Jun:'Jun',Jul:'Jul',Aug:'Agu',Sep:'Sep',Oct:'Okt',Nov:'Nov',Dec:'Des'};
+var _CKFG_MONUM= {Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12};
 var _ckfgLastHits = [];         // hasil pencarian terakhir
 var _ckfgChecked  = {};         // ceklis di hasil pencarian {kode:1}
-var _ckfgView  = 'simple';      // 'simple' = ringkas 1 skenario | 'bulan' = horizon per bulan
+var _ckfgView  = 'simple';      // 'simple' = ringkas 1 skenario | 'bulan' = per bulan ala Forecast
 var _ckfgPlansM= {};            // plan per FG per bulan {fg:{Mon:qty}} (absen = ikut MPS)
 
 function _ckfgFmt(v){ return (Math.round((v||0)*100)/100).toLocaleString('id-ID',{maximumFractionDigits:2}); }
+function _ckfgStatusOf(r){ return r.req<=0 ? '-' : (r.diffPR<0 ? 'Perlu PR' : (r.diffDtg<0 ? 'Perlu Datang' : 'Aman')); }
 
 function _ckfgFgName(code){
   var fgd=(typeof _fgDescFromMps!=='undefined'?_fgDescFromMps:null)||{};
@@ -6902,13 +6904,13 @@ function _cekFgAddAll(){
 }
 function _cekFgRemove(code){
   _ckfgSels=_ckfgSels.filter(function(c){ return c!==code; });
-  delete _ckfgPlans[code]; _ckfgOvr={};
+  delete _ckfgPlans[code]; delete _ckfgPlansM[code]; _ckfgOvr={};
   _cekFgSelPaint();
   if(_ckfgSels.length) _cekFgTable();
   else { var el=document.getElementById('ckfg-result'); if(el) el.innerHTML='<div style="color:var(--muted)">Cari lalu pilih FG untuk melihat materialnya.</div>'; }
 }
 function _cekFgClearAll(){
-  _ckfgSels=[]; _ckfgPlans={}; _ckfgOvr={}; _ckfgColSel={};
+  _ckfgSels=[]; _ckfgPlans={}; _ckfgPlansM={}; _ckfgOvr={}; _ckfgColSel={};
   _cekFgSelPaint();
   var el=document.getElementById('ckfg-result'); if(el) el.innerHTML='<div style="color:var(--muted)">Cari lalu pilih FG untuk melihat materialnya.</div>';
 }
@@ -6934,7 +6936,7 @@ function _cekFgSelPaint(){
     return '<div style="display:flex;align-items:center;gap:8px;padding:5px 10px;border-radius:6px;background:var(--bg2);margin-bottom:4px;font-size:12px;flex-wrap:wrap">'
       +'<span style="font-family:var(--mono);color:var(--teal);white-space:nowrap">'+fg+'</span>'
       +'<span style="flex:1;min-width:180px">'+String(_ckfgFgName(fg)).replace(/</g,'&lt;')+'</span>'
-      +'<input type="number" step="any" value="'+plan+'" onchange="_cekFgPlanEdit(\''+fg+'\',this.value)" title="Qty plan FG (pcs)" style="width:120px;text-align:right;padding:4px 7px;font-size:12px;font-weight:700;font-family:var(--mono);border:1px solid '+(isMps?'var(--border2)':'var(--amber)')+';border-radius:5px;background:'+(isMps?'var(--bg3)':'var(--amber-bg)')+';color:'+(isMps?'var(--text)':'var(--amber)')+'">'
+      +'<input type="number" step="any" value="'+plan+'" onchange="_cekFgPlanEdit(\''+fg+'\',this.value)" title="Qty plan FG (pcs) — dipakai tab Ringkas" style="width:120px;text-align:right;padding:4px 7px;font-size:12px;font-weight:700;font-family:var(--mono);border:1px solid '+(isMps?'var(--border2)':'var(--amber)')+';border-radius:5px;background:'+(isMps?'var(--bg3)':'var(--amber-bg)')+';color:'+(isMps?'var(--text)':'var(--amber)')+'">'
       +'<span style="font-size:10px;color:var(--muted);width:62px">'+(isMps?'= MPS':'≠ MPS '+_ckfgFmt(_ckfgPlanDefault(fg)))+'</span>'
       +'<span onclick="_cekFgRemove(\''+fg+'\')" style="cursor:pointer;color:var(--red);font-weight:700;padding:0 4px" title="Hapus dari pilihan">✕</span>'
       +'</div>';
@@ -6953,7 +6955,6 @@ function _cekFgTypeSel(t){ _ckfgType=t; _cekFgTable(); }
 function _cekFgReset(){ _ckfgPlans={}; _ckfgPlansM={}; _ckfgOvr={}; _cekFgSelPaint(); _cekFgTable(); }
 
 function _cekFgRows(){
-  // Agregasi BOM lintas FG terpilih: rumus sama dgn _mpsMrpCalculate (type 'N', RM/PM)
   var selSet={}; _ckfgSels.forEach(function(c){ selSet[c]=true; });
   var plans={};  _ckfgSels.forEach(function(c){ plans[c]=_ckfgPlanOf(c); });
   var agg={}, qtyPc={}, names={}, perFg={};
@@ -6981,12 +6982,18 @@ function _cekFgRows(){
     var bd=fgs.map(function(f){ return f+': '+_ckfgFmt(perFg[c][f]); }).join('\n');
     return {code:c, name:nm, uom:m.uom||'', qtyPc:qtyPc[c], fgCnt:fgs.length, breakdown:bd,
       req:req, ovr:(_ckfgOvr[c]!=null), soh:soh, po:po, pr:pr, avail:avail,
-      diffPR:avail-req,      // Selisih Perlu PR: minus → PO+PR pun tak cukup, buat PR baru
-      diffDtg:soh-req};      // Selisih Perlu Datang: minus → stok fisik belum cukup, PO/PR harus datang
+      diffPR:avail-req, diffDtg:soh-req};
   });
 }
 
+function _ckfgViewBtns(){
+  var vb=function(v,l){ var on=_ckfgView===v; return '<button class="btn btn-sm'+(on?' btn-primary':'')+'" onclick="_cekFgViewSel(\''+v+'\')" style="font-size:10.5px">'+l+'</button>'; };
+  return vb('simple','📋 Ringkas')+vb('bulan','📅 Per Bulan');
+}
+function _cekFgViewSel(v){ _ckfgView=v; _cekFgTable(); }
+
 function _cekFgTable(){ if(_ckfgView==='bulan'){ _cekFgTableBulan(); return; } _cekFgTableSimple(); }
+
 function _cekFgTableSimple(){
   var el=document.getElementById('ckfg-result');
   if(!el || !_ckfgSels.length) return;
@@ -7000,11 +7007,12 @@ function _cekFgTableSimple(){
     return true;
   });
   var totalPlan=0; _ckfgSels.forEach(function(fg){ totalPlan+=_ckfgPlanOf(fg); });
-  var kurangPR =rows.filter(function(r){ return r.req>0 && r.diffPR<0; }).length;
-  var kurangDtg=rows.filter(function(r){ return r.req>0 && r.diffDtg<0; }).length;
+  var nPR=0,nDtg=0,nAman=0;
+  rows.forEach(function(r){ var s=_ckfgStatusOf(r); if(s==='Perlu PR')nPR++; else if(s==='Perlu Datang')nDtg++; else if(s==='Aman')nAman++; });
+  var _sRank={'Perlu PR':0,'Perlu Datang':1,'Aman':2,'-':3};
   rows.sort(function(a,b){
-    var ka=(a.req>0&&a.diffPR<0)?0:1, kb=(b.req>0&&b.diffPR<0)?0:1;
-    if(ka!==kb) return ka-kb;
+    var ra=_sRank[_ckfgStatusOf(a)], rb=_sRank[_ckfgStatusOf(b)];
+    if(ra!==rb) return ra-rb;
     return a.code.localeCompare(b.code);
   });
   var mOpts='<option value="__TOTAL__"'+(_ckfgMonth==='__TOTAL__'?' selected':'')+'>Total semua bulan</option>';
@@ -7029,11 +7037,11 @@ function _cekFgTableSimple(){
   h+='<button class="btn btn-sm" onclick="_cekFgExport()" style="font-size:11px">↓ Export Excel</button>';
   h+='</div>';
   h+='<div style="font-size:11px;margin-top:8px;font-weight:600"><span style="color:var(--text)">'+rows.length+' material'+(_ckfgType!=='ALL'?' ('+_ckfgType+')':'')+'</span>'
-    +' · <span style="color:'+(kurangPR?'var(--red)':'var(--green)')+'">'+(kurangPR? kurangPR+' perlu PR' : 'PR aman semua')+'</span>'
-    +' · <span style="color:'+(kurangDtg?'var(--amber)':'var(--green)')+'">'+(kurangDtg? kurangDtg+' perlu datang' : 'stok fisik cukup semua')+'</span></div>';
-  h+='<div style="font-size:10.5px;color:var(--muted);margin-top:2px">SOH = total semua gudang · <b>Perlu PR</b> = (SOH+PO+PR) − req: minus = harus buat PR baru · <b>Perlu Datang</b> = SOH − req: minus = stok fisik belum cukup, pastikan PO/PR datang'+(multi?' · hover #FG utk rincian per FG':'')+'. Simulasi — tidak mengubah Forecast.</div>';
+    +' · <span style="color:'+(nPR?'var(--red)':'var(--green)')+'">'+nPR+' Perlu PR</span>'
+    +' · <span style="color:'+(nDtg?'var(--amber)':'var(--green)')+'">'+nDtg+' Perlu Datang</span>'
+    +' · <span style="color:var(--green)">'+nAman+' Aman</span></div>';
+  h+='<div style="font-size:10.5px;color:var(--muted);margin-top:2px">SOH = total semua gudang · <b>Perlu PR</b> = PO+PR pun tak cukup, buat PR baru · <b>Perlu Datang</b> = cukup di kertas, tapi PO/PR harus benar-benar datang · <b>Aman</b> = stok fisik cukup'+(multi?' · hover #FG utk rincian per FG':'')+'. Simulasi — tidak mengubah Forecast.</div>';
   h+='</div>';
-  // Header STICKY: th position:sticky di dalam container ber-scroll
   var thS='position:sticky;top:0;z-index:5;padding:7px 9px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);background:var(--bg3);border-bottom:2px solid var(--border2);text-align:right;white-space:nowrap';
   var thL=thS.replace('text-align:right','text-align:left');
   h+='<div style="overflow:auto;max-height:68vh;border:1px solid var(--border);border-radius:10px"><table style="width:100%;border-collapse:separate;border-spacing:0;min-width:1120px">';
@@ -7042,9 +7050,14 @@ function _cekFgTableSimple(){
     +'<th style="'+thL+'">Nama'+colBtn('nama','Nama')+'</th>'
     +'<th style="'+thS+'">Tipe'+colBtn('tipe','Tipe')+'</th>'
     +'<th style="'+thS+'">UoM'+colBtn('uom','UoM')+'</th>'
-    +(multi?'<th style="'+thS+'">#FG</th>':'<th style="'+thS+'">Qty/pcs</th>')
-    +'<th style="'+thS+'">Requirement</th><th style="'+thS+'">SOH</th><th style="'+thS+'">PO Open</th><th style="'+thS+'">PR Open</th><th style="'+thS+'">Total Avail</th>'
-    +'<th style="'+thS+'">Selisih Perlu PR</th><th style="'+thS+'">Selisih Perlu Datang</th>'
+    +(multi?'<th style="'+thS+'">#FG'+colBtn('fg','#FG')+'</th>':'<th style="'+thS+'">Qty/pcs'+colBtn('fg','Qty/pcs')+'</th>')
+    +'<th style="'+thS+'">Requirement'+colBtn('req','Requirement')+'</th>'
+    +'<th style="'+thS+'">SOH'+colBtn('soh','SOH')+'</th>'
+    +'<th style="'+thS+'">PO Open'+colBtn('po','PO Open')+'</th>'
+    +'<th style="'+thS+'">PR Open'+colBtn('pr','PR Open')+'</th>'
+    +'<th style="'+thS+'">Total Avail'+colBtn('avail','Total Avail')+'</th>'
+    +'<th style="'+thS+'">Selisih Perlu PR'+colBtn('diffpr','Selisih Perlu PR')+'</th>'
+    +'<th style="'+thS+'">Selisih Perlu Datang'+colBtn('diffdtg','Selisih Perlu Datang')+'</th>'
     +'<th style="'+thS+'">Status'+colBtn('status','Status')+'</th></tr></thead><tbody>';
   var tdR='padding:6px 9px;font-size:11.5px;font-family:var(--mono);text-align:right;border-bottom:1px solid var(--border);white-space:nowrap';
   var tdL='padding:6px 9px;font-size:11.5px;border-bottom:1px solid var(--border)';
@@ -7052,32 +7065,200 @@ function _cekFgTableSimple(){
     var bg=i%2?'' :'background:var(--bg3)';
     var tipeTxt=/^3/.test(r.code)?'RM':'PM';
     var tipe=tipeTxt==='RM'?'<span class="badge b-blue" style="font-size:9px">RM</span>':'<span class="badge b-purple" style="font-size:9px">PM</span>';
-    var sttTxt = r.req<=0 ? '-' : (r.diffPR>=0 ? 'Aman' : 'Kurang');
-    var stt = r.req<=0 ? '<span style="color:var(--muted)">—</span>'
-      : (r.diffPR>=0 ? '<span class="badge b-green" style="font-size:9.5px">✓ Aman</span>'
-                     : '<span class="badge" style="font-size:9.5px;background:var(--red-bg);color:var(--red)">✗ Kurang '+_ckfgFmt(-r.diffPR)+'</span>');
+    var sttTxt=_ckfgStatusOf(r);
+    var stt = sttTxt==='-' ? '<span style="color:var(--muted)">—</span>'
+      : sttTxt==='Aman' ? '<span class="badge b-green" style="font-size:9.5px">✓ Aman</span>'
+      : sttTxt==='Perlu Datang' ? '<span class="badge b-amber" style="font-size:9.5px">⚠ Perlu Datang</span>'
+      : '<span class="badge" style="font-size:9.5px;background:var(--red-bg);color:var(--red)">✗ Perlu PR '+_ckfgFmt(-r.diffPR)+'</span>';
+    var fgVal = multi ? String(r.fgCnt) : String(Math.round(r.qtyPc*1000000)/1000000);
     var col5 = multi
-      ? '<td style="'+tdR+'" title="'+String(r.breakdown).replace(/"/g,'&quot;')+'">'+r.fgCnt+'</td>'
-      : '<td style="'+tdR+'">'+(Math.round(r.qtyPc*1000000)/1000000)+'</td>';
+      ? '<td data-col="fg" data-val="'+fgVal+'" style="'+tdR+'" title="'+String(r.breakdown).replace(/"/g,'&quot;')+'">'+r.fgCnt+'</td>'
+      : '<td data-col="fg" data-val="'+fgVal+'" style="'+tdR+'">'+fgVal+'</td>';
     h+='<tr style="'+bg+'">'
       +'<td data-col="kode" data-val="'+r.code+'" style="'+tdL+';font-family:var(--mono);white-space:nowrap">'+r.code+'</td>'
       +'<td data-col="nama" data-val="'+String(r.name).replace(/"/g,'&quot;')+'" style="'+tdL+'">'+String(r.name).replace(/</g,'&lt;')+'</td>'
       +'<td data-col="tipe" data-val="'+tipeTxt+'" style="'+tdR.replace('text-align:right','text-align:center')+'">'+tipe+'</td>'
       +'<td data-col="uom" data-val="'+(r.uom||'')+'" style="'+tdR+'">'+r.uom+'</td>'
       +col5
-      +'<td style="'+tdR+'"><input type="number" step="any" value="'+(Math.round(r.req*100)/100)+'" onchange="_cekFgReqEdit(\''+r.code+'\',this.value)" style="width:110px;text-align:right;padding:3px 6px;font-size:11.5px;font-family:var(--mono);border:1px solid '+(r.ovr?'var(--amber)':'var(--border2)')+';border-radius:5px;background:'+(r.ovr?'var(--amber-bg)':'var(--bg2)')+';color:'+(r.ovr?'var(--amber)':'var(--text)')+'"></td>'
-      +'<td style="'+tdR+'">'+_ckfgFmt(r.soh)+'</td>'
-      +'<td style="'+tdR+';color:var(--accent)">'+(r.po?_ckfgFmt(r.po):'—')+'</td>'
-      +'<td style="'+tdR+';color:var(--teal)">'+(r.pr?_ckfgFmt(r.pr):'—')+'</td>'
-      +'<td style="'+tdR+';font-weight:700">'+_ckfgFmt(r.avail)+'</td>'
-      +'<td style="'+tdR+';font-weight:700;color:'+(r.diffPR<0?'var(--red)':'var(--green)')+'">'+_ckfgFmt(r.diffPR)+'</td>'
-      +'<td style="'+tdR+';font-weight:700;color:'+(r.diffDtg<0?'var(--amber)':'var(--green)')+'">'+_ckfgFmt(r.diffDtg)+'</td>'
+      +'<td data-col="req" data-val="'+_ckfgFmt(r.req)+'" style="'+tdR+'"><input type="number" step="any" value="'+(Math.round(r.req*100)/100)+'" onchange="_cekFgReqEdit(\''+r.code+'\',this.value)" style="width:110px;text-align:right;padding:3px 6px;font-size:11.5px;font-family:var(--mono);border:1px solid '+(r.ovr?'var(--amber)':'var(--border2)')+';border-radius:5px;background:'+(r.ovr?'var(--amber-bg)':'var(--bg2)')+';color:'+(r.ovr?'var(--amber)':'var(--text)')+'"></td>'
+      +'<td data-col="soh" data-val="'+_ckfgFmt(r.soh)+'" style="'+tdR+'">'+_ckfgFmt(r.soh)+'</td>'
+      +'<td data-col="po" data-val="'+_ckfgFmt(r.po)+'" style="'+tdR+';color:var(--accent)">'+(r.po?_ckfgFmt(r.po):'—')+'</td>'
+      +'<td data-col="pr" data-val="'+_ckfgFmt(r.pr)+'" style="'+tdR+';color:var(--teal)">'+(r.pr?_ckfgFmt(r.pr):'—')+'</td>'
+      +'<td data-col="avail" data-val="'+_ckfgFmt(r.avail)+'" style="'+tdR+';font-weight:700">'+_ckfgFmt(r.avail)+'</td>'
+      +'<td data-col="diffpr" data-val="'+_ckfgFmt(r.diffPR)+'" style="'+tdR+';font-weight:700;color:'+(r.diffPR<0?'var(--red)':'var(--green)')+'">'+_ckfgFmt(r.diffPR)+'</td>'
+      +'<td data-col="diffdtg" data-val="'+_ckfgFmt(r.diffDtg)+'" style="'+tdR+';font-weight:700;color:'+(r.diffDtg<0?'var(--amber)':'var(--green)')+'">'+_ckfgFmt(r.diffDtg)+'</td>'
       +'<td data-col="status" data-val="'+sttTxt+'" style="'+tdR.replace('text-align:right','text-align:center')+'">'+stt+'</td>'
       +'</tr>';
   });
   h+='</tbody></table></div>';
   el.innerHTML=h;
   _ckfgApplyColFilter(); _ckfgUpdateColBtns();
+}
+
+// ── Plan FG per bulan: override _ckfgPlansM, default MPS. Murni sandbox. ──────
+function _ckfgPlanMOf(fg,m){
+  if(_ckfgPlansM[fg] && _ckfgPlansM[fg][m]!=null) return _ckfgPlansM[fg][m];
+  var mps=(typeof _mpsData!=='undefined'&&_mpsData)?(_mpsData[fg]||null):null;
+  return mps ? (mps[m]||0) : 0;
+}
+function _cekFgPlanMEdit(fg,m,v){
+  var s=String(v).trim();
+  if(!_ckfgPlansM[fg]) _ckfgPlansM[fg]={};
+  if(s===''){ delete _ckfgPlansM[fg][m]; if(!Object.keys(_ckfgPlansM[fg]).length) delete _ckfgPlansM[fg]; }
+  else { var n=parseFloat(s.replace(',','.')); _ckfgPlansM[fg][m]=isNaN(n)?0:n; }
+  _cekFgTable();
+}
+
+// Slot bulan horizon → 'yyyymm' utk bucket PO/PR by tanggal request (DD/MM/YYYY).
+// Lebih awal dari horizon → bucket bulan pertama (overdue = datang sekarang);
+// lebih akhir dari horizon → bucket bulan terakhir.
+function _ckfgMonthSlots(months){
+  var now=new Date(), curY=now.getFullYear(), curM=now.getMonth()+1;
+  var slots=[], prevNum=0, y=null;
+  months.forEach(function(m,i){
+    var num=_CKFG_MONUM[m]||1;
+    if(i===0){ y=(num >= curM-6) ? curY : curY+1; }
+    else if(num < prevNum){ y++; }
+    prevNum=num;
+    slots.push(String(y)+String(num).padStart(2,'0'));
+  });
+  return slots;
+}
+function _ckfgBucketByDate(list, months, slots, getQty, getDate, code){
+  var out={}; months.forEach(function(m){ out[m]=0; });
+  (list||[]).forEach(function(o){
+    if(o.itemCode!==code) return;
+    var q=getQty(o)||0; if(!q) return;
+    var d=getDate(o)||'', idx=0;
+    var p=String(d).split('/');
+    if(p.length===3){
+      var ym=p[2]+String(parseInt(p[1],10)).padStart(2,'0');
+      if(ym<=slots[0]) idx=0;
+      else if(ym>=slots[slots.length-1]) idx=slots.length-1;
+      else { idx=slots.indexOf(ym); if(idx<0){ idx=0; for(var i=0;i<slots.length;i++){ if(slots[i]<=ym) idx=i; } } }
+    }
+    out[months[idx]]+=q;
+  });
+  return out;
+}
+
+// ── Tampilan Per Bulan ala Forecast: kartu per material, BARIS × bulan ────────
+function _cekFgTableBulan(){
+  var el=document.getElementById('ckfg-result');
+  if(!el || !_ckfgSels.length) return;
+  if(!_bomData || !_bomData.length){ el.innerHTML='<div style="color:var(--amber)">BOM belum ada di laptop ini.</div>'; return; }
+  var months=(_mpsActiveMonths||[]).slice();
+  if(!months.length){ el.innerHTML='<div style="color:var(--amber)">Bulan aktif MPS tidak diketahui — muat MPS dulu.</div>'; return; }
+  var slots=_ckfgMonthSlots(months);
+  var selSet={}; _ckfgSels.forEach(function(c){ selSet[c]=1; });
+  var fgRm={}, names={};
+  (_bomData||[]).forEach(function(b){
+    if(!b || !selSet[b.fg] || b.type!=='N' || !/^[34]/.test(b.rm||'')) return;
+    if(!fgRm[b.fg]) fgRm[b.fg]={};
+    fgRm[b.fg][b.rm]=(fgRm[b.fg][b.rm]||0)+(b.qty||0);
+    if(b.rmDesc && !names[b.rm]) names[b.rm]=b.rmDesc;
+  });
+  var fBtn=function(t,lbl){
+    var on=_ckfgType===t;
+    return '<button class="btn btn-sm'+(on?' btn-primary':'')+'" onclick="_cekFgTypeSel(\''+t+'\')" style="font-size:10.5px">'+lbl+'</button>';
+  };
+  var anyEdit=Object.keys(_ckfgPlansM).length>0;
+  var h='';
+  h+='<div style="background:var(--bg3);border-radius:10px;padding:12px 16px;margin-bottom:12px">';
+  h+='<div style="font-size:13px;font-weight:700;margin-bottom:8px">📅 Per Bulan — '+_ckfgSels.length+' FG · '+months.length+' bulan'+(anyEdit?' · <span style="color:var(--amber)">plan diedit (≠ MPS)</span>':'')+'</div>';
+  h+='<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end">';
+  h+='<div><div style="font-size:10.5px;color:var(--muted);margin-bottom:3px">Tampilan</div><div style="display:flex;gap:5px">'+_ckfgViewBtns()+'</div></div>';
+  h+='<div><div style="font-size:10.5px;color:var(--muted);margin-bottom:3px">Tipe material</div><div style="display:flex;gap:5px">'+fBtn('ALL','RM + PM')+fBtn('RM','RM')+fBtn('PM','PM')+'</div></div>';
+  h+='<button class="btn btn-sm" onclick="_cekFgReset()" style="font-size:11px">↺ Reset ke MPS</button>';
+  h+='<button class="btn btn-sm" onclick="_cekFgExport()" style="font-size:11px">↓ Export Excel</button>';
+  h+='</div>';
+  h+='<div style="font-size:10.5px;color:var(--muted);margin-top:8px">Edit plan FG per bulan → kartu material di bawah menghitung ulang. Stock awal = SOH total semua gudang; OSPO/OSPR di-bucket per bulan dari tanggal request PO/PR (lewat waktu → bulan pertama). Simulasi — tidak mengubah Forecast/MPS.</div>';
+  h+='</div>';
+
+  var thS='padding:6px 8px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);background:var(--bg3);border-bottom:2px solid var(--border2);text-align:right;white-space:nowrap';
+  var thL=thS.replace('text-align:right','text-align:left');
+  var tdR='padding:5px 8px;font-size:11.5px;font-family:var(--mono);text-align:right;border-bottom:1px solid var(--border);white-space:nowrap';
+  var tdLb='padding:5px 8px;font-size:10px;font-weight:700;letter-spacing:.04em;color:var(--muted);border-bottom:1px solid var(--border);white-space:nowrap';
+
+  // ── Plan FG per bulan (editable) ──
+  h+='<div style="font-size:11.5px;font-weight:700;color:var(--muted);margin:2px 0 6px">PLAN FG (pcs) — bisa diedit per bulan</div>';
+  h+='<div style="overflow:auto;max-height:34vh;border:1px solid var(--border);border-radius:10px;margin-bottom:16px"><table style="border-collapse:separate;border-spacing:0;min-width:'+(380+months.length*96)+'px">';
+  h+='<thead><tr><th style="'+thL+';position:sticky;top:0;left:0;z-index:7">FG</th><th style="'+thL+';position:sticky;top:0;z-index:5">Nama</th>';
+  months.forEach(function(m){ h+='<th style="'+thS+';position:sticky;top:0;z-index:5">'+(_CKFG_MOID[m]||m)+'</th>'; });
+  h+='<th style="'+thS+';position:sticky;top:0;z-index:5">Total</th></tr></thead><tbody>';
+  _ckfgSels.forEach(function(fg,i){
+    var bg=i%2?'var(--bg2)':'var(--bg3)';
+    var tot=0;
+    h+='<tr style="background:'+bg+'">'
+      +'<td style="'+tdR.replace('text-align:right','text-align:left')+';font-family:var(--mono);color:var(--teal);position:sticky;left:0;z-index:2;background:'+bg+'">'+fg+'</td>'
+      +'<td style="padding:5px 8px;font-size:11.5px;border-bottom:1px solid var(--border);min-width:160px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+String(_ckfgFgName(fg)).replace(/"/g,'&quot;')+'">'+String(_ckfgFgName(fg)).replace(/</g,'&lt;')+'</td>';
+    months.forEach(function(m){
+      var v=_ckfgPlanMOf(fg,m); tot+=v;
+      var ov=(_ckfgPlansM[fg] && _ckfgPlansM[fg][m]!=null);
+      h+='<td style="'+tdR+'"><input type="number" step="any" value="'+v+'" onchange="_cekFgPlanMEdit(\''+fg+'\',\''+m+'\',this.value)" style="width:82px;text-align:right;padding:3px 5px;font-size:11px;font-family:var(--mono);border:1px solid '+(ov?'var(--amber)':'var(--border2)')+';border-radius:5px;background:'+(ov?'var(--amber-bg)':'var(--bg2)')+';color:'+(ov?'var(--amber)':'var(--text)')+'"></td>';
+    });
+    h+='<td style="'+tdR+';font-weight:700">'+_ckfgFmt(tot)+'</td></tr>';
+  });
+  h+='</tbody></table></div>';
+
+  // ── Kartu per material ala Forecast ──
+  var md=STATE.masterData||{}, rn=STATE.realNameData||{};
+  var rmSet={};
+  Object.keys(fgRm).forEach(function(fg){ Object.keys(fgRm[fg]).forEach(function(rm){ rmSet[rm]=1; }); });
+  var rmCodes=Object.keys(rmSet).filter(function(c){
+    if(_ckfgType==='RM') return /^3/.test(c);
+    if(_ckfgType==='PM') return /^4/.test(c);
+    return true;
+  });
+  var cards=rmCodes.map(function(c){
+    var m=md[c]||{};
+    var nm=(_isAdmin && _rmDisplayMode==='realname' && rn[c]) ? rn[c] : (m.desc||names[c]||c);
+    var st=(STATE.stockData||{})[c]||{};
+    var soh=(st.btg||0)+(st.sng||0)+(st.jtk||0)+(st.pjt||0);
+    var ospoM=_ckfgBucketByDate(STATE.poData, months, slots, function(o){return o.openQty;}, function(o){return o.prReqDate;}, c);
+    var osprM=_ckfgBucketByDate((typeof _OSPR_DISABLED!=='undefined'&&_OSPR_DISABLED)?[]:(STATE.osprData||[]), months, slots, function(o){return o.openQty;}, function(o){return o.prReqDate;}, c);
+    var reqM={}, stockM={}, prev=soh, firstNeg=-1;
+    months.forEach(function(mo,mi){
+      var v=0; _ckfgSels.forEach(function(fg){ var q=(fgRm[fg]||{})[c]; if(q) v+=_ckfgPlanMOf(fg,mo)*q; });
+      reqM[mo]=v;
+      prev=prev+(ospoM[mo]||0)+(osprM[mo]||0)-v;
+      stockM[mo]=prev;
+      if(prev<0 && firstNeg<0) firstNeg=mi;
+    });
+    return {code:c,name:nm,uom:m.uom||'',soh:soh,reqM:reqM,ospoM:ospoM,osprM:osprM,stockM:stockM,firstNeg:firstNeg};
+  });
+  cards.sort(function(a,b){
+    var ka=a.firstNeg<0?99:a.firstNeg, kb=b.firstNeg<0?99:b.firstNeg;
+    if(ka!==kb) return ka-kb;
+    return a.code.localeCompare(b.code);
+  });
+  var nNeg=cards.filter(function(cd){ return cd.firstNeg>=0; }).length;
+  h+='<div style="font-size:11.5px;font-weight:700;color:var(--muted);margin:2px 0 8px">MATERIAL — '+cards.length+' kartu · <span style="color:'+(nNeg?'var(--red)':'var(--green)')+'">'+(nNeg? nNeg+' material stock-nya minus di salah satu bulan':'semua bulan aman')+'</span></div>';
+  cards.forEach(function(cd){
+    var tipe=/^3/.test(cd.code)?'<span class="badge b-blue" style="font-size:9px">RM</span>':'<span class="badge b-purple" style="font-size:9px">PM</span>';
+    h+='<div style="border:1px solid '+(cd.firstNeg>=0?'rgba(220,38,38,.4)':'var(--border)')+';border-radius:10px;margin-bottom:12px;overflow:hidden">';
+    h+='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:var(--bg3);border-bottom:1px solid var(--border)">'
+      +'<span style="font-family:var(--mono);color:var(--teal);font-weight:700">'+cd.code+'</span>'+tipe
+      +'<span style="font-size:12px;flex:1;min-width:160px">'+String(cd.name).replace(/</g,'&lt;')+'</span>'
+      +'<span style="font-size:10.5px;color:var(--muted)">SOH <b style="color:var(--text)">'+_ckfgFmt(cd.soh)+'</b> '+cd.uom+'</span>'
+      +(cd.firstNeg>=0?'<span class="badge" style="font-size:9.5px;background:var(--red-bg);color:var(--red)">✗ minus mulai '+(_CKFG_MOID[months[cd.firstNeg]]||months[cd.firstNeg])+'</span>':'<span class="badge b-green" style="font-size:9.5px">✓ Aman</span>')
+      +'</div>';
+    h+='<div style="overflow:auto"><table style="border-collapse:separate;border-spacing:0;min-width:'+(150+months.length*92)+'px;width:100%">';
+    h+='<thead><tr><th style="'+thL+'">BARIS</th>';
+    months.forEach(function(m){ h+='<th style="'+thS+'">'+(_CKFG_MOID[m]||m)+'</th>'; });
+    h+='</tr></thead><tbody>';
+    var row=function(lbl, getv, fmt){
+      h+='<tr><td style="'+tdLb+'">'+lbl+'</td>';
+      months.forEach(function(m){ h+=fmt(getv(m), m); });
+      h+='</tr>';
+    };
+    row('REQUIREMENT', function(m){return cd.reqM[m];}, function(v){ return '<td style="'+tdR+(v?'':';color:var(--muted)')+'">'+(v?_ckfgFmt(v):'—')+'</td>'; });
+    row('OSPO', function(m){return cd.ospoM[m];}, function(v){ return '<td style="'+tdR+';color:var(--accent)'+(v?';font-weight:700':'')+'">'+(v?_ckfgFmt(v):'—')+'</td>'; });
+    row('OSPR', function(m){return cd.osprM[m];}, function(v){ return '<td style="'+tdR+';color:var(--teal)'+(v?';font-weight:700':'')+'">'+(v?_ckfgFmt(v):'—')+'</td>'; });
+    row('STOCK (ENDING)', function(m){return cd.stockM[m];}, function(v){ return '<td style="'+tdR+';font-weight:700;color:'+(v<0?'var(--red)':'var(--green)')+'">'+_ckfgFmt(v)+'</td>'; });
+    h+='</tbody></table></div></div>';
+  });
+  el.innerHTML=h;
 }
 
 // ── Filter dropdown per kolom (ala tabel NPD, namespace _ckfg) ────────────────
@@ -7108,7 +7289,12 @@ function _ckfgColMenu(key, label, btn){
   var cells=host.querySelectorAll('td[data-col="'+key+'"]');
   var vals={};
   Array.prototype.forEach.call(cells, function(td){ var v=td.getAttribute('data-val')||''; if(!(v in vals)) vals[v]=v; });
-  var keysArr=Object.keys(vals); keysArr.sort();
+  var keysArr=Object.keys(vals);
+  // Sort numerik kalau mayoritas nilai angka (format id-ID: titik ribuan, koma desimal)
+  var _numCnt=0,_tot=0;
+  keysArr.forEach(function(v){ if(v!==''){ _tot++; var n=parseFloat(String(v).replace(/\./g,'').replace(/,/g,'.')); if(!isNaN(n)&&/[0-9]/.test(v)) _numCnt++; } });
+  if(_tot>0 && _numCnt/_tot>=0.6){ keysArr.sort(function(a,b){ var na=parseFloat(String(a).replace(/\./g,'').replace(/,/g,'.'))||0, nb=parseFloat(String(b).replace(/\./g,'').replace(/,/g,'.'))||0; return na-nb; }); }
+  else keysArr.sort();
   var sel=_ckfgColSel[key];
   var listHtml=keysArr.map(function(v){
     var checked=(!sel || sel.indexOf(v)>=0);
@@ -7143,208 +7329,23 @@ function _ckfgColAll(key, on){
   _ckfgColTick(key);
 }
 
-// ── Tab tampilan: Ringkas (1 skenario) vs Per Bulan (horizon ala Forecast) ────
-function _ckfgViewBtns(){
-  var vb=function(v,l){ var on=_ckfgView===v; return '<button class="btn btn-sm'+(on?' btn-primary':'')+'" onclick="_cekFgViewSel(\''+v+'\')" style="font-size:10.5px">'+l+'</button>'; };
-  return vb('simple','📋 Ringkas')+vb('bulan','📅 Per Bulan');
-}
-function _cekFgViewSel(v){ _ckfgView=v; _cekFgTable(); }
-
-// Plan FG per bulan: override _ckfgPlansM, default MPS. Murni sandbox — tidak
-// pernah ditulis balik ke _mpsData/Forecast.
-function _ckfgPlanMOf(fg,m){
-  if(_ckfgPlansM[fg] && _ckfgPlansM[fg][m]!=null) return _ckfgPlansM[fg][m];
-  var mps=(typeof _mpsData!=='undefined'&&_mpsData)?(_mpsData[fg]||null):null;
-  return mps ? (mps[m]||0) : 0;
-}
-function _cekFgPlanMEdit(fg,m,v){
-  var s=String(v).trim();
-  if(!_ckfgPlansM[fg]) _ckfgPlansM[fg]={};
-  if(s===''){ delete _ckfgPlansM[fg][m]; if(!Object.keys(_ckfgPlansM[fg]).length) delete _ckfgPlansM[fg]; }
-  else { var n=parseFloat(s.replace(',','.')); _ckfgPlansM[fg][m]=isNaN(n)?0:n; }
-  _cekFgTable();
-}
-
-// ── Tampilan Per Bulan: plan FG editable per bulan + requirement material/bulan ─
-function _cekFgTableBulan(){
-  var el=document.getElementById('ckfg-result');
-  if(!el || !_ckfgSels.length) return;
-  if(!_bomData || !_bomData.length){ el.innerHTML='<div style="color:var(--amber)">BOM belum ada di laptop ini.</div>'; return; }
-  var months=(_mpsActiveMonths||[]).slice();
-  if(!months.length){ el.innerHTML='<div style="color:var(--amber)">Bulan aktif MPS tidak diketahui — muat MPS dulu.</div>'; return; }
-  // qty/pcs per FG→RM (rumus sama dgn Hitung MRP: type N, RM/PM)
-  var selSet={}; _ckfgSels.forEach(function(c){ selSet[c]=1; });
-  var fgRm={}, names={};
-  (_bomData||[]).forEach(function(b){
-    if(!b || !selSet[b.fg] || b.type!=='N' || !/^[34]/.test(b.rm||'')) return;
-    if(!fgRm[b.fg]) fgRm[b.fg]={};
-    fgRm[b.fg][b.rm]=(fgRm[b.fg][b.rm]||0)+(b.qty||0);
-    if(b.rmDesc && !names[b.rm]) names[b.rm]=b.rmDesc;
-  });
-  var fBtn=function(t,lbl){
-    var on=_ckfgType===t;
-    return '<button class="btn btn-sm'+(on?' btn-primary':'')+'" onclick="_cekFgTypeSel(\''+t+'\')" style="font-size:10.5px">'+lbl+'</button>';
-  };
-  var anyEdit=Object.keys(_ckfgPlansM).length>0;
-  var h='';
-  h+='<div style="background:var(--bg3);border-radius:10px;padding:12px 16px;margin-bottom:12px">';
-  h+='<div style="font-size:13px;font-weight:700;margin-bottom:8px">📅 Per Bulan — '+_ckfgSels.length+' FG · '+months.length+' bulan'+(anyEdit?' · <span style="color:var(--amber)">plan diedit (≠ MPS)</span>':'')+'</div>';
-  h+='<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end">';
-  h+='<div><div style="font-size:10.5px;color:var(--muted);margin-bottom:3px">Tampilan</div><div style="display:flex;gap:5px">'+_ckfgViewBtns()+'</div></div>';
-  h+='<div><div style="font-size:10.5px;color:var(--muted);margin-bottom:3px">Tipe material</div><div style="display:flex;gap:5px">'+fBtn('ALL','RM + PM')+fBtn('RM','RM')+fBtn('PM','PM')+'</div></div>';
-  h+='<button class="btn btn-sm" onclick="_cekFgReset()" style="font-size:11px">↺ Reset ke MPS</button>';
-  h+='<button class="btn btn-sm" onclick="_cekFgExport()" style="font-size:11px">↓ Export Excel</button>';
-  h+='</div>';
-  h+='<div style="font-size:10.5px;color:var(--muted);margin-top:8px">Edit angka plan FG per bulan → requirement material per bulan otomatis menyesuaikan (sel oranye = ≠ MPS). <b>Perlu PR</b> = (SOH+PO+PR) − Total · <b>Perlu Datang</b> = SOH − Total. Simulasi — tidak mengubah Forecast/MPS.</div>';
-  h+='</div>';
-
-  var thS='position:sticky;top:0;z-index:5;padding:7px 9px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);background:var(--bg3);border-bottom:2px solid var(--border2);text-align:right;white-space:nowrap';
-  var thL=thS.replace('text-align:right','text-align:left');
-  var thL0=thL+';left:0;z-index:7';
-  var tdR='padding:5px 8px;font-size:11.5px;font-family:var(--mono);text-align:right;border-bottom:1px solid var(--border);white-space:nowrap';
-  var tdL='padding:5px 8px;font-size:11.5px;border-bottom:1px solid var(--border)';
-
-  // ── Tabel 1: Plan FG per bulan (editable) ──────────────────────────────────
-  h+='<div style="font-size:11.5px;font-weight:700;color:var(--muted);margin:2px 0 6px">PLAN FG (pcs) — bisa diedit per bulan</div>';
-  h+='<div style="overflow:auto;max-height:34vh;border:1px solid var(--border);border-radius:10px;margin-bottom:14px"><table style="border-collapse:separate;border-spacing:0;min-width:'+(380+months.length*96)+'px">';
-  h+='<thead><tr><th style="'+thL0+'">FG</th><th style="'+thL+'">Nama</th>';
-  months.forEach(function(m){ h+='<th style="'+thS+'">'+(_CKFG_MOID[m]||m)+'</th>'; });
-  h+='<th style="'+thS+'">Total</th></tr></thead><tbody>';
-  _ckfgSels.forEach(function(fg,i){
-    var bg=i%2?'var(--bg2)':'var(--bg3)';
-    var tot=0;
-    h+='<tr style="background:'+bg+'">'
-      +'<td style="'+tdL+';font-family:var(--mono);color:var(--teal);white-space:nowrap;position:sticky;left:0;z-index:2;background:'+bg+'">'+fg+'</td>'
-      +'<td style="'+tdL+';min-width:170px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+String(_ckfgFgName(fg)).replace(/"/g,'&quot;')+'">'+String(_ckfgFgName(fg)).replace(/</g,'&lt;')+'</td>';
-    months.forEach(function(m){
-      var v=_ckfgPlanMOf(fg,m); tot+=v;
-      var ov=(_ckfgPlansM[fg] && _ckfgPlansM[fg][m]!=null);
-      h+='<td style="'+tdR+'"><input type="number" step="any" value="'+v+'" onchange="_cekFgPlanMEdit(\''+fg+'\',\''+m+'\',this.value)" style="width:82px;text-align:right;padding:3px 5px;font-size:11px;font-family:var(--mono);border:1px solid '+(ov?'var(--amber)':'var(--border2)')+';border-radius:5px;background:'+(ov?'var(--amber-bg)':'var(--bg2)')+';color:'+(ov?'var(--amber)':'var(--text)')+'"></td>';
-    });
-    h+='<td style="'+tdR+';font-weight:700">'+_ckfgFmt(tot)+'</td></tr>';
-  });
-  h+='</tbody></table></div>';
-
-  // ── Tabel 2: Requirement material per bulan ────────────────────────────────
-  var md=STATE.masterData||{}, rn=STATE.realNameData||{};
-  var poBy={}; (STATE.poData||[]).forEach(function(p){ if(p.itemCode) poBy[p.itemCode]=(poBy[p.itemCode]||0)+(p.openQty||0); });
-  var rmSet={};
-  Object.keys(fgRm).forEach(function(fg){ Object.keys(fgRm[fg]).forEach(function(rm){ rmSet[rm]=1; }); });
-  var rmCodes=Object.keys(rmSet).filter(function(c){
-    if(_ckfgType==='RM') return /^3/.test(c);
-    if(_ckfgType==='PM') return /^4/.test(c);
-    return true;
-  });
-  var rows=rmCodes.map(function(c){
-    var m=md[c]||{};
-    var nm=(_isAdmin && _rmDisplayMode==='realname' && rn[c]) ? rn[c] : (m.desc||names[c]||c);
-    var st=(STATE.stockData||{})[c]||{};
-    var soh=(st.btg||0)+(st.sng||0)+(st.jtk||0)+(st.pjt||0);
-    var po=poBy[c]||0, pr=(STATE.osprByItem||{})[c]||0;
-    var reqM={}, tot=0;
-    months.forEach(function(mo){
-      var v=0;
-      _ckfgSels.forEach(function(fg){ var q=(fgRm[fg]||{})[c]; if(q) v+=_ckfgPlanMOf(fg,mo)*q; });
-      reqM[mo]=v; tot+=v;
-    });
-    return {code:c,name:nm,uom:m.uom||'',soh:soh,po:po,pr:pr,reqM:reqM,tot:tot,
-      diffPR:(soh+po+pr)-tot, diffDtg:soh-tot};
-  });
-  var kurangPR=rows.filter(function(r){ return r.tot>0 && r.diffPR<0; }).length;
-  rows.sort(function(a,b){
-    var ka=(a.tot>0&&a.diffPR<0)?0:1, kb=(b.tot>0&&b.diffPR<0)?0:1;
-    if(ka!==kb) return ka-kb;
-    return a.code.localeCompare(b.code);
-  });
-  h+='<div style="font-size:11.5px;font-weight:700;color:var(--muted);margin:2px 0 6px">REQUIREMENT MATERIAL per bulan — '+rows.length+' material · <span style="color:'+(kurangPR?'var(--red)':'var(--green)')+'">'+(kurangPR? kurangPR+' perlu PR (vs total horizon)':'semua aman vs total horizon')+'</span></div>';
-  h+='<div style="overflow:auto;max-height:60vh;border:1px solid var(--border);border-radius:10px"><table style="border-collapse:separate;border-spacing:0;min-width:'+(640+months.length*92)+'px">';
-  h+='<thead><tr><th style="'+thL0+'">Kode</th><th style="'+thL+'">Nama</th><th style="'+thS+'">Tipe</th><th style="'+thS+'">UoM</th>';
-  months.forEach(function(m){ h+='<th style="'+thS+'">'+(_CKFG_MOID[m]||m)+'</th>'; });
-  h+='<th style="'+thS+'">Total</th><th style="'+thS+'">SOH</th><th style="'+thS+'">PO+PR</th><th style="'+thS+'">Perlu PR</th><th style="'+thS+'">Perlu Datang</th></tr></thead><tbody>';
-  rows.forEach(function(r,i){
-    var bg=i%2?'var(--bg2)':'var(--bg3)';
-    var tipe=/^3/.test(r.code)?'<span class="badge b-blue" style="font-size:9px">RM</span>':'<span class="badge b-purple" style="font-size:9px">PM</span>';
-    h+='<tr style="background:'+bg+'">'
-      +'<td style="'+tdL+';font-family:var(--mono);white-space:nowrap;position:sticky;left:0;z-index:2;background:'+bg+'">'+r.code+'</td>'
-      +'<td style="'+tdL+';min-width:150px;max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+String(r.name).replace(/"/g,'&quot;')+'">'+String(r.name).replace(/</g,'&lt;')+'</td>'
-      +'<td style="'+tdR.replace('text-align:right','text-align:center')+'">'+tipe+'</td>'
-      +'<td style="'+tdR+'">'+r.uom+'</td>';
-    months.forEach(function(m){ var v=r.reqM[m]; h+='<td style="'+tdR+(v?'':';color:var(--muted)')+'">'+(v?_ckfgFmt(v):'—')+'</td>'; });
-    h+='<td style="'+tdR+';font-weight:700">'+_ckfgFmt(r.tot)+'</td>'
-      +'<td style="'+tdR+'">'+_ckfgFmt(r.soh)+'</td>'
-      +'<td style="'+tdR+';color:var(--accent)">'+((r.po+r.pr)?_ckfgFmt(r.po+r.pr):'—')+'</td>'
-      +'<td style="'+tdR+';font-weight:700;color:'+(r.diffPR<0?'var(--red)':'var(--green)')+'">'+_ckfgFmt(r.diffPR)+'</td>'
-      +'<td style="'+tdR+';font-weight:700;color:'+(r.diffDtg<0?'var(--amber)':'var(--green)')+'">'+_ckfgFmt(r.diffDtg)+'</td>'
-      +'</tr>';
-  });
-  h+='</tbody></table></div>';
-  el.innerHTML=h;
-}
-
-function _cekFgExportBulan(){
-  if(!_ckfgSels.length){ toast('Pilih FG dulu','err'); return; }
-  if(typeof XLSX==='undefined'){ toast('XLSX library tidak tersedia','err'); return; }
-  var months=(_mpsActiveMonths||[]).slice();
-  var moLbl=months.map(function(m){ return _CKFG_MOID[m]||m; });
-  var aoa=[['PLAN FG (pcs)'],['FG','Nama'].concat(moLbl).concat(['Total'])];
-  _ckfgSels.forEach(function(fg){
-    var line=[fg,_ckfgFgName(fg)], tot=0;
-    months.forEach(function(m){ var v=_ckfgPlanMOf(fg,m); tot+=v; line.push(v); });
-    line.push(tot); aoa.push(line);
-  });
-  aoa.push([]);
-  // Rebuild rows (logika sama dgn _cekFgTableBulan)
-  var selSet={}; _ckfgSels.forEach(function(c){ selSet[c]=1; });
-  var fgRm={}, names={};
-  (_bomData||[]).forEach(function(b){
-    if(!b || !selSet[b.fg] || b.type!=='N' || !/^[34]/.test(b.rm||'')) return;
-    if(!fgRm[b.fg]) fgRm[b.fg]={};
-    fgRm[b.fg][b.rm]=(fgRm[b.fg][b.rm]||0)+(b.qty||0);
-    if(b.rmDesc && !names[b.rm]) names[b.rm]=b.rmDesc;
-  });
-  var md=STATE.masterData||{}, rn=STATE.realNameData||{};
-  var poBy={}; (STATE.poData||[]).forEach(function(p){ if(p.itemCode) poBy[p.itemCode]=(poBy[p.itemCode]||0)+(p.openQty||0); });
-  var rmSet={}; Object.keys(fgRm).forEach(function(fg){ Object.keys(fgRm[fg]).forEach(function(rm){ rmSet[rm]=1; }); });
-  var rmCodes=Object.keys(rmSet).filter(function(c){
-    if(_ckfgType==='RM') return /^3/.test(c);
-    if(_ckfgType==='PM') return /^4/.test(c);
-    return true;
-  }).sort();
-  aoa.push(['REQUIREMENT MATERIAL']);
-  aoa.push(['Kode','Nama','Tipe','UoM'].concat(moLbl).concat(['Total','SOH','PO Open','PR Open','Selisih Perlu PR','Selisih Perlu Datang']));
-  rmCodes.forEach(function(c){
-    var m=md[c]||{};
-    var nm=(_isAdmin && _rmDisplayMode==='realname' && rn[c]) ? rn[c] : (m.desc||names[c]||c);
-    var st=(STATE.stockData||{})[c]||{};
-    var soh=(st.btg||0)+(st.sng||0)+(st.jtk||0)+(st.pjt||0);
-    var po=poBy[c]||0, pr=(STATE.osprByItem||{})[c]||0;
-    var line=[c,nm,/^3/.test(c)?'RM':'PM',m.uom||''], tot=0;
-    months.forEach(function(mo){
-      var v=0; _ckfgSels.forEach(function(fg){ var q=(fgRm[fg]||{})[c]; if(q) v+=_ckfgPlanMOf(fg,mo)*q; });
-      tot+=v; line.push(Math.round(v*100)/100);
-    });
-    line.push(Math.round(tot*100)/100, Math.round(soh*100)/100, Math.round(po*100)/100, Math.round(pr*100)/100, Math.round(((soh+po+pr)-tot)*100)/100, Math.round((soh-tot)*100)/100);
-    aoa.push(line);
-  });
-  var wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Cek by FG per Bulan');
-  XLSX.writeFile(wb, 'cek_by_fg_perbulan_'+(_ckfgSels.length)+'FG.xlsx');
-  toast('Export ✓','ok');
-}
-
 function _cekFgExport(){
   if(_ckfgView==='bulan'){ _cekFgExportBulan(); return; }
   if(!_ckfgSels.length){ toast('Pilih FG dulu','err'); return; }
   if(typeof XLSX==='undefined'){ toast('XLSX library tidak tersedia','err'); return; }
+  var multi=_ckfgSels.length>1;
   var rows=_cekFgRows().filter(function(r){
     if(_ckfgType==='RM') return /^3/.test(r.code);
     if(_ckfgType==='PM') return /^4/.test(r.code);
     return true;
   });
-  // Hormati filter kolom aktif
   if(Object.keys(_ckfgColSel).length){
     rows=rows.filter(function(r){
-      var vmap={kode:r.code, nama:r.name, tipe:(/^3/.test(r.code)?'RM':'PM'), uom:r.uom||'', status:(r.req<=0?'-':(r.diffPR>=0?'Aman':'Kurang'))};
+      var vmap={kode:r.code, nama:r.name, tipe:(/^3/.test(r.code)?'RM':'PM'), uom:r.uom||'',
+        fg:(multi?String(r.fgCnt):String(Math.round(r.qtyPc*1000000)/1000000)),
+        req:_ckfgFmt(r.req), soh:_ckfgFmt(r.soh), po:_ckfgFmt(r.po), pr:_ckfgFmt(r.pr),
+        avail:_ckfgFmt(r.avail), diffpr:_ckfgFmt(r.diffPR), diffdtg:_ckfgFmt(r.diffDtg),
+        status:_ckfgStatusOf(r)};
       return Object.keys(_ckfgColSel).every(function(k){ return _ckfgColSel[k].indexOf(String(vmap[k])) >= 0; });
     });
   }
@@ -7353,11 +7354,63 @@ function _cekFgExport(){
   aoa.push([]);
   aoa.push(['Kode','Nama','Tipe','UoM','#FG','Requirement','SOH','PO Open','PR Open','Total Avail','Selisih Perlu PR','Selisih Perlu Datang','Status','Rincian per FG']);
   rows.forEach(function(r){
-    aoa.push([r.code,r.name,/^3/.test(r.code)?'RM':'PM',r.uom,r.fgCnt,Math.round(r.req*100)/100,Math.round(r.soh*100)/100,Math.round(r.po*100)/100,Math.round(r.pr*100)/100,Math.round(r.avail*100)/100,Math.round(r.diffPR*100)/100,Math.round(r.diffDtg*100)/100,r.req<=0?'-':(r.diffPR>=0?'Aman':'Kurang'),r.breakdown.replace(/\n/g,' | ')]);
+    aoa.push([r.code,r.name,/^3/.test(r.code)?'RM':'PM',r.uom,r.fgCnt,Math.round(r.req*100)/100,Math.round(r.soh*100)/100,Math.round(r.po*100)/100,Math.round(r.pr*100)/100,Math.round(r.avail*100)/100,Math.round(r.diffPR*100)/100,Math.round(r.diffDtg*100)/100,_ckfgStatusOf(r),r.breakdown.replace(/\n/g,' | ')]);
   });
   var wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Cek by FG');
   XLSX.writeFile(wb, 'cek_by_fg_'+(_ckfgSels.length>1?_ckfgSels.length+'FG':_ckfgSels[0])+'.xlsx');
+  toast('Export ✓','ok');
+}
+
+function _cekFgExportBulan(){
+  if(!_ckfgSels.length){ toast('Pilih FG dulu','err'); return; }
+  if(typeof XLSX==='undefined'){ toast('XLSX library tidak tersedia','err'); return; }
+  var months=(_mpsActiveMonths||[]).slice();
+  var slots=_ckfgMonthSlots(months);
+  var moLbl=months.map(function(m){ return _CKFG_MOID[m]||m; });
+  var aoa=[['PLAN FG (pcs)'],['FG','Nama'].concat(moLbl).concat(['Total'])];
+  _ckfgSels.forEach(function(fg){
+    var line=[fg,_ckfgFgName(fg)], tot=0;
+    months.forEach(function(m){ var v=_ckfgPlanMOf(fg,m); tot+=v; line.push(v); });
+    line.push(tot); aoa.push(line);
+  });
+  aoa.push([]);
+  var selSet={}; _ckfgSels.forEach(function(c){ selSet[c]=1; });
+  var fgRm={}, names={};
+  (_bomData||[]).forEach(function(b){
+    if(!b || !selSet[b.fg] || b.type!=='N' || !/^[34]/.test(b.rm||'')) return;
+    if(!fgRm[b.fg]) fgRm[b.fg]={};
+    fgRm[b.fg][b.rm]=(fgRm[b.fg][b.rm]||0)+(b.qty||0);
+    if(b.rmDesc && !names[b.rm]) names[b.rm]=b.rmDesc;
+  });
+  var md=STATE.masterData||{}, rn=STATE.realNameData||{};
+  var rmSet={}; Object.keys(fgRm).forEach(function(fg){ Object.keys(fgRm[fg]).forEach(function(rm){ rmSet[rm]=1; }); });
+  var rmCodes=Object.keys(rmSet).filter(function(c){
+    if(_ckfgType==='RM') return /^3/.test(c);
+    if(_ckfgType==='PM') return /^4/.test(c);
+    return true;
+  }).sort();
+  aoa.push(['MATERIAL — per bulan (baris: Requirement / OSPO / OSPR / Stock Ending)']);
+  aoa.push(['Kode','Nama','Baris'].concat(moLbl));
+  rmCodes.forEach(function(c){
+    var m=md[c]||{};
+    var nm=(_isAdmin && _rmDisplayMode==='realname' && rn[c]) ? rn[c] : (m.desc||names[c]||c);
+    var st=(STATE.stockData||{})[c]||{};
+    var soh=(st.btg||0)+(st.sng||0)+(st.jtk||0)+(st.pjt||0);
+    var ospoM=_ckfgBucketByDate(STATE.poData, months, slots, function(o){return o.openQty;}, function(o){return o.prReqDate;}, c);
+    var osprM=_ckfgBucketByDate((typeof _OSPR_DISABLED!=='undefined'&&_OSPR_DISABLED)?[]:(STATE.osprData||[]), months, slots, function(o){return o.openQty;}, function(o){return o.prReqDate;}, c);
+    var reqL=[c,nm,'Requirement'], poL=['','','OSPO'], prL=['','','OSPR'], stL=['','','Stock (Ending)'];
+    var prev=soh;
+    months.forEach(function(mo){
+      var v=0; _ckfgSels.forEach(function(fg){ var q=(fgRm[fg]||{})[c]; if(q) v+=_ckfgPlanMOf(fg,mo)*q; });
+      prev=prev+(ospoM[mo]||0)+(osprM[mo]||0)-v;
+      reqL.push(Math.round(v*100)/100); poL.push(Math.round((ospoM[mo]||0)*100)/100); prL.push(Math.round((osprM[mo]||0)*100)/100); stL.push(Math.round(prev*100)/100);
+    });
+    aoa.push(reqL); aoa.push(poL); aoa.push(prL); aoa.push(stL);
+  });
+  var wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Cek by FG per Bulan');
+  XLSX.writeFile(wb, 'cek_by_fg_perbulan_'+(_ckfgSels.length)+'FG.xlsx');
   toast('Export ✓','ok');
 }
 
