@@ -3452,9 +3452,11 @@ function _applyRealtimeChanges(keys, vals) {
             _inSched.forEach(function(c){
               var k = (c.supName||'')+'|||'+(c.date||''); var l = _byKey[k];
               if(!l){ _byKey[k] = c; return; }
-              var rc=(_sRank[c.status]||0), rl=(_sRank[l.status]||0);
-              if(rc > rl) _byKey[k] = c;
-              else if(rc === rl && (c._upd||0) > (l._upd||0)) _byKey[k] = c;
+              // Cap waktu edit (_upd) terbaru menang MUTLAK (termasuk un-approve &
+              // silang item); rank status hanya fallback utk kartu lama tanpa _upd.
+              var cu=(c._upd||0), lu=(l._upd||0);
+              if(cu !== lu){ if(cu > lu) _byKey[k] = c; return; }
+              if((_sRank[c.status]||0) > (_sRank[l.status]||0)) _byKey[k] = c;
             });
             STATE.scheduleData = Object.keys(_byKey).map(function(k){ return _byKey[k]; });
           }
@@ -3991,9 +3993,10 @@ function appStart() {
           _cs.forEach(function(c){
             var k = (c.supName||'')+'|||'+(c.date||''); var l = _bByKey[k];
             if(!l){ _bByKey[k] = c; return; }
-            var _rc=(_bRank[c.status]||0), _rl=(_bRank[l.status]||0);
-            if(_rc > _rl) _bByKey[k] = c;
-            else if(_rc === _rl && (c._upd||0) > (l._upd||0)) _bByKey[k] = c;
+            // _upd terbaru menang mutlak; rank status hanya fallback (sama dgn realtime)
+            var _cu=(c._upd||0), _lu=(l._upd||0);
+            if(_cu !== _lu){ if(_cu > _lu) _bByKey[k] = c; return; }
+            if((_bRank[c.status]||0) > (_bRank[l.status]||0)) _bByKey[k] = c;
           });
           STATE.scheduleData = Object.keys(_bByKey).map(function(k){ return _bByKey[k]; });
           // TOMBSTONE: gabung daftar hapusan cloud + lokal, lalu buang kartu terhapus
@@ -11610,8 +11613,13 @@ function saveSchedDate(input) {
   if(!e) return;
   var iso = input.value; // YYYY-MM-DD
   var ddmmyyyy = iso ? iso.split('-').reverse().join('/') : '';
+  // Edit tanggal MENGGANTI KUNCI kartu (supName|||tanggal) — tombstone kunci lama,
+  // kalau tidak versi tanggal lama di cloud/laptop lain bangkit sebagai kartu kedua
+  // (kasus Croda muncul 3× dengan tanggal beda-beda).
+  if(e.date && e.date !== ddmmyyyy) _schedTombAdd([{supName: e.supName, date: e.date}]);
   e.date = ddmmyyyy;
   e.isManual = true;
+  e._upd = Date.now(); // kartu versi ini yang menang di merge
 
   // Sync ke poOverrides.date untuk semua PO di jadwal ini
   (e.entries||[]).forEach(function(en){
@@ -11800,6 +11808,7 @@ function toggleApprove(idx) {
   var e = STATE.scheduleData[idx];
   var wasApproved = ['approved','sent','confirmed'].indexOf(e.status) >= 0;
   e.status = e.status === 'pending' ? 'approved' : (e.status === 'approved' ? 'pending' : e.status);
+  e._upd = Date.now(); // termasuk un-approve: versi terbaru menang di merge (bukan rank saja)
   var nowApproved = e.status === 'approved';
 
   // Set / hapus poOverrides.date berdasarkan status approve
@@ -11945,6 +11954,7 @@ function approveAll() {
   STATE.scheduleData.forEach(function(e){
     if(e.status !== 'pending') return;
     e.status = 'approved';
+    e._upd = Date.now();
     if(e.entries && e.date) {
       var iso = e.date.split('/').reverse().join('-');
       (e.entries||[]).forEach(function(en){
@@ -11998,6 +12008,7 @@ function removeSchedule(idx) {
     cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
   }
   STATE.scheduleData.splice(idx, 1);
+  if(e) _schedTombAdd([e]); // tombstone: ✕ kartu menyebar & tidak bangkit lagi (lubang yg kemarin terlewat)
   localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData));
   _cloudSaveSchedule(JSON.stringify(STATE.scheduleData));
   renderSchedule();
@@ -12107,6 +12118,7 @@ async function sendWA() {
     var data = await res.json();
     if(data.status === false) throw new Error(data.reason||'Fonnte error');
     STATE.scheduleData[waQueue.idx].status = 'sent';
+    STATE.scheduleData[waQueue.idx]._upd = Date.now();
     localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData));
     _cloudSaveSchedule(JSON.stringify(STATE.scheduleData));
     closeModal('modal-wa'); renderSchedule(); toast('WA terkirim ✓','ok');
@@ -12127,7 +12139,7 @@ async function blastAll() {
     try {
       var res = await fetch('https://api.fonnte.com/send',{method:'POST',headers:{Authorization:CFG.fonnte,'Content-Type':'application/json'},body:JSON.stringify({target:sup.waTarget,message:buildWAMsg(entry),countryCode:'62',delay:2})});
       var d = await res.json(); if(d.status===false) throw new Error(d.reason);
-      entry.status = 'sent'; ok++;
+      entry.status = 'sent'; entry._upd = Date.now(); ok++;
     } catch(e){fail++;}
     await new Promise(function(r){setTimeout(r,1500)});
   }
