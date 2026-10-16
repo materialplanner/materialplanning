@@ -984,6 +984,10 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
         <button id="fc-g-line" onclick="_grafikSet('chartType','line')" style="padding:5px 11px;border:none;cursor:pointer;font-weight:600">Line</button>
         <button id="fc-g-bar" onclick="_grafikSet('chartType','bar')" style="padding:5px 11px;border:none;cursor:pointer;font-weight:600">Bar</button>
       </div>
+      <div style="display:inline-flex;border:1px solid var(--border2);border-radius:6px;overflow:hidden;font-size:11px" title="Sumber data baris Stock/OSPO/DOI — sama dengan toggle ⇄ di tab Detail">
+        <button id="fc-g-vfc" onclick="_grafikSet('view','forecast')" style="padding:5px 11px;border:none;cursor:pointer;font-weight:600">Forecast</button>
+        <button id="fc-g-vak" onclick="_grafikSet('view','aktual')" style="padding:5px 11px;border:none;cursor:pointer;font-weight:600">Aktual</button>
+      </div>
     </span>
 
     <!-- Filter rows (Detail only) -->
@@ -3232,7 +3236,7 @@ var _lastSyncMsg = '';
 // Keys yang disync ke cloud — tiap key = 1 dokumen di Firestore koleksi 'kv'
 // Ini menghindari batas 1MB per dokumen Firestore
 var CLOUD_KEYS = [
-  'schedule','po_overrides','proj_comments','stock_history',
+  'schedule','sched_tombs','po_overrides','proj_comments','stock_history',
   // proj_history: disimpan lokal saja (14 snapshot terlalu besar untuk Firebase 1MB limit)
   'suppliers','proj_hidden_cols','proj_snapshots',
   'sheet_url_master','sheet_url_mrp','sheet_url_realname','sheet_url_pallet_pm','sheet_url_pallet_rm','sheet_url_bom_sheet','sheet_url_cogm',
@@ -3440,20 +3444,39 @@ function _applyRealtimeChanges(keys, vals) {
             break;
           } else {
             // Union merge — JANGAN buang kartu lokal yg tak ada di cloud (mencegah "jadwal hilang").
-            // Pertahankan kartu LOKAL secara default (aksi user di device ini paling baru);
-            // ambil versi cloud HANYA kalau statusnya lebih tinggi (mis. device lain sudah confirm).
+            // Status lebih tinggi menang; status sama → _upd (cap waktu edit) lebih baru menang
+            // (supaya item yg disilang di laptop lain tidak bangkit); sisanya pertahankan lokal.
             var _sRank = {pending:0, approved:1, sent:2, partial:3, confirmed:4};
             var _byKey = {};
             STATE.scheduleData.forEach(function(c){ _byKey[(c.supName||'')+'|||'+(c.date||'')] = c; });
             _inSched.forEach(function(c){
               var k = (c.supName||'')+'|||'+(c.date||''); var l = _byKey[k];
               if(!l){ _byKey[k] = c; return; }
-              if((_sRank[c.status]||0) > (_sRank[l.status]||0)) _byKey[k] = c;
+              var rc=(_sRank[c.status]||0), rl=(_sRank[l.status]||0);
+              if(rc > rl) _byKey[k] = c;
+              else if(rc === rl && (c._upd||0) > (l._upd||0)) _byKey[k] = c;
             });
             STATE.scheduleData = Object.keys(_byKey).map(function(k){ return _byKey[k]; });
           }
+          // TOMBSTONE: buang kartu yang sudah dihapus (hapus manual / reset / diganti generate)
+          if(typeof _schedApplyTombs === 'function') STATE.scheduleData = _schedApplyTombs(STATE.scheduleData);
           try { localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData)); } catch(e){} // quota-safe
           renderFlags.sched = true; renderFlags.dash = true;
+          break;
+        }
+        case 'sched_tombs': {
+          // Daftar hapusan jadwal dari laptop lain → gabung (ts terbaru menang), terapkan
+          var _inT = JSON.parse(val || '{}');
+          if(typeof _schedTombsMerge === 'function'){
+            window._schedTombs = _schedTombsMerge(_schedTombsGet(), _inT);
+            try{ localStorage.setItem('sched_tombs', JSON.stringify(window._schedTombs)); }catch(e){}
+            var _before=(STATE.scheduleData||[]).length;
+            STATE.scheduleData = _schedApplyTombs(STATE.scheduleData||[]);
+            if(STATE.scheduleData.length !== _before){
+              try { localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData)); } catch(e){}
+              renderFlags.sched = true; renderFlags.dash = true;
+            }
+          }
           break;
         }
         case 'po_confirmations':
@@ -3962,15 +3985,26 @@ function appStart() {
           // UNION-MERGE dengan cloud — jangan skip hanya karena STATE "tidak kosong":
           // kalau localStorage penuh, STATE terisi data BEKU (lama) dan skip = kartu baru hilang.
           // Union per (supplier|tanggal), status lebih tinggi menang — sama dgn merge realtime.
-          var _bRank = {pending:0, partial:1, confirmed:2};
+          var _bRank = {pending:0, approved:1, sent:2, partial:3, confirmed:4};
           var _bByKey = {};
           (STATE.scheduleData||[]).forEach(function(c){ _bByKey[(c.supName||'')+'|||'+(c.date||'')] = c; });
           _cs.forEach(function(c){
             var k = (c.supName||'')+'|||'+(c.date||''); var l = _bByKey[k];
             if(!l){ _bByKey[k] = c; return; }
-            if((_bRank[c.status]||0) > (_bRank[l.status]||0)) _bByKey[k] = c;
+            var _rc=(_bRank[c.status]||0), _rl=(_bRank[l.status]||0);
+            if(_rc > _rl) _bByKey[k] = c;
+            else if(_rc === _rl && (c._upd||0) > (l._upd||0)) _bByKey[k] = c;
           });
           STATE.scheduleData = Object.keys(_bByKey).map(function(k){ return _bByKey[k]; });
+          // TOMBSTONE: gabung daftar hapusan cloud + lokal, lalu buang kartu terhapus
+          try {
+            if(typeof _schedTombsMerge === 'function'){
+              var _cT={}; try{ _cT=JSON.parse(cloudData['sched_tombs']||'{}')||{}; }catch(_e){}
+              window._schedTombs = _schedTombsMerge(_schedTombsGet(), _cT);
+              try{ localStorage.setItem('sched_tombs', JSON.stringify(window._schedTombs)); }catch(_e){}
+              STATE.scheduleData = _schedApplyTombs(STATE.scheduleData);
+            }
+          } catch(_e){}
           try { localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData)); } catch(_e){}
           if(typeof renderSchedule === 'function') { try { renderSchedule(); } catch(_e){} }
           if(typeof updateDashStats === 'function') { try { updateDashStats(); } catch(_e){} }
@@ -10843,6 +10877,43 @@ function _saveScheduleLS(){
 // kembali kartu/item yg baru saja dihapus/diubah lokal (echo dari aksi sendiri diabaikan).
 var _schedSelfEcho = null;
 function _cloudSaveSchedule(str){ _schedSelfEcho = str; try { cloudSave('schedule', str); } catch(e){} }
+
+// ── Tombstone jadwal terhapus: {supName|||tanggal: ts-hapus} ─────────────────
+// Tanpa ini union-merge antar laptop/boot "menyelamatkan" kartu yang sudah
+// dihapus/disilang/diganti saat generate → muncul lagi terus (keluarga bug yang
+// sama dengan tgl konfirmasi PO & FG NPD). Kartu lolos tombstone hanya jika
+// _upd-nya (cap waktu pembuatan/edit) >= waktu hapus — jadi generate ulang
+// SETELAH hapus tetap bisa membuat kartu baru di kunci yang sama.
+function _schedKeyOf(c){ return ((c&&c.supName)||'')+'|||'+((c&&c.date)||''); }
+function _schedTombsGet(){
+  if(window._schedTombs) return window._schedTombs;
+  var t={}; try{ t=JSON.parse(localStorage.getItem('sched_tombs')||'{}')||{}; }catch(e){}
+  window._schedTombs=t; return t;
+}
+function _schedTombsMerge(a,b){
+  var out={};
+  [a,b].forEach(function(m){ if(!m) return; Object.keys(m).forEach(function(k){ out[k]=Math.max(out[k]||0, m[k]||0); }); });
+  var lim=Date.now()-90*86400000; // pangkas >90 hari
+  Object.keys(out).forEach(function(k){ if(out[k]<lim) delete out[k]; });
+  return out;
+}
+function _schedTombsSave(t){
+  window._schedTombs=t;
+  try{ localStorage.setItem('sched_tombs', JSON.stringify(t)); }catch(e){}
+  try{ cloudSave('sched_tombs', JSON.stringify(t)); }catch(e){}
+}
+function _schedTombAdd(cards){
+  var t=_schedTombsMerge(_schedTombsGet(), null);
+  var now=Date.now();
+  (cards||[]).forEach(function(c){ var k=_schedKeyOf(c); if(k!=='|||') t[k]=now; });
+  _schedTombsSave(t);
+}
+function _schedApplyTombs(arr){
+  if(!arr || !arr.length) return arr||[];
+  var t=_schedTombsGet();
+  if(!Object.keys(t).length) return arr;
+  return arr.filter(function(c){ var ts=t[_schedKeyOf(c)]; return !ts || (c._upd||0) >= ts; });
+}
 function generateSchedule(typeFilter) {
   // Bungkus supaya error apa pun tampil jelas (bukan diam/UI stuck) & bisa didiagnosa
   try { return _generateScheduleImpl(typeFilter); }
@@ -11342,11 +11413,21 @@ function _generateScheduleImpl(typeFilter) {
   // Ini mencegah duplikat ketika user generate lebih dari sekali
   var suppliersToGenerate = {};
   Object.keys(bySupplier).forEach(function(k){ suppliersToGenerate[bySupplier[k].supName] = true; });
+  var _replacedPending = [];
   STATE.scheduleData = STATE.scheduleData.filter(function(card){
     if(card.status !== 'pending') return true;
     if(!suppliersToGenerate[card.supName]) return true;
+    _replacedPending.push(card);
     return false;
   });
+  // TOMBSTONE kartu pending yang diganti — tanpa ini, union-merge (laptop lain /
+  // cloud / boot) mengembalikan kartu lama di samping kartu baru.
+  if(_replacedPending.length && typeof _schedTombAdd === 'function') _schedTombAdd(_replacedPending);
+
+  // Stempel _upd kartu baru SETELAH tombstone di atas (>= ts hapus) — supaya kartu
+  // hasil generate ini sendiri lolos dari tombstone yang baru dibuat.
+  var _genTs = Date.now();
+  newSchedule.forEach(function(c){ c._upd = _genTs; });
 
   STATE.scheduleData = STATE.scheduleData.concat(newSchedule);
   var _schedStr = _saveScheduleLS();   // tahan-quota (prune histori + retry)
@@ -11773,6 +11854,7 @@ function removeSchedItem(schedIdx, entryIdx) {
     // Item terakhir — hapus seluruh jadwal entry
     if(!confirm('Hapus jadwal ' + e.supName + '?')) return;
     STATE.scheduleData.splice(schedIdx, 1);
+    _schedTombAdd([e]); // tombstone: hapusan menyebar & tidak bangkit lagi
     // Fix: bersihkan isManual dari poOverrides agar tidak mempengaruhi generate berikutnya
     (e.entries||[]).forEach(function(en){
       (en.pos||[]).forEach(function(po){
@@ -11802,6 +11884,7 @@ function removeSchedItem(schedIdx, entryIdx) {
       });
     });
     e.entries.splice(entryIdx, 1);
+    e._upd = Date.now(); // versi kartu ini lebih baru — item yg disilang tidak bangkit dari laptop lain
     // Update summary
     e.items = e.entries.map(function(en){
       if(!en.item) return '';
@@ -11846,7 +11929,7 @@ function splitSchedItem(schedIdx, entryIdx) {
   var ovr2 = pk2 ? (STATE.poOverrides[pk2]||{}) : {};
   var qty2 = ovr2.reqQtyOverride !== undefined ? ovr2.reqQtyOverride : (item.pos?item.pos.reduce(function(s,p){return s+(p.openQty||0)},0):0);
   var newEntry = {
-    supName: e.supName, date: e.date, status: 'pending', isManual: true,
+    supName: e.supName, date: e.date, status: 'pending', isManual: true, _upd: Date.now(),
     entries: [item],
     items: (_dispName(item.item)||'') + ' · ' + n_id(qty2) + ' ' + (item.pos&&item.pos[0]&&item.pos[0].uom ? item.pos[0].uom : (item.item.uom||'')),
     pos: item.pos ? item.pos.map(function(p){return p.docNum}).join(', ') : ''
@@ -11941,6 +12024,7 @@ function resetSchedule() {
   });
   localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
   cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
+  _schedTombAdd(STATE.scheduleData); // tombstone semua kartu — reset menyebar & tidak bangkit
   STATE.scheduleData = [];
   localStorage.setItem('schedule', '[]');
   _cloudSaveSchedule('[]');  // harus disimpan ke Firebase juga
@@ -13556,6 +13640,8 @@ function _appInit() {
   STATE.projectionHistory= JSON.parse(localStorage.getItem('proj_history')    || '{}');
   STATE.stockHistory     = JSON.parse(localStorage.getItem('stock_history')   || '{}');
   STATE.scheduleData     = JSON.parse(localStorage.getItem('schedule')        || '[]');
+  // Buang kartu yang sudah di-tombstone (localStorage bisa basi dibanding daftar hapusan)
+  try { if(typeof _schedApplyTombs === 'function') STATE.scheduleData = _schedApplyTombs(STATE.scheduleData); } catch(e){}
   STATE.supplierData     = JSON.parse(localStorage.getItem('suppliers')       || '[]');
   STATE.poOverrides      = JSON.parse(localStorage.getItem('po_overrides')    || '{}');
   STATE.projectionSnapshots = JSON.parse(localStorage.getItem('proj_snapshots')|| '{}');
@@ -16313,6 +16399,7 @@ function _fcDetailRow(code, fc, master) {
 // ═══ TAB GRAFIK ═══════════════════════════════════════════════════════════
 window._grafikCfg = window._grafikCfg || {
   chartType: 'line',
+  view: 'forecast',         // 'forecast' (Adjusted OSPO/stockFc/doiFc) | 'aktual' (OSPO asli/stock/doi) — sama dgn toggle ⇄ di tab Detail
   itemCode: '',             // filter item (kosong = semua)
   supplier: '',             // filter supplier (kosong = semua)
   rmpm: '',                 // '', 'rm' (3xxx), 'pm' (4xxx)
@@ -16320,17 +16407,21 @@ window._grafikCfg = window._grafikCfg || {
   toYM: '',
   rows: { requirement:true, stock:true, ospo:false, ospr:false, propose:false, grpo:false, doi:false }
 };
+if(window._grafikCfg.view == null) window._grafikCfg.view = 'forecast'; // cfg lama tanpa field view
 var _grafikChart = null;
 
-// Daftar baris + cara ambil arraynya dari fc
+// Daftar baris + cara ambil arraynya dari fc — getter MENGIKUTI mode Forecast/Aktual,
+// definisinya persis sama dengan tab Detail (_fcGridViewMode):
+//   forecast → forecastOspo / stockFc / doiFc · aktual → ospo(effective) / stock / doi
+function _grafikIsFc(){ return (window._grafikCfg.view||'forecast') !== 'aktual'; }
 var _GRAFIK_ROWS = [
   {key:'requirement', label:'Requirement', color:'#3b82f6', get:function(fc){ return fc.forecast; }},
-  {key:'stock',       label:'Stock Ending', color:'#10b981', get:function(fc){ return fc.stockFc || fc.stock; }},
-  {key:'ospo',        label:'OSPO',        color:'#14b8a6', get:function(fc){ return fc.ospo; }},
+  {key:'stock',       label:'Stock Ending', color:'#10b981', get:function(fc){ return _grafikIsFc() ? (fc.stockFc || fc.stock) : fc.stock; }},
+  {key:'ospo',        label:'OSPO',        color:'#14b8a6', get:function(fc){ return _grafikIsFc() ? (fc.forecastOspo || fc.ospo) : fc.ospo; }},
   {key:'ospr',        label:'OSPR',        color:'#f59e0b', get:function(fc){ return fc.ospr; }},
   {key:'propose',     label:'Propose PR',  color:'#8b5cf6', get:function(fc){ return fc.propose; }},
   {key:'grpo',        label:'GRPO (masuk)', color:'#06b6d4', isGRPO:true},
-  {key:'doi',         label:'DOI (hari)',  color:'#ef4444', get:function(fc){ return fc.doiFc || fc.doi; }, isDOI:true}
+  {key:'doi',         label:'DOI (hari)',  color:'#ef4444', get:function(fc){ return _grafikIsFc() ? (fc.doiFc || fc.doi) : fc.doi; }, isDOI:true}
 ];
 
 // ── Filter Tipe Item (multi-select): RM/PM/FG/WIP ──
@@ -16639,7 +16730,8 @@ function _fcRenderGrafik(el, items, fcData) {
 
   var titleTxt = (cfg.supplier ? cfg.supplier+' — ' : '')
     + (pickedItem ? pickedItem : 'Total '+supItems.length+' item')
-    + ' — ' + (isValue?'Value':'Qty');
+    + ' — ' + (isValue?'Value':'Qty')
+    + ' · ' + (_grafikIsFc()?'Forecast':'Aktual');
 
   if(_grafikChart) { _grafikChart.destroy(); _grafikChart = null; }
   var ctx = document.getElementById('fc-grafik-canvas').getContext('2d');
@@ -16900,6 +16992,11 @@ function _fcSyncGrafikToolbar() {
   var bL=document.getElementById('fc-g-line'), bB=document.getElementById('fc-g-bar');
   if(bL){ bL.style.background=cfg.chartType==='line'?'var(--accent)':'none'; bL.style.color=cfg.chartType==='line'?'#fff':'var(--muted)'; }
   if(bB){ bB.style.background=cfg.chartType==='bar'?'var(--accent)':'none'; bB.style.color=cfg.chartType==='bar'?'#fff':'var(--muted)'; }
+  // Forecast/Aktual active state
+  var _isFcG=(cfg.view||'forecast')!=='aktual';
+  var bF=document.getElementById('fc-g-vfc'), bA=document.getElementById('fc-g-vak');
+  if(bF){ bF.style.background=_isFcG?'var(--accent)':'none'; bF.style.color=_isFcG?'#fff':'var(--muted)'; }
+  if(bA){ bA.style.background=!_isFcG?'var(--accent)':'none'; bA.style.color=!_isFcG?'#fff':'var(--muted)'; }
 }
 function _grafikToolbarChange(){
   var sup=document.getElementById('fc-g-supplier'), f=document.getElementById('fc-g-from'), t=document.getElementById('fc-g-to');
