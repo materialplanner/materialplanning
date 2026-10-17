@@ -1143,6 +1143,17 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
     </div>
 
     <div class="card">
+      <div class="card-hdr"><span class="card-title">🏭 MPS</span><span id="mps_sheet-status" class="dot off"></span></div>
+      <div style="padding:14px">
+        <div class="fg"><label style="font-size:11px">Google Sheets URL</label><input id="mps_sheet-url" placeholder="https://docs.google.com/spreadsheets/d/..." style="width:100%;font-size:11px"></div>
+        <div class="fg"><label style="font-size:11px">Nama Tab</label><input id="mps_sheet-sheet" placeholder="MPS" style="width:100%;font-size:11px"></div>
+        <button class="btn btn-sm btn-primary" onclick="loadSheetData('mps_sheet')" style="width:100%;margin-top:6px">Muat MPS</button>
+        <div id="mps_sheet-info" style="margin-top:8px;font-size:11px;color:var(--muted)"></div>
+        <div id="mps_sheet-ts" style="font-size:10px;color:var(--muted);margin-top:2px"></div>
+        <div style="margin-top:8px;font-size:10px;color:var(--muted);line-height:1.5"><b>Samakan dengan file MPS xlsx</b>: header wajib memuat <b>"Item No"</b>, kolom plan <b>"Plan Jan…Plan Des"</b> (atau format lama JanPlan…), opsional kolom <b>"FC …"</b> untuk item FG 11/12 dan kolom deskripsi. Cara termudah: copy-paste isi file MPS xlsx apa adanya ke tab ini. Yang dimuat terakhir (upload / GSheet) = yang dipakai, persis alur BOM.</div>
+      </div>
+    </div>
+    <div class="card">
       <div class="card-hdr"><span class="card-title">🔧 BOM</span><span id="bom_sheet-status" class="dot off"></span></div>
       <div style="padding:14px">
         <div class="fg"><label style="font-size:11px">Google Sheets URL</label><input id="bom_sheet-url" placeholder="https://docs.google.com/spreadsheets/d/..." style="width:100%;font-size:11px"></div>
@@ -3239,8 +3250,8 @@ var CLOUD_KEYS = [
   'schedule','sched_tombs','po_overrides','proj_comments','stock_history',
   // proj_history: disimpan lokal saja (14 snapshot terlalu besar untuk Firebase 1MB limit)
   'suppliers','proj_hidden_cols','proj_snapshots',
-  'sheet_url_master','sheet_url_mrp','sheet_url_realname','sheet_url_pallet_pm','sheet_url_pallet_rm','sheet_url_bom_sheet','sheet_url_cogm',
-  'sheet_tab_master','sheet_tab_mrp','sheet_tab_realname','sheet_tab_pallet_pm','sheet_tab_pallet_rm','sheet_tab_bom_sheet','sheet_tab_cogm',
+  'sheet_url_master','sheet_url_mrp','sheet_url_realname','sheet_url_pallet_pm','sheet_url_pallet_rm','sheet_url_bom_sheet','sheet_url_cogm','sheet_url_mps_sheet',
+  'sheet_tab_master','sheet_tab_mrp','sheet_tab_realname','sheet_tab_pallet_pm','sheet_tab_pallet_rm','sheet_tab_bom_sheet','sheet_tab_cogm','sheet_tab_mps_sheet',
   'cogm_data',
   'npd_data',
   'sap_url','sap_user','sap_pass','fonnte','wn','workdays','last_sync','proj_highlighted',
@@ -4098,6 +4109,8 @@ function appStart() {
           if(_seed.length <= 950000) { cloudSave('mps_data_full', _seed); window._mpsCloudBundle = _seed; }
         } catch(e){}
       }
+      // Masih kosong setelah IDB + bundle cloud → auto-load dari GSheet (persis alur BOM)
+      if((!_mpsData || !Object.keys(_mpsData).length) && typeof _autoLoadMpsFromSheet === 'function') _autoLoadMpsFromSheet();
     }, 2500);
   }); }
   else { setTimeout(function(){ afterLoad({}); setTimeout(cloudStartRealtime, 500); }, 50); }
@@ -4191,8 +4204,8 @@ function processCOGM(rows, headers) {
   return out;
 }
 
-function _parseBomCSVByIndex(csvText) {
-  // Parse CSV → array of arrays (RFC 4180), pertahankan semua kolom termasuk duplikat
+// CSV → array-of-arrays (RFC 4180) — dipakai bom_sheet & mps_sheet (GSheet)
+function _csvTo2D(csvText){
   var allRows = []; var row = []; var cell = ''; var inQ = false;
   for(var i=0;i<csvText.length;i++){
     var c=csvText[i];
@@ -4203,6 +4216,12 @@ function _parseBomCSVByIndex(csvText) {
     else { cell+=c; }
   }
   if(cell||row.length){ row.push(cell); allRows.push(row); }
+  return allRows;
+}
+
+function _parseBomCSVByIndex(csvText) {
+  // Parse CSV → array of arrays (RFC 4180), pertahankan semua kolom termasuk duplikat
+  var allRows = _csvTo2D(csvText);
   if(allRows.length < 2) return [];
 
   // Cari header row: baris yang mengandung 'Qty per pcs' (sama seperti _bomUpload cari 'Item'+'Qty per pcs')
@@ -4405,6 +4424,15 @@ function loadSheetData(type) {
       if(dotEl) dotEl.className='dot';
       toast('BOM: '+_bomData.length+' baris ✓','ok');
 
+    } else if(type==='mps_sheet'){
+      // Parse CSV mentah → 2D array → parser MPS yang SAMA dgn upload xlsx (alur = BOM)
+      var mpsRows2D = _csvTo2D(text);
+      var cntMps = _mpsParseRows(mpsRows2D, 'gsheet', 'GSheet' + (sheet ? ' tab "'+sheet+'"' : ''));
+      localStorage.setItem('mps_sheet_upload_ts', ts);
+      if(infoEl) infoEl.textContent = cntMps+' FG dimuat ✓';
+      if(dotEl) dotEl.className='dot';
+      toast('MPS: '+cntMps+' FG ✓ (GSheet)','ok');
+
     } else if(type==='cogm'){
       STATE.cogmData = processCOGM(rows, headers);
       var cnt = Object.keys(STATE.cogmData).length;
@@ -4426,7 +4454,7 @@ function loadSheetData(type) {
 
 function loadAllSheets(autoBuild) {
   var promises = [];
-  ['master','mrp','realname','pallet_pm','pallet_rm','bom_sheet','cogm'].forEach(function(t){
+  ['master','mrp','realname','pallet_pm','pallet_rm','bom_sheet','mps_sheet','cogm'].forEach(function(t){
     if(localStorage.getItem('sheet_url_'+t)) promises.push(loadSheetData(t));
   });
   if(!promises.length) { toast('Belum ada URL Sheets. Buka menu Data Source terlebih dahulu.','err'); return Promise.resolve(); }
@@ -4441,7 +4469,7 @@ function loadAllSheets(autoBuild) {
 }
 
 function _restoreSheetUrls() {
-  ['master','mrp','realname','pallet_pm','pallet_rm','bom_sheet','cogm'].forEach(function(t){
+  ['master','mrp','realname','pallet_pm','pallet_rm','bom_sheet','mps_sheet','cogm'].forEach(function(t){
     var u=localStorage.getItem('sheet_url_'+t), s=localStorage.getItem('sheet_tab_'+t);
     var ue=document.getElementById(t+'-url'), se=document.getElementById(t+'-sheet');
     if(ue&&u) ue.value=u; if(se&&s) se.value=s;
@@ -18611,6 +18639,20 @@ function _mpsUpload(input) {
       var sheetName = wb.SheetNames.find(function(s){ return /MPS/i.test(s); }) || wb.SheetNames[0];
       var ws = wb.Sheets[sheetName];
       var rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
+      _mpsParseRows(rows, 'xlsx', 'sheet "'+sheetName+'"');
+    } catch(err) {
+      statusEl.textContent = '❌ Error: ' + err.message;
+      statusEl.style.color = 'var(--red)';
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// ── Parser MPS dari 2D array — DIPAKAI BERSAMA upload xlsx & GSheet ──────────
+// Alur persis BOM: sumber mana pun (xlsx / sheet "MPS" di GSheet master data)
+// masuk parser yang SAMA, hasil & penyimpanan identik; label sumber dicatat.
+function _mpsParseRows(rows, source, originLabel) {
+  var statusEl = document.getElementById('mps-status') || {style:{}};
 
       // Find header row (contains "Item No" or "Item No.")
       var hdrIdx = -1;
@@ -18618,7 +18660,7 @@ function _mpsUpload(input) {
         var rowStr = rows[i].map(function(v){return String(v||'').trim();});
         if(rowStr.some(function(v){ return /^item\s*no/i.test(v); })) { hdrIdx = i; break; }
       }
-      if(hdrIdx < 0) { statusEl.textContent = '❌ Header "Item No" tidak ditemukan'; statusEl.style.color='var(--red)'; return; }
+      if(hdrIdx < 0) { statusEl.textContent = '❌ Header "Item No" tidak ditemukan'; statusEl.style.color='var(--red)'; throw new Error('Header "Item No" tidak ditemukan — samakan format dengan file MPS xlsx'); }
 
       var headers = rows[hdrIdx].map(function(v){ return String(v||'').trim(); });
       // Find item code column
@@ -18757,15 +18799,14 @@ function _mpsUpload(input) {
       // tab Perbandingan MPS bisa dilihat di laptop lain (seperti hasil MRP).
       _mpsSaveCompareResult();
 
-      statusEl.textContent = '✓ ' + count + ' FG item dari sheet "' + sheetName + '"';
+      // Label sumber — persis pola BOM (bom_source / bom_source_ts)
+      var _mts = new Date();
+      var _mtsStr = _mts.getDate()+'/'+(_mts.getMonth()+1)+'/'+_mts.getFullYear()+' '+String(_mts.getHours()).padStart(2,'0')+':'+String(_mts.getMinutes()).padStart(2,'0');
+      try { localStorage.setItem('mps_source', source||'xlsx'); localStorage.setItem('mps_source_ts', _mtsStr); } catch(e){}
+      statusEl.textContent = '✓ ' + count + ' FG item dari ' + (originLabel||'upload') + ' · Sumber: ' + (source==='gsheet'?'GSheet':'Upload xlsx');
       statusEl.style.color = 'var(--green)';
       _mrpCheckReady();
-    } catch(err) {
-      statusEl.textContent = '❌ Error: ' + err.message;
-      statusEl.style.color = 'var(--red)';
-    }
-  };
-  reader.readAsArrayBuffer(file);
+      return count;
 }
 
 // ── Upload BOM ────────────────────────────────────────────────────────────────
@@ -19706,6 +19747,22 @@ function _autoLoadBomFromSheet() {
   });
 }
 
+// Auto-load MPS dari Google Sheets saat boot — persis alur _autoLoadBomFromSheet:
+// hanya kalau MPS lokal (IDB + bundle cloud) kosong dan URL sheet MPS sudah tersimpan
+// (URL sync via Firebase, jadi laptop baru langsung bisa muat sendiri).
+function _autoLoadMpsFromSheet() {
+  if(window._mpsAutoLoadDone) return;              // cegah dobel
+  if(_mpsData && Object.keys(_mpsData).length) return; // sudah ada data
+  var url = localStorage.getItem('sheet_url_mps_sheet') || '';
+  if(!url) return;
+  window._mpsAutoLoadDone = true;
+  var el = document.getElementById('mps-status');
+  if(el) { el.textContent = '⏳ Memuat MPS otomatis dari GSheet...'; el.style.color = 'var(--muted)'; }
+  loadSheetData('mps_sheet').catch(function(){
+    if(el) { el.textContent = '⚠ MPS belum termuat — buka Data Source → Muat MPS'; el.style.color = 'var(--amber)'; }
+  });
+}
+
 // ── Simpan/baca record state di IndexedDB (store 'mrp', id khusus) ────────────
 // Jaring pengaman utk data terapan (cache SAP, mrp_data): selamat walau
 // localStorage penuh DAN Firestore gagal (QUIC) sekaligus. Pakai store 'mrp'
@@ -19780,10 +19837,15 @@ function _mrpIdbLoad() {
           var cnt  = Object.keys(_mpsData).length;
           var el3  = document.getElementById('mps-status');
           var mpsStatusText = '✓ MPS tersimpan: ' + cnt + ' FG (' + ts3 + ')';
-          if(el3) { el3.textContent = mpsStatusText; el3.style.color='var(--green)'; }
+          var _msrc = localStorage.getItem('mps_source');
+          var _msrcLbl = _msrc==='gsheet' ? ' · Sumber: GSheet' : (_msrc==='xlsx' ? ' · Sumber: Upload xlsx' : '');
+          if(el3) { el3.textContent = mpsStatusText + _msrcLbl; el3.style.color='var(--green)'; }
           localStorage.setItem('mps_ui_status', mpsStatusText);
           cloudSave('mps_ui_status', mpsStatusText);
           _mrpCheckReady();
+        } else {
+          // IndexedDB MPS kosong (laptop baru) → auto-load dari GSheet kalau URL sudah ada
+          if(typeof _autoLoadMpsFromSheet === 'function') _autoLoadMpsFromSheet();
         }
       };
     } catch(e3) {}
