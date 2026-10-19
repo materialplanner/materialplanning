@@ -6236,7 +6236,12 @@ function _whereUsedRender() {
       var m = masterData[code] || {};
       if(code.toLowerCase().includes(q) || (m.desc||'').toLowerCase().includes(q) || (realNames[code]||'').toLowerCase().includes(q)) matchedCodes[code] = true;
     });
-    bom.forEach(function(b) { if(b.rm && b.rm.toLowerCase().includes(q)) matchedCodes[b.rm] = true; });
+    // Cari langsung di BOM (kode DAN nama/deskripsi komponen) — item yang tidak ada
+    // di Master Data tetap bisa ditemukan; sumber kebenarannya isi BOM itu sendiri.
+    bom.forEach(function(b) {
+      if(!b.rm) return;
+      if(b.rm.toLowerCase().includes(q) || (b.rmDesc||'').toLowerCase().includes(q)) matchedCodes[b.rm] = true;
+    });
   });
   var codes = Object.keys(matchedCodes).filter(function(c){ return /^[34]/.test(c); });
   if(!codes.length) {
@@ -6876,6 +6881,8 @@ var _ckfgLastHits = [];         // hasil pencarian terakhir
 var _ckfgChecked  = {};         // ceklis di hasil pencarian {kode:1}
 var _ckfgView  = 'simple';      // 'simple' = ringkas 1 skenario | 'bulan' = per bulan ala Forecast
 var _ckfgPlansM= {};            // plan per FG per bulan {fg:{Mon:qty}} (absen = ikut MPS)
+var _ckfgRmSel = null;          // mode REVERSE: kode RM/PM terpilih (lihat kebutuhan per FG)
+var _ckfgRmHits= [];            // hasil pencarian material (RM/PM) terakhir
 
 function _ckfgFmt(v){ return (Math.round((v||0)*100)/100).toLocaleString('id-ID',{maximumFractionDigits:2}); }
 function _ckfgStatusOf(r){ return r.req<=0 ? '-' : (r.diffPR<0 ? 'Perlu PR' : (r.diffDtg<0 ? 'Perlu Datang' : 'Aman')); }
@@ -6889,7 +6896,7 @@ function _ckfgFgName(code){
   return code;
 }
 
-function _cekFgInit(){ _cekFgSelPaint(); if(_ckfgSels.length) _cekFgTable(); }
+function _cekFgInit(){ _cekFgSelPaint(); if(_ckfgRmSel){ _cekFgRmTable(); } else if(_ckfgSels.length) _cekFgTable(); }
 
 function _cekFgSearch(){
   var box = document.getElementById('ckfg-matches');
@@ -6903,19 +6910,37 @@ function _cekFgSearch(){
   }
   var fgd = (typeof _fgDescFromMps !== 'undefined' ? _fgDescFromMps : null) || {};
   var md  = STATE.masterData || {};
+  var rn  = STATE.realNameData || {};
   var seen = {}, hits = [];
-  for(var i=0;i<_bomData.length && hits.length<40;i++){
-    var b=_bomData[i]; var fg=b.fg;
-    if(!fg || seen[fg] || !/^1/.test(fg)) continue;
-    var nm = fgd[fg] || (md[fg]&&md[fg].desc) || b.fgDesc || '';
-    if(fg.toLowerCase().includes(q) || nm.toLowerCase().includes(q)){
-      seen[fg]=true;
-      hits.push({code:fg, name:nm||fg});
+  var seenR = {}, rmHits = [];
+  for(var i=0;i<_bomData.length;i++){
+    var b=_bomData[i];
+    // FG (1xxx) — cocok kode/nama
+    var fg=b.fg;
+    if(fg && !seen[fg] && /^1/.test(fg) && hits.length<40){
+      var nm = fgd[fg] || (md[fg]&&md[fg].desc) || b.fgDesc || '';
+      if(fg.toLowerCase().includes(q) || nm.toLowerCase().includes(q)){
+        seen[fg]=true;
+        hits.push({code:fg, name:nm||fg});
+      }
     }
+    // REVERSE: material RM/PM (3xxx/4xxx) — cocok kode / nama master / real name / desc BOM
+    var rm=b.rm;
+    if(rm && !seenR[rm] && /^[34]/.test(rm) && rmHits.length<25){
+      var mR=md[rm]||{};
+      var nmR=(_isAdmin && _rmDisplayMode==='realname' && rn[rm]) ? rn[rm] : (mR.desc||b.rmDesc||'');
+      if(rm.toLowerCase().includes(q) || nmR.toLowerCase().includes(q) || (mR.desc||'').toLowerCase().includes(q) || (b.rmDesc||'').toLowerCase().includes(q) || (rn[rm]||'').toLowerCase().includes(q)){
+        seenR[rm]=true;
+        rmHits.push({code:rm, name:nmR||rm});
+      }
+    }
+    if(hits.length>=40 && rmHits.length>=25) break;
   }
-  if(!hits.length){ box.innerHTML='<div style="font-size:12px;color:var(--muted)">Tidak ada FG cocok di BOM.</div>'; return; }
+  if(!hits.length && !rmHits.length){ box.innerHTML='<div style="font-size:12px;color:var(--muted)">Tidak ada FG maupun RM/PM yang cocok di BOM.</div>'; return; }
   hits.sort(function(a,b){ return a.code.localeCompare(b.code); });
+  rmHits.sort(function(a,b){ return a.code.localeCompare(b.code); });
   _ckfgLastHits = hits;
+  _ckfgRmHits = rmHits;
   _cekFgPaintHits();
 }
 
@@ -6923,9 +6948,22 @@ function _cekFgPaintHits(){
   var box = document.getElementById('ckfg-matches');
   if(!box) return;
   var hits=_ckfgLastHits;
-  if(!hits.length){ box.innerHTML=''; return; }
+  var rmHits=_ckfgRmHits||[];
+  if(!hits.length && !rmHits.length){ box.innerHTML=''; return; }
+  var h='';
+  // ── Hasil MATERIAL (reverse: RM/PM → kebutuhan per FG) ──
+  if(rmHits.length){
+    h+='<div style="font-size:11px;color:var(--muted);font-weight:600;margin-bottom:5px">'+rmHits.length+' material (RM/PM) cocok — klik untuk lihat kebutuhan per FG:</div>';
+    h+=rmHits.map(function(rh){
+      var tipe=/^3/.test(rh.code)?'<span class="badge b-blue" style="font-size:9px;margin-left:6px">RM</span>':'<span class="badge b-purple" style="font-size:9px;margin-left:6px">PM</span>';
+      return '<div onclick="_cekFgPickRM(\''+rh.code+'\')" style="cursor:pointer;padding:6px 10px;border-radius:6px;background:var(--bg2);margin-bottom:4px;font-size:12px">'
+        +'🔄 <span style="font-family:var(--mono);color:var(--accent)">'+rh.code+'</span> — '+String(rh.name).replace(/</g,'&lt;')+tipe+'</div>';
+    }).join('');
+    if(hits.length) h+='<div style="height:8px"></div>';
+  }
+  if(!hits.length){ box.innerHTML=h; return; }
   var nCk=Object.keys(_ckfgChecked).length;
-  var h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;gap:8px;flex-wrap:wrap">'
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;gap:8px;flex-wrap:wrap">'
     +'<div style="font-size:11px;color:var(--muted)">'+hits.length+' FG cocok — ceklis lalu klik Tambahkan, atau Tambah semua</div>'
     +'<div style="display:flex;gap:6px">'
     +'<button class="btn btn-sm btn-primary" onclick="_cekFgAddChecked()" style="font-size:10.5px">➕ Tambahkan yang diceklis ('+nCk+')</button>'
@@ -6951,19 +6989,19 @@ function _cekFgToggleHit(code){
 function _cekFgCloseSearch(){
   var si=document.getElementById('ckfg-search'); if(si) si.value='';
   var box=document.getElementById('ckfg-matches'); if(box) box.innerHTML='';
-  _ckfgLastHits=[]; _ckfgChecked={};
+  _ckfgLastHits=[]; _ckfgChecked={}; _ckfgRmHits=[];
 }
 function _cekFgAddChecked(){
   var codes=Object.keys(_ckfgChecked);
   if(!codes.length){ toast('Ceklis dulu FG yang mau ditambahkan','err'); return; }
   codes.forEach(function(c){ if(_ckfgSels.indexOf(c)<0) _ckfgSels.push(c); });
-  _ckfgOvr={};
+  _ckfgOvr={}; _ckfgRmSel=null;
   _cekFgCloseSearch();
   _cekFgSelPaint(); _cekFgTable();
 }
 function _cekFgAddAll(){
   _ckfgLastHits.forEach(function(hh){ if(_ckfgSels.indexOf(hh.code)<0) _ckfgSels.push(hh.code); });
-  _ckfgOvr={};
+  _ckfgOvr={}; _ckfgRmSel=null;
   _cekFgCloseSearch();
   _cekFgSelPaint(); _cekFgTable();
 }
@@ -7051,13 +7089,134 @@ function _cekFgRows(){
   });
 }
 
+// ── Mode REVERSE: RM/PM → kebutuhan per FG per bulan ─────────────────────────
+// Requirement per FG = plan MPS[fg][bulan] × qty/pcs BOM (type N) — rumus yang
+// SAMA dengan Hitung MRP; baris TOTAL per bulan = requirement material tsb (= MRP).
+// Read-only & ikut MPS murni (bukan skenario sandbox FG yang sedang dipilih).
+function _cekFgPickRM(code){
+  _ckfgRmSel = code;
+  _cekFgCloseSearch();
+  _cekFgRmTable();
+}
+function _cekFgRmClose(){
+  _ckfgRmSel = null;
+  var el=document.getElementById('ckfg-result');
+  if(_ckfgSels.length) _cekFgTable();
+  else if(el) el.innerHTML='<div style="color:var(--muted)">Cari lalu pilih FG untuk melihat materialnya.</div>';
+}
+function _cekFgRmRows(){
+  var code=_ckfgRmSel;
+  var md=STATE.masterData||{};
+  var fgd=(typeof _fgDescFromMps!=='undefined'?_fgDescFromMps:null)||{};
+  var months=(_mpsActiveMonths||[]).slice();
+  var fgQty={}, fgName={};
+  (_bomData||[]).forEach(function(b){
+    if(!b || b.rm!==code || b.type!=='N') return;
+    fgQty[b.fg]=(fgQty[b.fg]||0)+(b.qty||0);
+    if(b.fgDesc && !fgName[b.fg]) fgName[b.fg]=b.fgDesc;
+  });
+  var rows=Object.keys(fgQty).map(function(fg){
+    var mps=(typeof _mpsData!=='undefined'&&_mpsData)?(_mpsData[fg]||null):null;
+    var reqM={}, tot=0;
+    months.forEach(function(mo){ var v=mps?(mps[mo]||0)*fgQty[fg]:0; reqM[mo]=v; tot+=v; });
+    return {fg:fg, name:fgd[fg]||(md[fg]&&md[fg].desc)||fgName[fg]||fg, qty:fgQty[fg], reqM:reqM, tot:tot, hasMps:!!mps};
+  });
+  rows.sort(function(a,b){ return (b.tot-a.tot) || a.fg.localeCompare(b.fg); });
+  return {rows:rows, months:months};
+}
+function _cekFgRmTable(){
+  var el=document.getElementById('ckfg-result');
+  if(!el || !_ckfgRmSel) return;
+  if(!_bomData || !_bomData.length){ el.innerHTML='<div style="color:var(--amber)">BOM belum ada di laptop ini.</div>'; return; }
+  var code=_ckfgRmSel;
+  var md=STATE.masterData||{}, rn=STATE.realNameData||{};
+  var m0=md[code]||{};
+  var nm=(_isAdmin && _rmDisplayMode==='realname' && rn[code]) ? rn[code] : (m0.desc||code);
+  var d=_cekFgRmRows();
+  var rows=d.rows, months=d.months;
+  var tipe=/^3/.test(code)?'<span class="badge b-blue" style="font-size:9px">RM</span>':'<span class="badge b-purple" style="font-size:9px">PM</span>';
+  var totM={}, grand=0;
+  months.forEach(function(mo){ totM[mo]=0; });
+  rows.forEach(function(r){ months.forEach(function(mo){ totM[mo]+=r.reqM[mo]; }); grand+=r.tot; });
+  var st=(STATE.stockData||{})[code]||{};
+  var soh=(st.btg||0)+(st.sng||0)+(st.jtk||0)+(st.pjt||0);
+  var po=0; (STATE.poData||[]).forEach(function(p){ if(p.itemCode===code) po+=(p.openQty||0); });
+  var pr=(STATE.osprByItem||{})[code]||0;
+  var chip=function(l,v,c){ return '<span style="font-size:10.5px;color:var(--muted)">'+l+' <b style="color:'+(c||'var(--text)')+'">'+_ckfgFmt(v)+'</b></span>'; };
+  var h='';
+  h+='<div style="background:var(--bg3);border-radius:10px;padding:12px 16px;margin-bottom:12px">';
+  h+='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+    +'<button class="btn btn-sm" onclick="_cekFgRmClose()" style="font-size:11px">← Kembali</button>'
+    +'<span style="font-family:var(--mono);color:var(--accent);font-weight:700;font-size:13px">'+code+'</span>'+tipe
+    +'<span style="font-size:13px;font-weight:700;flex:1;min-width:160px">'+String(nm).replace(/</g,'&lt;')+'</span>'
+    +'<button class="btn btn-sm" onclick="_cekFgRmExport()" style="font-size:11px">↓ Export Excel</button>'
+    +'</div>';
+  h+='<div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px">'
+    +chip('SOH', soh)+chip('PO Open', po, 'var(--accent)')+chip('PR Open', pr, 'var(--teal)')
+    +chip('Total Req horizon', grand, grand>(soh+po+pr)?'var(--red)':'var(--green)')
+    +'<span style="font-size:10.5px;color:var(--muted)">'+rows.length+' FG pemakai'+(m0.uom?' · UoM '+m0.uom:'')+'</span></div>';
+  h+='<div style="font-size:10.5px;color:var(--muted);margin-top:4px">Requirement = plan MPS × qty/pcs BOM (type N) — identik Hitung MRP. Baris TOTAL per bulan = kebutuhan material ini. Read-only, ikut MPS murni.</div>';
+  h+='</div>';
+  var thS='position:sticky;top:0;z-index:5;padding:7px 9px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);background:var(--bg3);border-bottom:2px solid var(--border2);text-align:right;white-space:nowrap';
+  var thL=thS.replace('text-align:right','text-align:left');
+  var tdR='padding:6px 9px;font-size:11.5px;font-family:var(--mono);text-align:right;border-bottom:1px solid var(--border);white-space:nowrap';
+  var tdL='padding:6px 9px;font-size:11.5px;border-bottom:1px solid var(--border)';
+  h+='<div style="overflow:auto;max-height:68vh;border:1px solid var(--border);border-radius:10px"><table style="border-collapse:separate;border-spacing:0;min-width:'+(520+months.length*92)+'px;width:100%">';
+  h+='<thead><tr><th style="'+thL+'">Kode FG</th><th style="'+thL+'">Nama</th><th style="'+thS+'">Qty/pcs</th>';
+  months.forEach(function(mo){ h+='<th style="'+thS+'">'+(_CKFG_MOID[mo]||mo)+'</th>'; });
+  h+='<th style="'+thS+'">Total</th></tr></thead><tbody>';
+  rows.forEach(function(r,i){
+    var bg=i%2?'' :'background:var(--bg3)';
+    var dim=r.hasMps?'':';opacity:.55';
+    h+='<tr style="'+bg+dim+'">'
+      +'<td style="'+tdL+';font-family:var(--mono);white-space:nowrap">'+r.fg+'</td>'
+      +'<td style="'+tdL+';min-width:200px">'+String(r.name).replace(/</g,'&lt;')+(r.hasMps?'':' <span style="font-size:9px;color:var(--muted)">(tanpa MPS)</span>')+'</td>'
+      +'<td style="'+tdR+'">'+(Math.round(r.qty*1000000)/1000000)+'</td>';
+    months.forEach(function(mo){ var v=r.reqM[mo]; h+='<td style="'+tdR+(v?'':';color:var(--muted)')+'">'+(v?_ckfgFmt(v):'—')+'</td>'; });
+    h+='<td style="'+tdR+';font-weight:700">'+_ckfgFmt(r.tot)+'</td></tr>';
+  });
+  h+='<tr style="background:var(--bg3);font-weight:700"><td style="'+tdL+'" colspan="3">TOTAL (= requirement material)</td>';
+  months.forEach(function(mo){ h+='<td style="'+tdR+';font-weight:700;color:var(--accent)">'+_ckfgFmt(totM[mo])+'</td>'; });
+  h+='<td style="'+tdR+';font-weight:700;color:var(--accent)">'+_ckfgFmt(grand)+'</td></tr>';
+  h+='</tbody></table></div>';
+  el.innerHTML=h;
+}
+function _cekFgRmExport(){
+  if(!_ckfgRmSel){ toast('Pilih material dulu','err'); return; }
+  if(typeof XLSX==='undefined'){ toast('XLSX library tidak tersedia','err'); return; }
+  var d=_cekFgRmRows();
+  var moLbl=d.months.map(function(m){ return _CKFG_MOID[m]||m; });
+  var md=STATE.masterData||{}, rn=STATE.realNameData||{};
+  var nm=(_isAdmin && _rmDisplayMode==='realname' && rn[_ckfgRmSel]) ? rn[_ckfgRmSel] : ((md[_ckfgRmSel]||{}).desc||'');
+  var aoa=[[ _ckfgRmSel, nm ],[],['Kode FG','Nama','Qty/pcs'].concat(moLbl).concat(['Total'])];
+  var totM={}, grand=0; d.months.forEach(function(mo){ totM[mo]=0; });
+  d.rows.forEach(function(r){
+    var line=[r.fg,r.name,r.qty];
+    d.months.forEach(function(mo){ line.push(Math.round(r.reqM[mo]*100)/100); totM[mo]+=r.reqM[mo]; });
+    grand+=r.tot; line.push(Math.round(r.tot*100)/100);
+    aoa.push(line);
+  });
+  var totLine=['TOTAL','',''];
+  d.months.forEach(function(mo){ totLine.push(Math.round(totM[mo]*100)/100); });
+  totLine.push(Math.round(grand*100)/100);
+  aoa.push(totLine);
+  var wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Cek by RM');
+  XLSX.writeFile(wb, 'cek_by_rm_'+_ckfgRmSel+'.xlsx');
+  toast('Export ✓','ok');
+}
+
 function _ckfgViewBtns(){
   var vb=function(v,l){ var on=_ckfgView===v; return '<button class="btn btn-sm'+(on?' btn-primary':'')+'" onclick="_cekFgViewSel(\''+v+'\')" style="font-size:10.5px">'+l+'</button>'; };
   return vb('simple','📋 Ringkas')+vb('bulan','📅 Per Bulan');
 }
 function _cekFgViewSel(v){ _ckfgView=v; _cekFgTable(); }
 
-function _cekFgTable(){ if(_ckfgView==='bulan'){ _cekFgTableBulan(); return; } _cekFgTableSimple(); }
+function _cekFgTable(){
+  if(_ckfgRmSel){ _cekFgRmTable(); return; }          // mode reverse RM/PM aktif
+  if(_ckfgView==='bulan'){ _cekFgTableBulan(); return; }
+  _cekFgTableSimple();
+}
 
 function _cekFgTableSimple(){
   var el=document.getElementById('ckfg-result');
