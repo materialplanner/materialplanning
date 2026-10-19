@@ -18816,6 +18816,31 @@ function _mpsUpload(input) {
   reader.readAsArrayBuffer(file);
 }
 
+// Parser angka sel MPS — xlsx mengirim number asli (lewat begitu saja), tapi CSV
+// GSheet (gviz) mengirim STRING sesuai format tampilan sel: "4.800" (ribuan ID),
+// "1,200" (ribuan US), "1.234,5" / "1,234.5" (campuran). parseFloat mentah salah
+// baca semuanya ("4.800"→4.8, "1,200"→1) — ini sumber hitungan MPS GSheet ngaco.
+// Aturan: ada dua pemisah → pemisah TERAKHIR = desimal; satu pemisah → pola
+// ribuan (kelompok 3 digit) dibuang, selain itu dianggap desimal.
+function _mpsNumCell(v){
+  if(typeof v === 'number') return isNaN(v) ? 0 : v;
+  var s = String(v == null ? '' : v).trim().replace(/\s/g,'');
+  if(!s) return 0;
+  var hasC = s.indexOf(',') >= 0, hasD = s.indexOf('.') >= 0;
+  if(hasC && hasD){
+    if(s.lastIndexOf(',') > s.lastIndexOf('.')) s = s.replace(/\./g,'').replace(',', '.'); // 1.234,5 (ID)
+    else s = s.replace(/,/g,'');                                                           // 1,234.5 (US)
+  } else if(hasC){
+    if(/^-?\d{1,3}(,\d{3})+$/.test(s)) s = s.replace(/,/g,''); // 1,200 → ribuan US
+    else s = s.replace(',', '.');                              // 4,5 → desimal ID
+  } else if(hasD){
+    if(/^-?\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g,''); // 4.800 → ribuan ID
+    // selain pola ribuan: biarkan (0.000186 = desimal)
+  }
+  var n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+}
+
 // ── Parser MPS dari 2D array — DIPAKAI BERSAMA upload xlsx & GSheet ──────────
 // Alur persis BOM: sumber mana pun (xlsx / sheet "MPS" di GSheet master data)
 // masuk parser yang SAMA, hasil & penyimpanan identik; label sumber dicatat.
@@ -18913,14 +18938,14 @@ function _mpsParseRows(rows, source, originLabel) {
         if(!code || !/^\d{9,12}/.test(code)) continue;
         var plans = {};
         MRP_MONTHS.forEach(function(m) {
-          plans[m] = planIdxs[m] >= 0 ? (parseFloat(row[planIdxs[m]]) || 0) : 0;
+          plans[m] = planIdxs[m] >= 0 ? _mpsNumCell(row[planIdxs[m]]) : 0;
         });
         _mpsData[code] = plans;
         // Item FG (kode 11/12): simpan angka forecast dari kolom FC apa adanya
         if(/^1[12]/.test(code)) {
           var _fgfc = {}, _hasFc = false;
           Object.keys(fcIdxs).forEach(function(m){
-            var v = parseFloat(row[fcIdxs[m]]) || 0;
+            var v = _mpsNumCell(row[fcIdxs[m]]);
             _fgfc[m] = v; if(v > 0) _hasFc = true;
           });
           if(_hasFc) _mpsFgFc[code] = _fgfc;
