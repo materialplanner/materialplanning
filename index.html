@@ -4611,6 +4611,12 @@ function _wuIsWIP(code, name) {
   var nm = (name || '').trim().toUpperCase();
   return nm.indexOf('WIP') === 0;
 }
+// Parent yang sah utk where-used: FG WIP (aturan di atas) ATAU FG jadi (kode 11/12xxx).
+// Perlu karena PM (4xxx) tidak pernah masuk WIP — PM langsung nempel di FG jadi.
+function _wuParentOk(code, name) {
+  if(_wuIsWIP(code, name)) return true;
+  return /^1[12]/.test(String(code||''));
+}
 function _whereUsedSetMode(mode) {
   window._whereUsedMode = mode;
   var bRm = document.getElementById('wu-mode-rm'), bFg = document.getElementById('wu-mode-fg');
@@ -4620,7 +4626,7 @@ function _whereUsedSetMode(mode) {
     bFg.className = 'btn btn-sm' + (mode==='fg' ? ' btn-primary' : '');
   }
   if(hint) hint.textContent = mode==='rm'
-    ? 'Masukkan kode atau nama RM/PM — cari dipakai di FG (WIP) mana saja'
+    ? 'Masukkan kode atau nama RM/PM — RM muncul di WIP, PM muncul di FG jadi'
     : 'Masukkan kode atau nama FG — cari butuh RM/PM apa saja';
   if(ta) ta.placeholder = mode==='rm'
     ? 'Contoh: 3000010026, Ecocerol\n3000030033'
@@ -4635,7 +4641,7 @@ function _wuGlobalRmUsage() {
   var usage = {}; // rmCode -> {fgSet:{}, count}
   (_bomData||[]).forEach(function(b){
     if(!b.rm || !b.fg) return;
-    if(!_wuIsWIP(b.fg, b.fgDesc)) return; // hanya FG WIP (kode awalan '2' + nama 'WIP...')
+    if(!_wuParentOk(b.fg, b.fgDesc)) return; // FG WIP ATAU FG jadi (11/12xxx)
     if(!usage[b.rm]) usage[b.rm] = {};
     usage[b.rm][b.fg] = true;
   });
@@ -6256,9 +6262,9 @@ function _whereUsedRender() {
     var fgSeen = {}, fgList = [];
     bom.forEach(function(b) {
       if(b.rm !== rmCode || !b.fg || fgSeen[b.fg]) return;
-      if(!_wuIsWIP(b.fg, b.fgDesc)) return; // HANYA FG WIP
+      if(!_wuParentOk(b.fg, b.fgDesc)) return; // FG WIP ATAU FG jadi (11/12xxx) — PM muncul via FG jadi
       fgSeen[b.fg] = true;
-      fgList.push({ fgCode: b.fg, fgName: fgNameOf(b.fg) || b.fg });
+      fgList.push({ fgCode: b.fg, fgName: fgNameOf(b.fg) || b.fg, isWip: _wuIsWIP(b.fg, b.fgDesc) });
     });
     fgList.sort(function(a,b){ return a.fgCode.localeCompare(b.fgCode); });
     if(fgList.length) rows.push({ rmCode: rmCode, rmName: rmNameOf(rmCode) || rmCode, fgList: fgList, fgCountGlobal: usage[rmCode] || 0 });
@@ -6266,7 +6272,7 @@ function _whereUsedRender() {
   window._whereUsedData = { mode:'rm', rows: rows };
 
   if(!rows.length) {
-    el.innerHTML = '<div style="color:var(--muted);padding:8px">RM/PM yang dicari tidak dipakai di FG WIP mana pun.</div>';
+    el.innerHTML = '<div style="color:var(--muted);padding:8px">RM/PM yang dicari tidak dipakai di WIP maupun FG mana pun (cek BOM).</div>';
     return;
   }
   _whereUsedPaintRM(el, rows);
@@ -6277,7 +6283,7 @@ function _whereUsedPaintRM(el, rows) {
   var totalFG = rows.reduce(function(s,r){ return s+r.fgList.length; }, 0);
   var thS = 'padding:8px 10px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);background:var(--bg3);border-bottom:2px solid var(--border2)';
   var html = '<div style="font-size:11px;color:var(--muted);margin-bottom:10px;display:flex;align-items:center;gap:10px">'
-    + '<span><b>'+rows.length+'</b> RM/PM · <b>'+totalFG+'</b> FG WIP</span>'
+    + '<span><b>'+rows.length+'</b> RM/PM · <b>'+totalFG+'</b> WIP/FG</span>'
     + '<button class="btn btn-sm" onclick="_whereUsedCopy()" style="font-size:11px">Copy</button>'
     + '</div>';
   html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
@@ -6285,8 +6291,8 @@ function _whereUsedPaintRM(el, rows) {
     + '<th style="'+thS+'">Kode RM/PM</th>'
     + '<th style="'+thS+'">Nama RM/PM</th>'
     + '<th style="'+thS+';text-align:center">Dipakai di</th>'
-    + '<th style="'+thS+'">Kode FG</th>'
-    + '<th style="'+thS+'">Nama FG (WIP)</th>'
+    + '<th style="'+thS+'">Kode FG/WIP</th>'
+    + '<th style="'+thS+'">Nama FG/WIP</th>'
     + '</tr></thead><tbody>';
   rows.forEach(function(r, ri) {
     var rowBg = ri%2===0 ? '' : 'background:var(--bg3)';
@@ -6301,7 +6307,10 @@ function _whereUsedPaintRM(el, rows) {
         html += '<td style="padding:8px 10px;font-size:11.5px;font-weight:500;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:top" rowspan="'+r.fgList.length+'">'+r.rmName+'</td>';
         html += '<td style="padding:8px 10px;text-align:center;vertical-align:top" rowspan="'+r.fgList.length+'">'+usageBadge+'</td>';
       }
-      html += '<td style="padding:8px 10px;font-family:var(--mono);font-size:11px;white-space:nowrap">'+fg.fgCode+'</td>';
+      var typeBadge = fg.isWip
+        ? '<span style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:8px;background:rgba(245,158,11,.15);color:var(--amber);font-weight:700;font-size:9px">WIP</span>'
+        : '<span style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:8px;background:rgba(34,197,94,.15);color:var(--green);font-weight:700;font-size:9px">FG</span>';
+      html += '<td style="padding:8px 10px;font-family:var(--mono);font-size:11px;white-space:nowrap">'+fg.fgCode+typeBadge+'</td>';
       html += '<td style="padding:8px 10px;font-size:11.5px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+fg.fgName+'</td>';
       html += '</tr>';
     });
@@ -6394,13 +6403,13 @@ function _whereUsedExport() {
     });
     cols = [{wch:14},{wch:35},{wch:14},{wch:30},{wch:20},{wch:8}];
   } else {
-    data = [['Kode RM/PM','Nama RM/PM','Dipakai di (FG WIP)','Unik?','Kode FG','Nama FG (WIP)']];
+    data = [['Kode RM/PM','Nama RM/PM','Dipakai di (WIP/FG)','Unik?','Kode FG/WIP','Nama FG/WIP','Tipe']];
     d.rows.forEach(function(r) {
       r.fgList.forEach(function(fg) {
-        data.push([r.rmCode, r.rmName, r.fgCountGlobal, r.fgCountGlobal===1?'UNIK':'', fg.fgCode, fg.fgName]);
+        data.push([r.rmCode, r.rmName, r.fgCountGlobal, r.fgCountGlobal===1?'UNIK':'', fg.fgCode, fg.fgName, fg.isWip?'WIP':'FG']);
       });
     });
-    cols = [{wch:14},{wch:30},{wch:20},{wch:8},{wch:14},{wch:35}];
+    cols = [{wch:14},{wch:30},{wch:20},{wch:8},{wch:14},{wch:35},{wch:6}];
   }
 
   var ws = XLSX.utils.aoa_to_sheet(data);
