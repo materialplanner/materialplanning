@@ -2116,6 +2116,18 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
   </div>
 </div>
 
+<!-- Modal Detail PO Open per item -->
+<div class="modal-bg" id="modal-po-detail">
+  <div class="modal" style="width:680px;max-width:96vw">
+    <h3 style="margin-bottom:2px">Detail PO Open — <span id="pod-code" style="color:var(--teal);font-size:14px"></span></h3>
+    <div id="pod-sub" style="font-size:11.5px;color:var(--muted);margin-bottom:10px"></div>
+    <div id="pod-body" style="max-height:60vh;overflow:auto"></div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="closeModal('modal-po-detail')">Tutup</button>
+    </div>
+  </div>
+</div>
+
 <!-- Modal Rincian Requirement per FG -->
 <div class="modal-bg" id="modal-req-detail">
   <div class="modal" style="width:720px;max-width:96vw">
@@ -15633,6 +15645,58 @@ function _fcVal(qty, code) {
 // Angka "raw MRP" ini = forecastRaw[mi]. Nilai Requirement yang tampil di tabel
 // bisa berbeda utk bulan berjalan (dikurangi matcom) atau saat "Sertakan NPD" aktif
 // (ditambah kebutuhan NPD) — perbedaan itu ditampilkan sebagai catatan di bawah.
+// Popup detail SEMUA PO open untuk satu item — dipanggil dari "Total PO" di kartu
+// info item & dari sel baris Adjusted OSPO. mi (index bulan) opsional, hanya untuk
+// label konteks; daftar PO selalu semua PO open item tsb (apa adanya dari SAP).
+function _fcShowPODetail(code, mi) {
+  var pos = (STATE.poData || []).filter(function(p){ return p.itemCode === code && (p.openQty||0) > 0; });
+  var md  = (STATE.masterData || {})[code] || {};
+  var rn  = (STATE.realNameData || {})[code];
+  var nm  = (_isAdmin && _rmDisplayMode === 'realname' && rn) ? rn : (md.desc || '');
+  var uom = md.uom || (pos[0] && pos[0].uom) || '';
+  // Sort by tanggal kirim (prReqDate DD/MM/YYYY); tanpa tanggal → paling bawah
+  var toIso = function(d){ var m=/^(\d{2})\/(\d{2})\/(\d{4})$/.exec(String(d||'')); return m ? (m[3]+'-'+m[2]+'-'+m[1]) : '9999-99-99'; };
+  pos.sort(function(a,b){ return toIso(a.prReqDate).localeCompare(toIso(b.prReqDate)) || String(a.docNum).localeCompare(String(b.docNum)); });
+  var total = pos.reduce(function(s,p){ return s+(p.openQty||0); }, 0);
+  document.getElementById('pod-code').textContent = code + (nm ? ' · ' + nm : '');
+  var ctx = (typeof mi === 'number' && window.FC_MONTHS && window.FC_MONTHS[mi])
+    ? ' · diklik dari bulan <strong style="color:var(--text)">' + window.FC_MONTHS[mi] + "'" + _fcYearForMonthIdx(mi) + '</strong> (plot Adjusted OSPO = distribusi pool, bukan per-PO)'
+    : '';
+  document.getElementById('pod-sub').innerHTML = pos.length + ' PO open · Total <strong style="color:var(--teal)">'
+    + n_id(Math.round(total*100)/100) + ' ' + uom + '</strong>' + ctx;
+  var html;
+  if(!pos.length) {
+    html = '<div style="padding:16px;text-align:center;color:var(--muted);font-size:12px">Tidak ada PO open untuk item ini di data OSPO saat ini.</div>';
+  } else {
+    html = '<table style="width:100%;border-collapse:collapse;font-size:11.5px">'
+      + '<thead><tr style="border-bottom:1px solid var(--border2)">'
+      + '<th style="text-align:left;padding:6px 8px;color:var(--muted);font-weight:600">No. PO</th>'
+      + '<th style="text-align:left;padding:6px 8px;color:var(--muted);font-weight:600">Supplier</th>'
+      + '<th style="text-align:center;padding:6px 8px;color:var(--muted);font-weight:600">Site</th>'
+      + '<th style="text-align:center;padding:6px 8px;color:var(--muted);font-weight:600">Tgl Kirim</th>'
+      + '<th style="text-align:right;padding:6px 8px;color:var(--muted);font-weight:600">Open Qty</th>'
+      + '</tr></thead><tbody>';
+    var today = new Date(); today.setHours(0,0,0,0);
+    pos.forEach(function(p){
+      var iso = toIso(p.prReqDate);
+      var late = iso !== '9999-99-99' && new Date(iso) < today;
+      html += '<tr style="border-bottom:1px dotted var(--border)">'
+        + '<td style="padding:5px 8px;font-family:var(--mono);color:var(--text)">' + (p.docNum||'—') + '</td>'
+        + '<td style="padding:5px 8px;color:var(--muted)">' + (p.supplierName||'—') + '</td>'
+        + '<td style="padding:5px 8px;text-align:center;font-family:var(--mono);font-size:10.5px;color:var(--muted)">' + (p.site||'—') + '</td>'
+        + '<td style="padding:5px 8px;text-align:center;font-family:var(--mono)' + (late?';color:var(--red);font-weight:600':';color:var(--text)') + '" title="' + (late?'Tanggal kirim sudah lewat — barang belum diterima':'') + '">' + (p.prReqDate||'—') + (late?' ⚠':'') + '</td>'
+        + '<td style="padding:5px 8px;text-align:right;font-family:var(--mono);color:var(--teal);font-weight:600">' + n_id(p.openQty||0) + ' ' + (p.uom||'') + '</td>'
+        + '</tr>';
+    });
+    html += '<tr style="border-top:2px solid var(--border2);font-weight:700">'
+      + '<td style="padding:6px 8px" colspan="4">TOTAL PO Open</td>'
+      + '<td style="padding:6px 8px;text-align:right;font-family:var(--mono);color:var(--teal)">' + n_id(Math.round(total*100)/100) + ' ' + uom + '</td></tr>';
+    html += '</tbody></table>';
+  }
+  document.getElementById('pod-body').innerHTML = html;
+  document.getElementById('modal-po-detail').classList.add('open');
+}
+
 function _fcShowReqDetail(code, mi, _retry) {
   var _mpsOk = _mpsData && Object.keys(_mpsData).length;
   var _bomOk = _bomData && _bomData.length;
@@ -16398,7 +16462,9 @@ function _fcDetailRow(code, fc, master) {
   var mRows = [['Kode','<span style="font-family:var(--mono)">'+code+'</span>'],['Tipe',iType],['UoM',master.uom||'—'],
     ['MOQ',n_id(master.moq||0)],['Multiple',n_id(master.multiple||1)],['Lead Time',fc.lt_days+' hari'],
     ['SOH',_sohDisplay],
-    ['Total PO','<span style="color:'+(_totPO>0?'var(--teal)':'var(--muted)')+';font-weight:600">'+n_id(_totPO)+'</span> <small style="color:var(--muted)">'+(master.uom||'')+'</small>'],
+    ['Total PO', _totPO>0
+      ? '<span onclick="_fcShowPODetail(\''+code+'\')" title="Klik: detail semua PO open item ini" style="color:var(--teal);font-weight:600;cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px">'+n_id(_totPO)+'</span> <small style="color:var(--muted)">'+(master.uom||'')+'</small>'
+      : '<span style="color:var(--muted);font-weight:600">'+n_id(_totPO)+'</span> <small style="color:var(--muted)">'+(master.uom||'')+'</small>'],
     ['Total PR','<span style="color:'+(_totPR>0?'var(--accent)':'var(--muted)')+';font-weight:600">'+n_id(_totPR)+'</span> <small style="color:var(--muted)">'+(master.uom||'')+'</small>'],
     ['ABC','<span style="font-weight:700;color:'+abcColor+'">'+( abc||'—')+'</span>']];
   // Sisipkan matcom rows sebelum ABC
@@ -16482,7 +16548,7 @@ function _fcDetailRow(code, fc, master) {
       + cells + _totO + '</tr>';
   }
 
-  function gRow(label, vals, clsFn, editable, fieldCode, cellClick) {
+  function gRow(label, vals, clsFn, editable, fieldCode, cellClick, cellTitle) {
     var isValueMode = window._fcValueView;
     var isDOI = (label === 'DOI (hari)');
     var cells = vals.map(function(v, i) {
@@ -16517,7 +16583,7 @@ function _fcDetailRow(code, fc, master) {
       var style = clsFn ? clsFn(v, i) : 'color:var(--text)';
       var disp  = (v===0||v===null||v===undefined) ? '<span style="color:var(--hint)">—</span>' : n_id(v);
       if(cellClick && v>0) {
-        return '<td onclick="event.stopPropagation();'+cellClick+'(\''+code+'\','+i+')" title="Klik: rincian FG pembentuk requirement" style="text-align:right;padding:5px 5px;font-family:var(--mono);font-size:11px;cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px;'+style+'">'+disp+'</td>';
+        return '<td onclick="event.stopPropagation();'+cellClick+'(\''+code+'\','+i+')" title="'+(cellTitle||'Klik: rincian FG pembentuk requirement')+'" style="text-align:right;padding:5px 5px;font-family:var(--mono);font-size:11px;cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px;'+style+'">'+disp+'</td>';
       }
       return '<td style="text-align:right;padding:5px 5px;font-family:var(--mono);font-size:11px;'+style+'">'+disp+'</td>';
     }).join('');
@@ -16606,7 +16672,7 @@ function _fcDetailRow(code, fc, master) {
       })() : '')
     + gRow('Requirement', _fcValArr(fc.forecast, code), function(v,i){ return (window._inclNPD && fc.npdAdd && fc.npdAdd[i]>0) ? 'background:var(--teal-bg);color:var(--teal);font-weight:700' : 'color:var(--text)'; }, false, code, '_fcShowReqDetail')
     + (isFcView
-        ? gRow('Adjusted OSPO', _fcValArr(fc.forecastOspo, code), function(v){ return v>0?'color:var(--teal);font-weight:600':'color:var(--hint)'; })
+        ? gRow('Adjusted OSPO', _fcValArr(fc.forecastOspo, code), function(v){ return v>0?'color:var(--teal);font-weight:600':'color:var(--hint)'; }, false, code, '_fcShowPODetail', 'Klik: detail semua PO open item ini')
         : gRowOspo('OSPO', _fcValArr(fc.ospo, code), _fcValArr(fc.ospoBase, code), code, 'ospo')
       )
     + (isFcView
