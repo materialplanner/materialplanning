@@ -773,13 +773,13 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
 <div class="page" id="pg-cek-fg">
   <div class="ph-l">
     <h2>🧪 Cek by FG</h2>
-    <p>Simulasi kecukupan material per FG. Requirement awal mengikuti plan MPS — qty bisa diubah bebas untuk cek skenario ("kalau jalan 200k, RM aman?"). <b>Hanya untuk cek</b>: tidak mempengaruhi Forecast/MRP dan tidak disimpan.</p>
+    <p>Simulasi kecukupan material per FG. Requirement awal mengikuti plan MPS — qty bisa diubah bebas untuk cek skenario ("kalau jalan 200k, RM aman?"). Bisa juga <b>reverse</b>: masukkan kode/nama RM-PM di kolom cari → muncul kebutuhan per FG per bulan. <b>Hanya untuk cek</b>: tidak mempengaruhi Forecast/MRP dan tidak disimpan.</p>
   </div>
 
   <div style="background:var(--bg3);border-radius:10px;padding:14px 16px;margin-bottom:14px">
-    <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Cari FG — kode atau nama. Bisa pilih beberapa FG (mis. semua varian Hydraglaze) → kebutuhan material otomatis di-pivot.</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Cari FG <b>atau RM/PM</b> — kode atau nama. FG bisa dipilih beberapa (mis. semua varian Hydraglaze) → kebutuhan material di-pivot. Hasil material ditandai 🔄 — klik untuk lihat kebutuhan per FG per bulan.</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <input id="ckfg-search" oninput="_cekFgSearch()" placeholder="contoh: hydraglaze / 1201010311 — klik hasil untuk menambah"
+      <input id="ckfg-search" oninput="_cekFgSearch()" placeholder="contoh: hydraglaze / 1201010311 / 3000010001 / kode PM — FG maupun RM/PM bisa dicari"
         style="flex:1;min-width:260px;padding:8px 10px;font-size:12px;font-family:var(--mono);border:1px solid var(--border2);border-radius:6px;background:var(--bg2);color:var(--text)">
       <button class="btn btn-sm" onclick="document.getElementById('ckfg-search').value='';_cekFgSearch()">✕ Clear</button>
     </div>
