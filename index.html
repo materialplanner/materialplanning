@@ -6892,6 +6892,7 @@ var _ckfgView  = 'simple';      // 'simple' = ringkas 1 skenario | 'bulan' = per
 var _ckfgPlansM= {};            // plan per FG per bulan {fg:{Mon:qty}} (absen = ikut MPS)
 var _ckfgRmSel = null;          // mode REVERSE: kode RM/PM terpilih (lihat kebutuhan per FG)
 var _ckfgRmHits= [];            // hasil pencarian material (RM/PM) terakhir
+var _ckfgRmQty = null;          // kalkulator simulasi: qty RM/PM yang dipunya (null = off)
 
 function _ckfgFmt(v){ return (Math.round((v||0)*100)/100).toLocaleString('id-ID',{maximumFractionDigits:2}); }
 function _ckfgStatusOf(r){ return r.req<=0 ? '-' : (r.diffPR<0 ? 'Perlu PR' : (r.diffDtg<0 ? 'Perlu Datang' : 'Aman')); }
@@ -7104,7 +7105,15 @@ function _cekFgRows(){
 // Read-only & ikut MPS murni (bukan skenario sandbox FG yang sedang dipilih).
 function _cekFgPickRM(code){
   _ckfgRmSel = code;
+  _ckfgRmQty = null; // reset kalkulator saat ganti material
   _cekFgCloseSearch();
+  _cekFgRmTable();
+}
+// Kalkulator simulasi reverse: set qty RM/PM yang dipunya → kolom "≈ FG (pcs)"
+function _cekFgRmQtySet(v){
+  if(v == null || v === ''){ _ckfgRmQty = null; _cekFgRmTable(); return; }
+  var n = (typeof v === 'number') ? v : _mpsNumCell(v);
+  _ckfgRmQty = (isFinite(n) && n > 0) ? n : null;
   _cekFgRmTable();
 }
 function _cekFgRmClose(){
@@ -7165,13 +7174,27 @@ function _cekFgRmTable(){
     +chip('Total Req horizon', grand, grand>(soh+po+pr)?'var(--red)':'var(--green)')
     +'<span style="font-size:10.5px;color:var(--muted)">'+rows.length+' FG pemakai'+(m0.uom?' · UoM '+m0.uom:'')+'</span></div>';
   h+='<div style="font-size:10.5px;color:var(--muted);margin-top:4px">Requirement = plan MPS × qty/pcs BOM (type N) — identik Hitung MRP. Baris TOTAL per bulan = kebutuhan material ini. Read-only, ikut MPS murni.</div>';
+  // ── Kalkulator simulasi: qty RM/PM → berapa FG yang bisa dibuat ──
+  var calcVal = (_ckfgRmQty != null && isFinite(_ckfgRmQty)) ? _ckfgRmQty : null;
+  h+='<div style="margin-top:8px;padding:8px 10px;background:var(--bg2);border:1px dashed var(--border2);border-radius:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+    +'<span style="font-size:11px;font-weight:700">🧮 Simulasi:</span>'
+    +'<span style="font-size:11px;color:var(--muted)">kalau punya</span>'
+    +'<input id="ckfg-rm-qty" type="text" value="'+(calcVal!=null?calcVal:'')+'" placeholder="qty'+(m0.uom?' '+m0.uom:'')+'" onchange="_cekFgRmQtySet(this.value)" onkeydown="if(event.key===\'Enter\')this.blur()" style="width:110px;padding:4px 8px;font-family:var(--mono);font-size:12px;background:var(--bg);border:1px solid var(--border2);border-radius:6px;color:var(--text)">'
+    +(m0.uom?'<span style="font-size:11px;color:var(--muted)">'+m0.uom+'</span>':'')
+    +'<span style="font-size:11px;color:var(--muted)">→ kolom <b>≈ FG (pcs)</b> per baris</span>'
+    +'<button class="btn btn-sm" style="font-size:10px" onclick="_cekFgRmQtySet('+soh+')">= SOH</button>'
+    +'<button class="btn btn-sm" style="font-size:10px" onclick="_cekFgRmQtySet('+(soh+po+pr)+')">= SOH+PO+PR</button>'
+    +(calcVal!=null?'<button class="btn btn-sm" style="font-size:10px" onclick="_cekFgRmQtySet(null)">✕ reset</button>':'')
+    +(calcVal!=null?'<span style="font-size:10px;color:var(--amber)">⚠ angka per FG = kalau SELURUH qty dipakai untuk FG itu saja (alternatif, bukan dibagi)</span>':'')
+    +'</div>';
   h+='</div>';
   var thS='position:sticky;top:0;z-index:5;padding:7px 9px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);background:var(--bg3);border-bottom:2px solid var(--border2);text-align:right;white-space:nowrap';
   var thL=thS.replace('text-align:right','text-align:left');
   var tdR='padding:6px 9px;font-size:11.5px;font-family:var(--mono);text-align:right;border-bottom:1px solid var(--border);white-space:nowrap';
   var tdL='padding:6px 9px;font-size:11.5px;border-bottom:1px solid var(--border)';
-  h+='<div style="overflow:auto;max-height:68vh;border:1px solid var(--border);border-radius:10px"><table style="border-collapse:separate;border-spacing:0;min-width:'+(520+months.length*92)+'px;width:100%">';
+  h+='<div style="overflow:auto;max-height:68vh;border:1px solid var(--border);border-radius:10px"><table style="border-collapse:separate;border-spacing:0;min-width:'+(520+(calcVal!=null?110:0)+months.length*92)+'px;width:100%">';
   h+='<thead><tr><th style="'+thL+'">Kode FG</th><th style="'+thL+'">Nama</th><th style="'+thS+'">Qty/pcs</th>';
+  if(calcVal!=null) h+='<th style="'+thS+';color:var(--teal)" title="'+_ckfgFmt(calcVal)+' ÷ qty/pcs — jika seluruh qty dipakai untuk FG ini">≈ FG (pcs)</th>';
   months.forEach(function(mo){ h+='<th style="'+thS+'">'+(_CKFG_MOID[mo]||mo)+'</th>'; });
   h+='<th style="'+thS+'">Total</th></tr></thead><tbody>';
   rows.forEach(function(r,i){
@@ -7181,10 +7204,14 @@ function _cekFgRmTable(){
       +'<td style="'+tdL+';font-family:var(--mono);white-space:nowrap">'+r.fg+'</td>'
       +'<td style="'+tdL+';min-width:200px">'+String(r.name).replace(/</g,'&lt;')+(r.hasMps?'':' <span style="font-size:9px;color:var(--muted)">(tanpa MPS)</span>')+'</td>'
       +'<td style="'+tdR+'">'+(Math.round(r.qty*1000000)/1000000)+'</td>';
+    if(calcVal!=null){
+      var canMake = r.qty>0 ? Math.floor(calcVal/r.qty) : null;
+      h+='<td style="'+tdR+';font-weight:700;color:var(--teal)">'+(canMake!=null?_ckfgFmt(canMake):'—')+'</td>';
+    }
     months.forEach(function(mo){ var v=r.reqM[mo]; h+='<td style="'+tdR+(v?'':';color:var(--muted)')+'">'+(v?_ckfgFmt(v):'—')+'</td>'; });
     h+='<td style="'+tdR+';font-weight:700">'+_ckfgFmt(r.tot)+'</td></tr>';
   });
-  h+='<tr style="background:var(--bg3);font-weight:700"><td style="'+tdL+'" colspan="3">TOTAL (= requirement material)</td>';
+  h+='<tr style="background:var(--bg3);font-weight:700"><td style="'+tdL+'" colspan="'+(calcVal!=null?4:3)+'">TOTAL (= requirement material)</td>';
   months.forEach(function(mo){ h+='<td style="'+tdR+';font-weight:700;color:var(--accent)">'+_ckfgFmt(totM[mo])+'</td>'; });
   h+='<td style="'+tdR+';font-weight:700;color:var(--accent)">'+_ckfgFmt(grand)+'</td></tr>';
   h+='</tbody></table></div>';
@@ -7197,15 +7224,20 @@ function _cekFgRmExport(){
   var moLbl=d.months.map(function(m){ return _CKFG_MOID[m]||m; });
   var md=STATE.masterData||{}, rn=STATE.realNameData||{};
   var nm=(_isAdmin && _rmDisplayMode==='realname' && rn[_ckfgRmSel]) ? rn[_ckfgRmSel] : ((md[_ckfgRmSel]||{}).desc||'');
-  var aoa=[[ _ckfgRmSel, nm ],[],['Kode FG','Nama','Qty/pcs'].concat(moLbl).concat(['Total'])];
+  var calcQ=(_ckfgRmQty!=null && isFinite(_ckfgRmQty))?_ckfgRmQty:null;
+  var hdr=['Kode FG','Nama','Qty/pcs'];
+  if(calcQ!=null) hdr.push('≈ FG (pcs) dari '+calcQ);
+  var aoa=[[ _ckfgRmSel, nm ],[],hdr.concat(moLbl).concat(['Total'])];
   var totM={}, grand=0; d.months.forEach(function(mo){ totM[mo]=0; });
   d.rows.forEach(function(r){
     var line=[r.fg,r.name,r.qty];
+    if(calcQ!=null) line.push(r.qty>0?Math.floor(calcQ/r.qty):'');
     d.months.forEach(function(mo){ line.push(Math.round(r.reqM[mo]*100)/100); totM[mo]+=r.reqM[mo]; });
     grand+=r.tot; line.push(Math.round(r.tot*100)/100);
     aoa.push(line);
   });
   var totLine=['TOTAL','',''];
+  if(calcQ!=null) totLine.push('');
   d.months.forEach(function(mo){ totLine.push(Math.round(totM[mo]*100)/100); });
   totLine.push(Math.round(grand*100)/100);
   aoa.push(totLine);
