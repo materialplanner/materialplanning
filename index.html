@@ -13710,7 +13710,7 @@ function renderHighlighted() {
     var covStr = p.coverageDateStr || '—';
     return '<div style="display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:0.5px solid var(--border)">'+
       '<span style="width:8px;height:8px;border-radius:50%;background:'+dotColor+';display:inline-block;flex-shrink:0;margin-top:5px"></span>'+
-      '<div style="flex:1;min-width:0;overflow:hidden">'+
+      '<div style="flex:1;min-width:0;overflow:hidden;cursor:pointer" onclick="_dashGoForecast(\''+p.productCode+'\')" title="Klik → buka item ini di Forecast & Propose PR">'+
         '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">'+
           '<div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">'+name+grpoBadge2+'</div>'+
           '<div style="flex-shrink:0;display:flex;align-items:center;gap:4px">'+
@@ -13730,6 +13730,33 @@ function renderHighlighted() {
       '<span onclick="toggleHighlight(\''+p.productCode+'\',false)" title="Unpin" style="cursor:pointer;color:var(--muted);font-size:14px;flex-shrink:0;padding-top:2px;margin-left:4px">✕</span>'+
     '</div>';
   }).join('');
+}
+
+// Klik item di Highlighted Issues → lompat ke menu Forecast, search terisi kode
+// item, filter lain di-reset (ABC/status/rows → semua; tipe item ditambah kalau
+// tipe item ini sedang tidak dicentang), baris langsung expand + scroll.
+function _dashGoForecast(code) {
+  // Pastikan tipe item ini ikut tercentang di filter tipe (kalau tidak, item tak tampil)
+  try {
+    var t = (typeof _fcCodeType === 'function') ? _fcCodeType(code) : '';
+    if(t && t !== 'OTHER' && (window._fcTypeSel||[]).indexOf(t) < 0) {
+      window._fcTypeSel = (window._fcTypeSel||[]).concat([t]);
+      if(typeof _fcTypeSave === 'function') _fcTypeSave();
+    }
+  } catch(e) {}
+  // Isi search dengan kode (exact-match) & reset filter lain supaya pasti kelihatan
+  var s = document.getElementById('srch-fc'); if(s) s.value = code;
+  ['f-fc-abc','f-fc-status','f-fc-rows'].forEach(function(id){
+    var el = document.getElementById(id); if(el) el.value = '';
+  });
+  _fcExpanded[code] = true; // langsung buka detail
+  var nav = document.querySelector('.ni[data-label="Forecast & Propose PR"]');
+  showPage('forecast', nav); // handler showPage memanggil renderForecast dgn filter di atas
+  setTimeout(function(){
+    // scope ke halaman forecast — data-code juga dipakai tabel lain (projection dkk)
+    var row = document.querySelector('#pg-forecast [data-code="'+code+'"]');
+    if(row) row.scrollIntoView({behavior:'smooth', block:'start'});
+  }, 120);
 }
 
 function toggleColMenu() {
