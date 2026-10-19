@@ -3638,7 +3638,7 @@ function _applyRealtimeChanges(keys, vals) {
         case 'sap_cache_po':
           var rawP = JSON.parse(val || '[]');
           STATE.poData = _filterPOBlacklist(rawP.map(function(p){
-            if(p.d !== undefined) return {docNum:p.d,itemCode:p.i,itemName:p.n,supplierName:p.s,openQty:p.q,uom:p.u,prReqDate:fmtSAPDate(p.r),site:p.t,lineNum:(p.l!=null?parseInt(p.l):null)};
+            if(p.d !== undefined) return {docNum:p.d,itemCode:p.i,itemName:p.n,supplierName:p.s,openQty:p.q,uom:p.u,prReqDate:fmtSAPDate(p.r),site:p.t,lineNum:(p.l!=null?parseInt(p.l):null),poReqDate:fmtSAPDate(p.e||''),docDate:fmtSAPDate(p.o||'')};
             return p;
           }));
           loadOSPO();
@@ -6641,6 +6641,9 @@ async function loadPO() {
     }).map(function(r){
       return { docNum: r.DocNum, docDate: fmtSAPDate(r.DocDate),
         prReqDate: fmtSAPDate(r.PR_Req_Date), site: r.U_ReqSite||'',
+        // PO Req Date (tgl kirim di PO) — baru terisi kalau query SAP report 28
+        // sudah ditambah kolom alias PO_Req_Date (atau ShipDate); selain itu kosong
+        poReqDate: fmtSAPDate(r.PO_Req_Date || r.ShipDate || r.Ship_Date || ''),
         supplierName: r.CardName, itemCode: r.ItemCode,
         itemName: r.Dscription, openQty: r.OpenQty, uom: r.unitMsr,
         status: r.DocStatus, lineStatus: r.PO_LineStatus,
@@ -7752,7 +7755,7 @@ async function syncAll() {
       var sStock = JSON.stringify(STATE.stockData);
       // Compress PO: short keys, hanya field esensial
       var compPO = (STATE.poData||[]).map(function(p){
-        return {d:p.docNum,i:p.itemCode,n:p.itemName,s:p.supplierName,q:p.openQty,u:p.uom,r:p.prReqDate,t:p.site,l:p.lineNum};
+        return {d:p.docNum,i:p.itemCode,n:p.itemName,s:p.supplierName,q:p.openQty,u:p.uom,r:p.prReqDate,t:p.site,l:p.lineNum,e:p.poReqDate||'',o:p.docDate||''};
       });
       var sPO = JSON.stringify(compPO);
       // Compress GRPO
@@ -14003,7 +14006,7 @@ function _appInit() {
           // PENTING: lineNum (l) HARUS ikut di-restore — kalau tidak, _poKey() jatuh ke
           // format lama (docNum_itemCode) dan semua tgl request/konfirmasi yang tersimpan
           // di key baru (docNum_lineNum_itemCode) tidak ketemu sampai user klik Refresh SAP.
-          if(p.d !== undefined) return {docNum:p.d,itemCode:p.i,itemName:p.n,supplierName:p.s,openQty:p.q,uom:p.u,prReqDate:fmtSAPDate(p.r),site:p.t,lineNum:(p.l!=null?parseInt(p.l):null)};
+          if(p.d !== undefined) return {docNum:p.d,itemCode:p.i,itemName:p.n,supplierName:p.s,openQty:p.q,uom:p.u,prReqDate:fmtSAPDate(p.r),site:p.t,lineNum:(p.l!=null?parseInt(p.l):null),poReqDate:fmtSAPDate(p.e||''),docDate:fmtSAPDate(p.o||'')};
           return p;
         }));
       }
@@ -15671,22 +15674,26 @@ function _fcShowPODetail(code, mi) {
     html = '<table style="width:100%;border-collapse:collapse;font-size:11.5px">'
       + '<thead><tr style="border-bottom:1px solid var(--border2)">'
       + '<th style="text-align:left;padding:6px 8px;color:var(--muted);font-weight:600">No. PO</th>'
+      + '<th style="text-align:center;padding:6px 8px;color:var(--muted);font-weight:600">Doc Date</th>'
       + '<th style="text-align:left;padding:6px 8px;color:var(--muted);font-weight:600">Supplier</th>'
       + '<th style="text-align:center;padding:6px 8px;color:var(--muted);font-weight:600">Site</th>'
       + '<th style="text-align:center;padding:6px 8px;color:var(--muted);font-weight:600">PR Req Date</th>'
+      + '<th style="text-align:center;padding:6px 8px;color:var(--muted);font-weight:600" title="Tgl kirim di PO — terisi setelah query SAP report 28 ditambah kolom PO_Req_Date">PO Req Date</th>'
       + '<th style="text-align:right;padding:6px 8px;color:var(--muted);font-weight:600">Open Qty</th>'
       + '</tr></thead><tbody>';
     pos.forEach(function(p){
       html += '<tr style="border-bottom:1px dotted var(--border)">'
         + '<td style="padding:5px 8px;font-family:var(--mono);color:var(--text)">' + (p.docNum||'—') + '</td>'
+        + '<td style="padding:5px 8px;text-align:center;font-family:var(--mono);color:var(--muted)">' + (p.docDate||'—') + '</td>'
         + '<td style="padding:5px 8px;color:var(--muted)">' + (p.supplierName||'—') + '</td>'
         + '<td style="padding:5px 8px;text-align:center;font-family:var(--mono);font-size:10.5px;color:var(--muted)">' + (p.site||'—') + '</td>'
         + '<td style="padding:5px 8px;text-align:center;font-family:var(--mono);color:var(--text)">' + (p.prReqDate||'—') + '</td>'
+        + '<td style="padding:5px 8px;text-align:center;font-family:var(--mono);color:var(--text)">' + (p.poReqDate||'—') + '</td>'
         + '<td style="padding:5px 8px;text-align:right;font-family:var(--mono);color:var(--teal);font-weight:600">' + n_id(p.openQty||0) + ' ' + (p.uom||'') + '</td>'
         + '</tr>';
     });
     html += '<tr style="border-top:2px solid var(--border2);font-weight:700">'
-      + '<td style="padding:6px 8px" colspan="4">TOTAL PO Open</td>'
+      + '<td style="padding:6px 8px" colspan="6">TOTAL PO Open</td>'
       + '<td style="padding:6px 8px;text-align:right;font-family:var(--mono);color:var(--teal)">' + n_id(Math.round(total*100)/100) + ' ' + uom + '</td></tr>';
     html += '</tbody></table>';
   }
