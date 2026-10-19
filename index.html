@@ -6894,7 +6894,8 @@ async function loadMatcomSAP() {
 //                   Perlu Datang = PR aman tapi SOH − req < 0 → PO/PR harus DATANG;
 //                   Aman = stok fisik saja sudah cukup.
 var _ckfgSels  = [];            // kode FG terpilih (multi)
-var _ckfgMonth = '__TOTAL__';   // '__TOTAL__' atau bulan MPS (short EN)
+var _ckfgMonth = '__TOTAL__';   // legacy — tidak dipakai lagi (diganti _ckfgMonthsSel multi-ceklis)
+var _ckfgMonthsSel = null;      // null = semua bulan; array bulan shortEN = hanya bulan terceklis
 var _ckfgPlans = {};            // qty plan per FG {kode: qty} (absen = ikut MPS)
 var _ckfgOvr   = {};            // override requirement per material {kode: qty}
 var _ckfgType  = 'ALL';         // filter cepat: ALL | RM | PM
@@ -7043,11 +7044,25 @@ function _cekFgClearAll(){
   var el=document.getElementById('ckfg-result'); if(el) el.innerHTML='<div style="color:var(--muted)">Cari lalu pilih FG untuk melihat materialnya.</div>';
 }
 
+// Bulan MPS efektif: null/kosong = semua bulan aktif; selain itu hanya yang terceklis
+function _ckfgMonthsEff(){
+  var act=_mpsActiveMonths||[];
+  if(!_ckfgMonthsSel || !_ckfgMonthsSel.length) return act.slice();
+  return act.filter(function(m){ return _ckfgMonthsSel.indexOf(m)>=0; });
+}
+function _ckfgMonthLabel(){
+  var act=_mpsActiveMonths||[];
+  var eff=_ckfgMonthsEff();
+  if(!_ckfgMonthsSel || !_ckfgMonthsSel.length || eff.length>=act.length) return 'Semua bulan';
+  if(!eff.length) return 'Semua bulan';
+  if(eff.length<=3) return eff.map(function(m){ return _CKFG_MOID[m]||m; }).join('+');
+  return eff.length+' bulan';
+}
 function _ckfgPlanDefault(fg){
   var mps=(typeof _mpsData!=='undefined'&&_mpsData)?(_mpsData[fg]||null):null;
   if(!mps) return 0;
-  if(_ckfgMonth==='__TOTAL__'){ var t=0; (_mpsActiveMonths||[]).forEach(function(m){ t+=(mps[m]||0); }); return t; }
-  return mps[_ckfgMonth]||0;
+  var t=0; _ckfgMonthsEff().forEach(function(m){ t+=(mps[m]||0); });
+  return t;
 }
 function _ckfgPlanOf(fg){ return (_ckfgPlans[fg]!=null) ? _ckfgPlans[fg] : _ckfgPlanDefault(fg); }
 
@@ -7072,7 +7087,55 @@ function _cekFgSelPaint(){
   el.innerHTML=h;
 }
 
-function _cekFgMonthSel(v){ _ckfgMonth=v; _ckfgPlans={}; _ckfgOvr={}; _cekFgSelPaint(); _cekFgTable(); }
+// ── Pilih bulan MPS: ceklis beberapa bulan sekaligus ─────────────────────────
+function _cekFgMonthToggle(m,on){
+  if(m==='__ALL__'){
+    _ckfgMonthsSel=null;
+  } else {
+    if(!_ckfgMonthsSel) _ckfgMonthsSel=[];
+    var i=_ckfgMonthsSel.indexOf(m);
+    if(on && i<0) _ckfgMonthsSel.push(m);
+    else if(!on && i>=0) _ckfgMonthsSel.splice(i,1);
+    if(!_ckfgMonthsSel.length) _ckfgMonthsSel=null; // tak ada yang diceklis = semua
+  }
+  _ckfgPlans={}; _ckfgOvr={}; // basis plan berubah → reset edit manual (perilaku sama spt dulu)
+  _cekFgSelPaint(); _cekFgTable();
+  _cekFgMonthMenuSync();
+}
+function _cekFgMonthMenuSync(){
+  var pop=document.getElementById('ckfg-mon-pop'); if(!pop) return;
+  var allOn=(!_ckfgMonthsSel || !_ckfgMonthsSel.length);
+  pop.querySelectorAll('input[data-m]').forEach(function(cb){
+    var m=cb.getAttribute('data-m');
+    cb.checked = m==='__ALL__' ? allOn : (!allOn && _ckfgMonthsSel.indexOf(m)>=0);
+  });
+}
+function _ckfgMonOutside(e){
+  var pop=document.getElementById('ckfg-mon-pop');
+  if(pop && !pop.contains(e.target) && !(e.target.id==='ckfg-mon-btn')){
+    pop.remove(); document.removeEventListener('mousedown',_ckfgMonOutside);
+  }
+}
+function _cekFgMonthMenu(btn){
+  var ex=document.getElementById('ckfg-mon-pop');
+  if(ex){ ex.remove(); document.removeEventListener('mousedown',_ckfgMonOutside); return; }
+  var allOn=(!_ckfgMonthsSel || !_ckfgMonthsSel.length);
+  var rows='<label style="display:flex;align-items:center;gap:7px;font-size:12px;padding:4px 2px;cursor:pointer;border-bottom:1px solid var(--border);margin-bottom:3px;padding-bottom:6px">'
+    +'<input type="checkbox" data-m="__ALL__" '+(allOn?'checked':'')+' onchange="_cekFgMonthToggle(\'__ALL__\',this.checked)"> <b>Semua bulan</b></label>';
+  rows+=(_mpsActiveMonths||[]).map(function(m){
+    var on=!allOn && _ckfgMonthsSel.indexOf(m)>=0;
+    return '<label style="display:flex;align-items:center;gap:7px;font-size:12px;padding:4px 2px;cursor:pointer">'
+      +'<input type="checkbox" data-m="'+m+'" '+(on?'checked':'')+' onchange="_cekFgMonthToggle(\''+m+'\',this.checked)"> '+(_CKFG_MOID[m]||m)+'</label>';
+  }).join('');
+  var pop=document.createElement('div'); pop.id='ckfg-mon-pop';
+  pop.style.cssText='position:fixed;z-index:1200;background:var(--bg2);border:1px solid var(--border2);border-radius:8px;box-shadow:0 8px 30px rgba(0,0,0,.3);padding:9px;width:170px;max-height:60vh;overflow:auto';
+  pop.innerHTML='<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);margin-bottom:5px">Bulan MPS — bisa pilih beberapa</div>'+rows;
+  document.body.appendChild(pop);
+  var r=btn.getBoundingClientRect();
+  pop.style.left=Math.min(r.left, window.innerWidth-185)+'px';
+  pop.style.top=(r.bottom+4)+'px';
+  setTimeout(function(){ document.addEventListener('mousedown',_ckfgMonOutside); },0);
+}
 function _cekFgPlanEdit(fg,v){ var n=parseFloat(String(v).replace(',','.')); _ckfgPlans[fg]=isNaN(n)?0:n; _ckfgOvr={}; _cekFgSelPaint(); _cekFgTable(); }
 function _cekFgReqEdit(code,v){
   var s=String(v).trim();
@@ -7295,10 +7358,6 @@ function _cekFgTableSimple(){
     if(ra!==rb) return ra-rb;
     return a.code.localeCompare(b.code);
   });
-  var mOpts='<option value="__TOTAL__"'+(_ckfgMonth==='__TOTAL__'?' selected':'')+'>Total semua bulan</option>';
-  (_mpsActiveMonths||[]).forEach(function(m){
-    mOpts+='<option value="'+m+'"'+(_ckfgMonth===m?' selected':'')+'>'+(_CKFG_MOID[m]||m)+'</option>';
-  });
   var fBtn=function(t,lbl){
     var on=_ckfgType===t;
     return '<button class="btn btn-sm'+(on?' btn-primary':'')+'" onclick="_cekFgTypeSel(\''+t+'\')" style="font-size:10.5px">'+lbl+'</button>';
@@ -7311,7 +7370,7 @@ function _cekFgTableSimple(){
       : '<span style="font-family:var(--mono);color:var(--teal)">'+_ckfgSels[0]+'</span> — '+String(_ckfgFgName(_ckfgSels[0])).replace(/</g,'&lt;')+' · plan '+_ckfgFmt(totalPlan)+' pcs')+'</div>';
   h+='<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end">';
   h+='<div><div style="font-size:10.5px;color:var(--muted);margin-bottom:3px">Tampilan</div><div style="display:flex;gap:5px">'+_ckfgViewBtns()+'</div></div>';
-  h+='<div><div style="font-size:10.5px;color:var(--muted);margin-bottom:3px">Bulan MPS</div><select onchange="_cekFgMonthSel(this.value)" style="padding:6px 8px;font-size:12px;border:1px solid var(--border2);border-radius:6px;background:var(--bg2);color:var(--text)">'+mOpts+'</select></div>';
+  h+='<div><div style="font-size:10.5px;color:var(--muted);margin-bottom:3px">Bulan MPS</div><button id="ckfg-mon-btn" class="btn btn-sm" onclick="_cekFgMonthMenu(this);event.stopPropagation()" title="Ceklis satu atau beberapa bulan — requirement = jumlah bulan terceklis" style="font-size:11.5px">'+_ckfgMonthLabel()+' ▾</button></div>';
   h+='<div><div style="font-size:10.5px;color:var(--muted);margin-bottom:3px">Tipe material</div><div style="display:flex;gap:5px">'+fBtn('ALL','RM + PM')+fBtn('RM','RM')+fBtn('PM','PM')+'</div></div>';
   h+='<button class="btn btn-sm" onclick="_cekFgReset()" style="font-size:11px">↺ Reset ke MPS</button>';
   h+='<button class="btn btn-sm" onclick="_cekFgExport()" style="font-size:11px">↓ Export Excel</button>';
@@ -7629,7 +7688,7 @@ function _cekFgExport(){
       return Object.keys(_ckfgColSel).every(function(k){ return _ckfgColSel[k].indexOf(String(vmap[k])) >= 0; });
     });
   }
-  var aoa=[['Bulan',_ckfgMonth==='__TOTAL__'?'Total semua bulan':(_CKFG_MOID[_ckfgMonth]||_ckfgMonth)],['FG terpilih','Qty Plan']];
+  var aoa=[['Bulan',_ckfgMonthLabel()==='Semua bulan'?'Semua bulan':_ckfgMonthsEff().map(function(m){return _CKFG_MOID[m]||m;}).join(' + ')],['FG terpilih','Qty Plan']];
   _ckfgSels.forEach(function(fg){ aoa.push([fg+' — '+_ckfgFgName(fg), _ckfgPlanOf(fg)]); });
   aoa.push([]);
   aoa.push(['Kode','Nama','Tipe','UoM','#FG','Requirement','SOH','PO Open','PR Open','Total Avail','Selisih Perlu PR','Selisih Perlu Datang','Status','Rincian per FG']);
