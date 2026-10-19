@@ -15673,18 +15673,15 @@ function _fcShowPODetail(code, mi) {
       + '<th style="text-align:left;padding:6px 8px;color:var(--muted);font-weight:600">No. PO</th>'
       + '<th style="text-align:left;padding:6px 8px;color:var(--muted);font-weight:600">Supplier</th>'
       + '<th style="text-align:center;padding:6px 8px;color:var(--muted);font-weight:600">Site</th>'
-      + '<th style="text-align:center;padding:6px 8px;color:var(--muted);font-weight:600">Tgl Kirim</th>'
+      + '<th style="text-align:center;padding:6px 8px;color:var(--muted);font-weight:600">PR Req Date</th>'
       + '<th style="text-align:right;padding:6px 8px;color:var(--muted);font-weight:600">Open Qty</th>'
       + '</tr></thead><tbody>';
-    var today = new Date(); today.setHours(0,0,0,0);
     pos.forEach(function(p){
-      var iso = toIso(p.prReqDate);
-      var late = iso !== '9999-99-99' && new Date(iso) < today;
       html += '<tr style="border-bottom:1px dotted var(--border)">'
         + '<td style="padding:5px 8px;font-family:var(--mono);color:var(--text)">' + (p.docNum||'—') + '</td>'
         + '<td style="padding:5px 8px;color:var(--muted)">' + (p.supplierName||'—') + '</td>'
         + '<td style="padding:5px 8px;text-align:center;font-family:var(--mono);font-size:10.5px;color:var(--muted)">' + (p.site||'—') + '</td>'
-        + '<td style="padding:5px 8px;text-align:center;font-family:var(--mono)' + (late?';color:var(--red);font-weight:600':';color:var(--text)') + '" title="' + (late?'Tanggal kirim sudah lewat — barang belum diterima':'') + '">' + (p.prReqDate||'—') + (late?' ⚠':'') + '</td>'
+        + '<td style="padding:5px 8px;text-align:center;font-family:var(--mono);color:var(--text)">' + (p.prReqDate||'—') + '</td>'
         + '<td style="padding:5px 8px;text-align:right;font-family:var(--mono);color:var(--teal);font-weight:600">' + n_id(p.openQty||0) + ' ' + (p.uom||'') + '</td>'
         + '</tr>';
     });
