@@ -16725,7 +16725,9 @@ function _fcDetailRow(code, fc, master) {
   var abcColor = abc==='A'?'var(--red)':abc==='B'?'var(--amber)':abc==='C'?'var(--green)':'var(--muted)';
 
   // Meta panel
-  var meta = '<div style="display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-size:11px;padding:12px 14px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r)">';
+  // minmax(0,1fr) + min-width:0 di dd: nilai panjang (anotasi kecil dsb) WRAP di dalam
+  // kartu, bukan meluber keluar kotak (default min-width:auto bikin grid melar).
+  var meta = '<div style="display:grid;grid-template-columns:auto minmax(0,1fr);gap:3px 10px;font-size:11px;padding:12px 14px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r)">';
   var matcomM = (STATE.matcomMonthly || {})[code] || {};
   var _MNAME = ['','Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agt','Sep','Okt','Nov','Des'];
   var curMo  = new Date().getMonth() + 1;
@@ -16786,13 +16788,27 @@ function _fcDetailRow(code, fc, master) {
       ? '<span onclick="_fcShowPODetail(\''+code+'\')" title="Klik: detail semua PO open item ini" style="color:var(--teal);font-weight:600;cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px">'+n_id(_totPO)+'</span> <small style="color:var(--muted)">'+(master.uom||'')+'</small>'
       : '<span style="color:var(--muted);font-weight:600">'+n_id(_totPO)+'</span> <small style="color:var(--muted)">'+(master.uom||'')+'</small>'],
     ['Total PR','<span style="color:'+(_totPR>0?'var(--accent)':'var(--muted)')+';font-weight:600">'+n_id(_totPR)+'</span> <small style="color:var(--muted)">'+(master.uom||'')+'</small>'],
+    ['GRPO '+_MNAME[curMo], (function(){
+      // GRPO bulan berjalan — STATE.grpoData memang selalu berisi bulan ini saja
+      if(!(STATE.grpoData && STATE.grpoData.length)) return '<span style="color:var(--muted)">—</span> <small style="color:var(--muted);font-size:9px">(GRPO belum dimuat)</small>';
+      var g=0;
+      STATE.grpoData.forEach(function(x){
+        if(x.itemCode!==code) return;
+        var q=x.qty||0;
+        if((x.uom||'').toUpperCase()==='GR') q/=1000; // samakan dgn konversi stock
+        g+=q;
+      });
+      return '<span style="color:'+(g>0?'var(--green)':'var(--muted)')+';font-weight:600">'+n_id(Math.round(g*100)/100)+'</span>'
+        +' <small style="color:var(--muted)">'+_mcUomDisplay+'</small>'
+        +' <small style="color:var(--muted);font-size:9px">(diterima bln ini)</small>';
+    })()],
     ['ABC','<span style="font-weight:700;color:'+abcColor+'">'+( abc||'—')+'</span>']];
   // Sisipkan matcom rows sebelum ABC
   matcomRows.forEach(function(r,i){ mRows.splice(mRows.length-1, 0, r); });
   if(rn && _isAdmin) mRows.splice(1,0,['Real Name','<span style="color:var(--teal)">'+rn+'</span>']);
   mRows.forEach(function(r){
-    meta += '<dt style="color:var(--muted);font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:600;padding-top:2px">'+r[0]+'</dt>'
-          + '<dd style="margin:0;font-family:var(--mono);font-size:11.5px">'+r[1]+'</dd>';
+    meta += '<dt style="color:var(--muted);font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:600;padding-top:2px;white-space:nowrap">'+r[0]+'</dt>'
+          + '<dd style="margin:0;font-family:var(--mono);font-size:11.5px;min-width:0;overflow-wrap:break-word">'+r[1]+'</dd>';
   });
   meta += '</div>';
 
