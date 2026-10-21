@@ -16755,12 +16755,13 @@ function _fcDetailRow(code, fc, master) {
     '<span style="color:'+(_fcRawCur>0?'var(--text)':'var(--muted)')+';font-weight:600">'+n_id(_fcRawCur)+'</span>'
     +' <small style="color:var(--muted)">'+_mcUomDisplay+'</small>'
     +' <small style="color:var(--muted);font-size:9px">(sebelum matcom)</small>']);
-  var _usagePct = _fcRawCur>0 ? (_mcQty/_fcRawCur*100) : (_mcQty>0 ? Infinity : 0);
-  var _usageStr = (_fcRawCur>0) ? (n_id(Math.round(_usagePct))+'%') : (_mcQty>0 ? '∞ (forecast 0)' : '—');
-  var _usageColor = !isFinite(_usagePct) ? 'var(--red)' : (_usagePct>=100 ? 'var(--red)' : (_usagePct>=80 ? 'var(--amber)' : 'var(--muted)'));
+  // Ada pemakaian tapi forecast bulan ini 0 → tampilkan 100% (bukan ∞), tetap merah
+  var _usagePct = _fcRawCur>0 ? (_mcQty/_fcRawCur*100) : (_mcQty>0 ? 100 : 0);
+  var _usageStr = (_fcRawCur>0) ? (n_id(Math.round(_usagePct))+'%') : (_mcQty>0 ? '100% <small style="color:var(--muted);font-size:9px">(plan 0)</small>' : '—');
+  var _usageColor = _usagePct>=100 ? 'var(--red)' : (_usagePct>=80 ? 'var(--amber)' : 'var(--muted)');
   matcomRows.push(['% Usage '+_MNAME[curMo],
     '<span style="color:'+_usageColor+';font-weight:700">'+_usageStr+'</span>'
-    +(isFinite(_usagePct)&&_usagePct>=100?' <small style="color:var(--red);font-size:9px">over</small>':'')]);
+    +(_fcRawCur>0&&_usagePct>=100?' <small style="color:var(--red);font-size:9px">over</small>':'')]);
   // SOH display: kalau ada BOM parents, tampilkan "asli + assembly" bukan langsung total
   var _sohDisplay = (function() {
     var _bomPar = BOM_PARENTS[code];
@@ -17927,7 +17928,7 @@ function _fcUsagePctOf(code, fcData) {
     var p = mc/raw*100;
     return {str:n_id(Math.round(p))+'%', color: p>=100?'var(--red)':(p>=80?'var(--amber)':'var(--muted)')};
   }
-  if(mc>0) return {str:'∞', color:'var(--red)'};
+  if(mc>0) return {str:'100%', color:'var(--red)'}; // pemakaian ada, plan 0 → anggap 100%
   return {str:'—', color:'var(--muted)'};
 }
 
