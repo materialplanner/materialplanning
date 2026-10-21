@@ -2128,6 +2128,18 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
   </div>
 </div>
 
+<!-- Modal Rincian SOH per gudang -->
+<div class="modal-bg" id="modal-soh-detail">
+  <div class="modal" style="width:560px;max-width:96vw">
+    <h3 style="margin-bottom:2px">Rincian SOH — <span id="sohd-code" style="color:var(--teal);font-size:14px"></span></h3>
+    <div id="sohd-sub" style="font-size:11.5px;color:var(--muted);margin-bottom:10px"></div>
+    <div id="sohd-body" style="max-height:60vh;overflow:auto"></div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="closeModal('modal-soh-detail')">Tutup</button>
+    </div>
+  </div>
+</div>
+
 <!-- Modal Detail PO Open per item -->
 <div class="modal-bg" id="modal-po-detail">
   <div class="modal" style="width:680px;max-width:96vw">
@@ -4539,6 +4551,7 @@ var STATE = {
   osprData: [],
   osprByItem: {},
   stockData: {},
+  stockWhs: {},   // rincian SOH per gudang per item (hanya terisi dari sync fresh / IndexedDB lokal)
   stockHistory: JSON.parse(localStorage.getItem('stock_history') || '{}'),
   scheduleData: JSON.parse(localStorage.getItem('schedule') || '[]'),
   supplierData: JSON.parse(localStorage.getItem('suppliers') || '[]'),
@@ -6500,8 +6513,8 @@ var BOM_PARENTS = {
   '4000020085': ['4000020082'],               // Plug Hanasui ← Power Serum
 };
 
-var BTG_WHS = ['GBEX','GBFP','GBHB','GBHK','GBJD','GBNS','GKIB','GSBC','GTIM','PFFG'];
-var SNG_WHS = ['SBFP','SBHB','SBHK','SFFG','SKIB','SSBC'];
+var BTG_WHS = ['GBEX','GBFP','GBHB','GBHK','GBJD','GBNS','GKIB','GSBC','GTIM','PFFG','PWIP']; // PWIP = WIP produksi Bitung
+var SNG_WHS = ['SBFP','SBHB','SBHK','SFFG','SKIB','SSBC','SWIP'];                             // SWIP = WIP produksi Sangiang
 var JTK_WHS = ['GTJT']; // Gudang Jatirangon
 var PJT_WHS = ['GTPJ']; // Gudang GTPJ (pisah kolom sendiri)
 
@@ -6565,6 +6578,7 @@ async function loadStock() {
     if(!res.ok) throw new Error('Stock API ' + res.status);
     var raw = await res.json();
     STATE.stockData = {};
+    STATE.stockWhs = {};
     (raw || []).forEach(function(r) {
       var ic = r.ItemCode, whs = r.WhsCode;
       var onHand = parseFloat(r.OnHand) || 0;
@@ -6576,7 +6590,13 @@ async function loadStock() {
       if(SNG_WHS.indexOf(whs) >= 0) STATE.stockData[ic].sng += onHand;
       if(JTK_WHS.indexOf(whs) >= 0) STATE.stockData[ic].jtk += onHand;
       if(PJT_WHS.indexOf(whs) >= 0) STATE.stockData[ic].pjt += onHand;
+      // Rincian per gudang (utk popup SOH) — filter sama, angka pasti nyambung
+      if(!STATE.stockWhs[ic]) STATE.stockWhs[ic] = {};
+      STATE.stockWhs[ic][whs] = (STATE.stockWhs[ic][whs]||0) + onHand;
     });
+    // Simpan rincian per gudang ke IndexedDB LOKAL saja (tidak ke Firestore — besar,
+    // dan rincian cukup per laptop; laptop lain tinggal Sync stock sendiri).
+    try { if(typeof _stateIdbSave === 'function') _stateIdbSave('stock_whs', {data: STATE.stockWhs, ts: Date.now()}); } catch(_e){}
     _setSyncItem('stock', 'ok');
     toast(Object.keys(STATE.stockData).length + ' item stock ✓', 'ok');
   } catch(e) {
@@ -7351,6 +7371,11 @@ function _cekFgRmTable(){
   var soh=(st.btg||0)+(st.sng||0)+(st.jtk||0)+(st.pjt||0);
   var po=0; (STATE.poData||[]).forEach(function(p){ if(p.itemCode===code) po+=(p.openQty||0); });
   var pr=(STATE.osprByItem||{})[code]||0;
+  // Matcom bulan berjalan — konversi sama dgn engine forecast (uom gram → ×0.001)
+  var _rmCurMo=new Date().getMonth()+1;
+  var _rmMcF=(/^(g|gr|gram)$/i.test((m0.uom||'').trim()))?0.001:1;
+  var matcomCur=((STATE.matcomMonthly&&STATE.matcomMonthly[code])?(STATE.matcomMonthly[code][_rmCurMo]||0):0)*_rmMcF;
+  var _moLblId=['','Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'][_rmCurMo]||'';
   var chip=function(l,v,c){ return '<span style="font-size:10.5px;color:var(--muted)">'+l+' <b style="color:'+(c||'var(--text)')+'">'+_ckfgFmt(v)+'</b></span>'; };
   var h='';
   h+='<div style="background:var(--bg3);border-radius:10px;padding:12px 16px;margin-bottom:12px">';
@@ -7362,6 +7387,9 @@ function _cekFgRmTable(){
     +'</div>';
   h+='<div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px">'
     +chip('SOH', soh)+chip('PO Open', po, 'var(--accent)')+chip('PR Open', pr, 'var(--teal)')
+    +((STATE.matcomMonthly&&STATE.matcomMonthly[code])
+       ? '<span style="font-size:10.5px;color:var(--muted)" title="Material Consumption bulan berjalan — pemakaian yang sudah terjadi">Matcom '+_moLblId+' <b style="color:var(--purple,#8b5cf6)">'+_ckfgFmt(Math.round(matcomCur*100)/100)+'</b></span>'
+       : '<span style="font-size:10.5px;color:var(--muted)" title="Sync Matcom dulu di menu Forecast">Matcom '+_moLblId+' <b style="color:var(--hint)">—</b></span>')
     +chip('Total Req horizon', grand, grand>(soh+po+pr)?'var(--red)':'var(--green)')
     +'<span style="font-size:10.5px;color:var(--muted)">'+rows.length+' FG pemakai'+(m0.uom?' · UoM '+m0.uom:'')+'</span></div>';
   h+='<div style="font-size:10.5px;color:var(--muted);margin-top:4px">Requirement = plan MPS × qty/pcs BOM (type N) — identik Hitung MRP. Baris TOTAL per bulan = kebutuhan material ini. Read-only, ikut MPS murni.</div>';
@@ -14258,6 +14286,13 @@ function _appInit() {
     });
   } catch(e){}
 
+  // ── Rincian SOH per gudang (popup SOH di Forecast) — lokal IndexedDB saja ──
+  try {
+    if(typeof _stateIdbLoad === 'function') _stateIdbLoad('stock_whs', function(rec){
+      if(rec && rec.data && !(STATE.stockWhs && Object.keys(STATE.stockWhs).length)) STATE.stockWhs = rec.data;
+    });
+  } catch(e){}
+
   // ── proj_history → IndexedDB: muat + MIGRASI sekali dari localStorage ──────
   // Union per tanggal (tidak ada snapshot yang hilang), lalu salinan localStorage
   // DIHAPUS supaya kuota 5MB lega — ini pencabut akar serial bug "localStorage penuh".
@@ -15840,6 +15875,75 @@ function _fcVal(qty, code) {
 // Angka "raw MRP" ini = forecastRaw[mi]. Nilai Requirement yang tampil di tabel
 // bisa berbeda utk bulan berjalan (dikurangi matcom) atau saat "Sertakan NPD" aktif
 // (ditambah kebutuhan NPD) — perbedaan itu ditampilkan sebagai catatan di bawah.
+// Popup rincian SOH per gudang — dipanggil dari angka SOH di kartu info item Forecast.
+// Rincian per gudang tersimpan LOKAL (IndexedDB) dari sync stock terakhir di laptop ini;
+// laptop yang hanya restore dari cloud melihat subtotal per site saja sampai Sync sendiri.
+function _fcShowSOHDetail(code) {
+  var md = (STATE.masterData || {})[code] || {};
+  var rn = (STATE.realNameData || {})[code];
+  var nm = (_isAdmin && _rmDisplayMode === 'realname' && rn) ? rn : (md.desc || '');
+  var uom = md.uom || '';
+  var st = (STATE.stockData || {})[code] || {};
+  var total = (st.btg||0)+(st.sng||0)+(st.jtk||0)+(st.pjt||0);
+  var whsMap = (STATE.stockWhs || {})[code] || null;
+  document.getElementById('sohd-code').textContent = code + (nm ? ' · ' + nm : '');
+  document.getElementById('sohd-sub').innerHTML = 'Total SOH <strong style="color:var(--teal)">' + n_id(Math.round(total*100)/100) + ' ' + uom + '</strong>'
+    + (whsMap ? '' : ' · <span style="color:var(--amber)">rincian per gudang belum ada di laptop ini — Sync stock sekali untuk melihatnya</span>');
+  var SITES = [
+    {k:'btg', lbl:'Bitung (BTG)',    list:BTG_WHS},
+    {k:'sng', lbl:'Sangiang (SNG)',  list:SNG_WHS},
+    {k:'jtk', lbl:'Jatirangon (JTK)',list:JTK_WHS},
+    {k:'pjt', lbl:'GTPJ (PJT)',      list:PJT_WHS}
+  ];
+  var tdL='padding:5px 8px;font-size:11.5px;border-bottom:1px dotted var(--border)';
+  var tdR='padding:5px 8px;font-size:11.5px;font-family:var(--mono);text-align:right;border-bottom:1px dotted var(--border)';
+  var html='<table style="width:100%;border-collapse:collapse;font-size:11.5px">'
+    + '<thead><tr style="border-bottom:1px solid var(--border2)">'
+    + '<th style="text-align:left;padding:6px 8px;color:var(--muted);font-weight:600">Gudang</th>'
+    + '<th style="text-align:right;padding:6px 8px;color:var(--muted);font-weight:600">Qty ('+uom+')</th>'
+    + '<th style="text-align:right;padding:6px 8px;color:var(--muted);font-weight:600">%</th>'
+    + '</tr></thead><tbody>';
+  SITES.forEach(function(s){
+    var siteTot = st[s.k]||0;
+    if(siteTot<=0 && !(whsMap && s.list.some(function(w){ return (whsMap[w]||0)>0; }))) return;
+    html += '<tr style="background:var(--bg3)"><td style="'+tdL+';font-weight:700">'+s.lbl+'</td>'
+      + '<td style="'+tdR+';font-weight:700">'+n_id(Math.round(siteTot*100)/100)+'</td>'
+      + '<td style="'+tdR+';color:var(--muted)">'+(total>0?(siteTot/total*100).toFixed(1):'0.0')+'%</td></tr>';
+    if(whsMap){
+      s.list.filter(function(w){ return (whsMap[w]||0)>0; })
+        .sort(function(a,b){ return (whsMap[b]||0)-(whsMap[a]||0); })
+        .forEach(function(w){
+          var v=whsMap[w];
+          var isWip=(w==='PWIP'||w==='SWIP');
+          html += '<tr><td style="'+tdL+';padding-left:22px;font-family:var(--mono);color:var(--text)">'+w
+            + (isWip?' <span style="font-size:9px;color:var(--amber)">WIP produksi</span>':'')+'</td>'
+            + '<td style="'+tdR+'">'+n_id(Math.round(v*100)/100)+'</td>'
+            + '<td style="'+tdR+';color:var(--muted)">'+(total>0?(v/total*100).toFixed(1):'0.0')+'%</td></tr>';
+        });
+    }
+  });
+  // Gudang di luar daftar site (jaga-jaga) — tampilkan supaya tidak ada qty "hilang"
+  if(whsMap){
+    var known={}; SITES.forEach(function(s){ s.list.forEach(function(w){ known[w]=1; }); });
+    var others=Object.keys(whsMap).filter(function(w){ return !known[w] && (whsMap[w]||0)>0; });
+    if(others.length){
+      html += '<tr style="background:var(--bg3)"><td style="'+tdL+';font-weight:700">Lainnya</td><td style="'+tdR+'"></td><td style="'+tdR+'"></td></tr>';
+      others.forEach(function(w){
+        html += '<tr><td style="'+tdL+';padding-left:22px;font-family:var(--mono)">'+w+'</td>'
+          + '<td style="'+tdR+'">'+n_id(Math.round(whsMap[w]*100)/100)+'</td><td style="'+tdR+'"></td></tr>';
+      });
+    }
+  }
+  html += '<tr style="border-top:2px solid var(--border2);font-weight:700">'
+    + '<td style="padding:6px 8px">TOTAL SOH</td>'
+    + '<td style="padding:6px 8px;text-align:right;font-family:var(--mono);color:var(--teal)">'+n_id(Math.round(total*100)/100)+'</td>'
+    + '<td style="padding:6px 8px;text-align:right">100%</td></tr>';
+  html += '</tbody></table>';
+  if(!total && !whsMap) html = '<div style="padding:16px;text-align:center;color:var(--muted);font-size:12px">Tidak ada stok tercatat untuk item ini.</div>';
+  document.getElementById('sohd-body').innerHTML = html;
+  document.getElementById('modal-soh-detail').classList.add('open');
+}
+
 // Popup detail SEMUA PO open untuk satu item — dipanggil dari "Total PO" di kartu
 // info item & dari sel baris Adjusted OSPO. mi (index bulan) opsional, hanya untuk
 // label konteks; daftar PO selalu semua PO open item tsb (apa adanya dari SAP).
@@ -16677,7 +16781,7 @@ function _fcDetailRow(code, fc, master) {
   var _totPR = (fc.ospr_base||[]).reduce(function(s,v){ return s+(v||0); }, 0);
   var mRows = [['Kode','<span style="font-family:var(--mono)">'+code+'</span>'],['Tipe',iType],['UoM',master.uom||'—'],
     ['MOQ',n_id(master.moq||0)],['Multiple',n_id(master.multiple||1)],['Lead Time',fc.lt_days+' hari'],
-    ['SOH',_sohDisplay],
+    ['SOH','<span onclick="_fcShowSOHDetail(\''+code+'\')" title="Klik: rincian SOH per gudang" style="cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px">'+_sohDisplay+'</span>'],
     ['Total PO', _totPO>0
       ? '<span onclick="_fcShowPODetail(\''+code+'\')" title="Klik: detail semua PO open item ini" style="color:var(--teal);font-weight:600;cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px">'+n_id(_totPO)+'</span> <small style="color:var(--muted)">'+(master.uom||'')+'</small>'
       : '<span style="color:var(--muted);font-weight:600">'+n_id(_totPO)+'</span> <small style="color:var(--muted)">'+(master.uom||'')+'</small>'],
