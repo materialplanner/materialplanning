@@ -18816,7 +18816,8 @@ function _fcExportRekapGSheet() {
   rows.forEach(function(r) {
     var stTxt = r.isOverdue||r.daysLeft<=7 ? 'URGENT' : 'BELUM - Buka: '+fmt(r.createPRBy)+' ('+r.daysLeft+' hari)';
     data.push([r.site||'', r.code, r.name, r.uom, r.lt||'', r.supplier||'', r.proposeMonth,
-               Math.round(r.qty), fmt(r.createPRBy), stTxt]);
+               String(Math.round((r.qty||0)*100)/100).replace('.',','), // desimal koma utk Sheets lokal ID
+               fmt(r.createPRBy), stTxt]);
   });
   var tsv = data.map(function(row){
     return row.map(function(v){
@@ -19163,7 +19164,7 @@ function _fcExportRekap() {
     var stTxt = r.isOverdue||r.daysLeft<=7 ? 'URGENT' : 'BELUM - Buka: '+fmt(r.createPRBy)+' ('+r.daysLeft+' hari)';
     data.push([
       r.site||'', r.code, r.name, r.uom, r.lt||'',
-      r.supplier||'', r.proposeMonth, Math.round(r.qty),
+      r.supplier||'', r.proposeMonth, Math.round((r.qty||0)*100)/100, // jaga desimal (67,5 jangan jadi 68)
       fmt(r.createPRBy), stTxt
     ]);
   });
