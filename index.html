@@ -17912,6 +17912,25 @@ function _fcRenderRekap(el, items, fcData, fStatus) {
   _fcRenderRekapTable(el, propRows, fcData, '');
 }
 
+// % Usage bulan berjalan per item — rumus SAMA dgn kartu info item:
+// matcom bulan ini (gram → /1000) ÷ forecast ASLI bulan ini (sebelum matcom).
+// Return {str, color}. raw 0 + matcom ada → '∞'; dua-duanya kosong → '—'.
+function _fcUsagePctOf(code, fcData) {
+  var mm = (STATE.matcomMonthly||{})[code]||{};
+  var curMo = new Date().getMonth()+1;
+  var uom = ((STATE.masterData||{})[code]||{}).uom||'';
+  var f = (/^(g|gr|gram)$/i.test(uom.trim())) ? 0.001 : 1;
+  var mc = (mm[curMo]||0)*f;
+  var fc = (fcData||window._fcRekapFcData||{})[code];
+  var raw = (fc && fc.forecastRaw && fc.snapMoIdx!=null) ? (fc.forecastRaw[fc.snapMoIdx]||0) : 0;
+  if(raw>0){
+    var p = mc/raw*100;
+    return {str:n_id(Math.round(p))+'%', color: p>=100?'var(--red)':(p>=80?'var(--amber)':'var(--muted)')};
+  }
+  if(mc>0) return {str:'∞', color:'var(--red)'};
+  return {str:'—', color:'var(--muted)'};
+}
+
 // Table renderer generic — dipakai untuk data LIVE maupun data SNAPSHOT beku.
 // snapshotBanner: HTML string (kosong = mode live, ada isi = mode snapshot).
 function _fcRenderRekapTable(el, propRows, fcData, snapshotBanner) {
@@ -17945,6 +17964,7 @@ function _fcRenderRekapTable(el, propRows, fcData, snapshotBanner) {
     + '<th style="'+thStyle+'">Supplier</th>'
     + '<th style="'+thStyle+';text-align:center">Kebutuhan Bulan</th>'
     + '<th style="'+thStyle+';text-align:right">'+(window._fcValueView?'Value':'Qty')+'</th>'
+    + '<th style="'+thStyle+';text-align:center" title="Matcom bulan berjalan ÷ forecast asli bulan berjalan — sama dgn kartu info item">% Usage Bln Ini</th>'
     + '<th style="'+thStyle+';text-align:center">PR Harus Dibuka</th>'
     + '<th style="'+thStyle+';text-align:center;border-right:none">Status Buka</th>'
     + '</tr></thead><tbody>';
@@ -17967,6 +17987,7 @@ function _fcRenderRekapTable(el, propRows, fcData, snapshotBanner) {
       + '<td style="'+tdS+'max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:11px">'+(r.supplier||'—')+'</td>'
       + '<td style="'+tdS+'text-align:center;font-weight:600">'+r.proposeMonth+'</td>'
       + '<td style="'+tdS+'text-align:right;font-family:var(--mono);font-weight:600">'+(window._fcValueView ? n_id(Math.round((r.qty||0)*_fcCOGM(r.code))) : (n_id(r.qty)+' '+r.uom))+'</td>'
+      + (function(){ var u=_fcUsagePctOf(r.code, fcData); return '<td style="'+tdS+'text-align:center;font-family:var(--mono);font-weight:600;color:'+u.color+'">'+u.str+'</td>'; })()
       + '<td style="'+tdS+'text-align:center;font-family:var(--mono);font-weight:600">'+fmt(r.createPRBy)+'</td>'
       + '<td style="'+tdS+'border-right:none">'+stTxt+'</td>'
       + '</tr>';
@@ -18811,12 +18832,13 @@ function _fcExportRekapGSheet() {
   var rows = window._fcRekapRows || [];
   if(!rows.length) { toast('Tidak ada data rekap','err'); return; }
   var fmt = function(d){ return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear(); };
-  var header = ['Site','Item No','Description','UoM','L.T (hari)','Supplier','Kebutuhan Bulan','Qty','PR Harus Dibuka','Status Buka'];
+  var header = ['Site','Item No','Description','UoM','L.T (hari)','Supplier','Kebutuhan Bulan','Qty','% Usage Bln Ini','PR Harus Dibuka','Status Buka'];
   var data = [header];
   rows.forEach(function(r) {
     var stTxt = r.isOverdue||r.daysLeft<=7 ? 'URGENT' : 'BELUM - Buka: '+fmt(r.createPRBy)+' ('+r.daysLeft+' hari)';
     data.push([r.site||'', r.code, r.name, r.uom, r.lt||'', r.supplier||'', r.proposeMonth,
                String(Math.round((r.qty||0)*100)/100).replace('.',','), // desimal koma utk Sheets lokal ID
+               _fcUsagePctOf(r.code).str,
                fmt(r.createPRBy), stTxt]);
   });
   var tsv = data.map(function(row){
@@ -19158,13 +19180,14 @@ function _fcExportRekap() {
     return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();
   };
   if(typeof XLSX === 'undefined') { toast('SheetJS belum siap','err'); return; }
-  var headers = ['Site','Item No','Description','UoM','L.T (hari)','Supplier','Kebutuhan Bulan','Qty','PR Harus Dibuka','Status Buka'];
+  var headers = ['Site','Item No','Description','UoM','L.T (hari)','Supplier','Kebutuhan Bulan','Qty','% Usage Bln Ini','PR Harus Dibuka','Status Buka'];
   var data = [headers];
   rows.forEach(function(r) {
     var stTxt = r.isOverdue||r.daysLeft<=7 ? 'URGENT' : 'BELUM - Buka: '+fmt(r.createPRBy)+' ('+r.daysLeft+' hari)';
     data.push([
       r.site||'', r.code, r.name, r.uom, r.lt||'',
       r.supplier||'', r.proposeMonth, Math.round((r.qty||0)*100)/100, // jaga desimal (67,5 jangan jadi 68)
+      _fcUsagePctOf(r.code).str,
       fmt(r.createPRBy), stTxt
     ]);
   });
@@ -19185,7 +19208,7 @@ function _fcExportRekap() {
       if(ws[cell2]) ws[cell2].s = {fill:{fgColor:{rgb:rowColor}}};
     }
   }
-  ws['!cols'] = [{wch:12},{wch:14},{wch:30},{wch:6},{wch:10},{wch:28},{wch:16},{wch:10},{wch:16},{wch:35}];
+  ws['!cols'] = [{wch:12},{wch:14},{wch:30},{wch:6},{wch:10},{wch:28},{wch:16},{wch:10},{wch:12},{wch:16},{wch:35}];
   var wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Rekap PR');
   XLSX.writeFile(wb, 'rekap_propose_pr_'+new Date().toISOString().slice(0,10)+'.xlsx');
