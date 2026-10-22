@@ -4671,19 +4671,31 @@ function _whereUsedSetMode(mode) {
   _whereUsedRender();
 }
 
-// Hitung, secara GLOBAL dari seluruh BOM, di berapa FG WIP (kode awalan '2' + nama 'WIP...')
-// sebuah RM dipakai. Cache di window supaya tidak dihitung ulang tiap baris.
+// Hitung, secara GLOBAL dari seluruh BOM, di berapa parent sebuah material dipakai.
+// RM (3xxx): hitung WIP SAJA — kalau FG jadi ikut dihitung, RM unik 1 produk terbaca
+// "3 FG" (FG + tester + WIP produk yang sama) dan badge UNIK tidak pernah muncul.
+// PM (4xxx): hitung FG jadi (PM tidak pernah lewat WIP).
+// Cache di window supaya tidak dihitung ulang tiap baris.
 function _wuGlobalRmUsage() {
   if(window._wuRmUsageCache && window._wuRmUsageStamp === (_bomData||[]).length) return window._wuRmUsageCache;
-  var usage = {}; // rmCode -> {fgSet:{}, count}
+  var usageWip = {}, usageAll = {}; // rmCode -> set parent
   (_bomData||[]).forEach(function(b){
     if(!b.rm || !b.fg) return;
-    if(!_wuParentOk(b.fg, b.fgDesc)) return; // FG WIP ATAU FG jadi (11/12xxx)
-    if(!usage[b.rm]) usage[b.rm] = {};
-    usage[b.rm][b.fg] = true;
+    if(!_wuParentOk(b.fg, b.fgDesc)) return;
+    if(!usageAll[b.rm]) usageAll[b.rm] = {};
+    usageAll[b.rm][b.fg] = true;
+    if(_wuIsWIP(b.fg, b.fgDesc)) {
+      if(!usageWip[b.rm]) usageWip[b.rm] = {};
+      usageWip[b.rm][b.fg] = true;
+    }
   });
   var out = {};
-  Object.keys(usage).forEach(function(rm){ out[rm] = Object.keys(usage[rm]).length; });
+  Object.keys(usageAll).forEach(function(rm){
+    var nAll = Object.keys(usageAll[rm]).length;
+    var nWip = usageWip[rm] ? Object.keys(usageWip[rm]).length : 0;
+    // RM: pakai hitungan WIP; fallback ke semua parent kalau RM itu tak pernah lewat WIP
+    out[rm] = /^3/.test(rm) ? (nWip > 0 ? nWip : nAll) : nAll;
+  });
   window._wuRmUsageCache = out;
   window._wuRmUsageStamp = (_bomData||[]).length;
   return out;
