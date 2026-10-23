@@ -6726,19 +6726,7 @@ async function loadGRPO() {
   if(tbl) tbl.innerHTML = '<div class="loading"><div class="spin"></div>Memuat GRPO ' + m + '/' + y + '...</div>';
   try {
     var raw = await sapFetchTO(27, { '[%0]': startDate, '[%1]': endDate });
-    STATE.grpoData = (raw || []).filter(function(r){
-      var s = (r.DocStatus||'').toLowerCase();
-      if(s === 'cancelled' || s === 'cancellation') return false;
-      var ic = (r.ItemCode||'').toString();
-      if(/^6/.test(ic) && r.CardName !== 'Berkat Asia Kemasindo, PT') return false;
-      if(!/^[1234]/.test(ic)) return false; // hanya FG(1)/WIP(2)/RM(3)/PM(4)
-      return true;
-    }).map(function(r){
-      return { grpoDate: fmtSAPDate(r.GRPO_Date), itemCode: r.ItemCode,
-        itemName: r.Dscription, supplierName: r.CardName, qty: r.Quantity, uom: r.unitMsr,
-        baseRef: String(r.BaseRef||r.BaseEntry||r.PO_DocNum||r.PoNum||''),
-        grpoDocNum: String(r.DocNum||r.DocEntry||'') };
-    });
+    STATE.grpoData = (raw || []).map(_grpoMapRow).filter(function(x){ return x !== null; });
     var sgrpo = document.getElementById('s-grpo'); if(sgrpo) sgrpo.textContent = (STATE.grpoData||[]).length;
     renderGRPO();
     _autoRemoveDeliveredCards();
@@ -9173,17 +9161,7 @@ async function loadGRPOMonth() {
   if(grpoEl) grpoEl.innerHTML = '<div class="loading"><div class="spin"></div>Memuat GRPO ' + m + '/' + y + '...</div>';
   try {
     var raw = await sapFetchTO(27, { '[%0]': startDate, '[%1]': endDate });
-    STATE.grpoData = (raw || []).filter(function(r){
-      var s=(r.DocStatus||'').toLowerCase();
-      if(s==='cancelled'||s==='cancellation') return false;
-      var ic=(r.ItemCode||'').toString();
-      if(/^6/.test(ic)&&r.CardName!=='Berkat Asia Kemasindo, PT') return false;
-      if(!/^[1234]/.test(ic)) return false; // hanya FG/WIP/RM/PM
-      return true;
-    }).map(function(r){
-      return { grpoDate:fmtSAPDate(r.GRPO_Date), itemCode:r.ItemCode,
-        itemName:r.Dscription, supplierName:r.CardName, qty:r.Quantity, uom:r.unitMsr };
-    });
+    STATE.grpoData = (raw || []).map(_grpoMapRow).filter(function(x){ return x !== null; });
     var sg = document.getElementById('s-grpo'); if(sg) sg.textContent = (STATE.grpoData||[]).length;
     renderGRPO();
     toast(STATE.grpoData.length + ' GRPO ' + m + '/' + y + ' ✓', 'ok');
@@ -10957,10 +10935,37 @@ function _dispName(p) {
   return p.description || p.productCode || '';
 }
 // Helper: display name for PO/GRPO/OSPR items (no itemType, uses itemCode prefix)
+// Mapper satu baris GRPO dari query 27 — KEBAL perubahan gaya nama kolom:
+// semua key dinormalisasi (lowercase, buang non-alfanumerik) lalu dicocokkan,
+// jadi GRPO_Date / "Grpo Date" / GrpoDate, Dscription / Itemname dll. semua kena.
+// Return null untuk baris yang difilter (cancelled / kode non 1-4).
+function _grpoMapRow(r) {
+  var k = {};
+  Object.keys(r || {}).forEach(function(key){ k[key.toLowerCase().replace(/[^a-z0-9]/g,'')] = r[key]; });
+  var s = String(k.docstatus || '').toLowerCase();
+  if(s === 'cancelled' || s === 'cancellation') return null;
+  var ic = String(k.itemcode || '');
+  if(/^6/.test(ic) && k.cardname !== 'Berkat Asia Kemasindo, PT') return null;
+  if(!/^[1234]/.test(ic)) return null; // hanya FG(1)/WIP(2)/RM(3)/PM(4)
+  return {
+    grpoDate: fmtSAPDate(k.grpodate || k.date || ''),
+    itemCode: ic,
+    itemName: k.itemname || k.dscription || k.description || k.itemdescription || '',
+    supplierName: k.cardname || '',
+    qty: k.quantity != null ? k.quantity : (k.qty || 0),
+    uom: k.unitmsr || k.uom || '',
+    baseRef: String(k.baseref || k.baseentry || k.podocnum || k.ponum || ''),
+    grpoDocNum: String(k.docnum || k.docentry || '')
+  };
+}
+
 function _poName(itemCode, itemName) {
   if(_rmDisplayMode === 'realname' && /^3/.test(itemCode||'') && STATE.realNameData && STATE.realNameData[itemCode])
     return STATE.realNameData[itemCode];
-  return itemName || '';
+  if(itemName) return itemName;
+  // Fallback: nama dari Master Data — menutup kasus tarikan SAP yang kolom namanya kosong
+  var _md = (STATE.masterData||{})[itemCode];
+  return (_md && _md.desc) || '';
 }
 
 function renderDashSchedule() {
