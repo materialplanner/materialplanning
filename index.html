@@ -11014,13 +11014,20 @@ function _obalParseRows(rows2d, originLabel) {
   var cQty  = find(['qtyrm']);
   if(cRm<0)   throw new Error('Kolom "Component_Item" tidak ditemukan');
   if(cQty<0)  throw new Error('Kolom "Qty RM" tidak ditemukan');
+  // Angka sheet Obal = lokal ID: KOMA SELALU DESIMAL ("3,999" = 3,999 kg — BUKAN 3999).
+  // _mpsNumCell salah di kasus desimal 3 digit (dikira ribuan US), jadi pakai aturan ID murni.
+  var pnum=function(v){
+    if(typeof v==='number') return isNaN(v)?0:v;
+    var n=(typeof _parseNumID==='function')?_parseNumID(v):parseFloat(String(v||'').replace(/\./g,'').replace(',','.'));
+    return isNaN(n)?0:n;
+  };
   var out=[], wipSet={}, rmSet={};
   for(var r=hdrIdx+1;r<rows2d.length;r++){
     var row=rows2d[r];
     var fg=String(row[cFg]||'').trim(), rm=String(row[cRm]||'').trim();
     if(!fg || !rm || !/^[34]/.test(rm)) continue;
-    var q=_mpsNumCell(row[cQty]); if(!(q>0)) continue;
-    var p=cObal>=0 ? _mpsNumCell(row[cObal]) : 0;
+    var q=pnum(row[cQty]); if(!(q>0)) continue;
+    var p=cObal>=0 ? pnum(row[cObal]) : 0;
     out.push({ w:fg, n:(cFgD>=0?String(row[cFgD]||'').trim():''), r:rm, q:q, p:p });
     wipSet[fg]=1; rmSet[rm]=1;
   }
@@ -16057,20 +16064,18 @@ function _fcShowMatcomDetail(code) {
     html+='<table style="width:100%;border-collapse:collapse;font-size:11.5px">'
       +'<thead><tr style="border-bottom:1px solid var(--border2)">'
       +'<th style="'+thL+'">Kode WIP</th><th style="'+thL+'">Nama WIP</th>'
-      +'<th style="'+thS+'">RM terpakai ('+uomDisp+')</th><th style="'+thS+'">Obal WIP (pcs)</th>'
+      +'<th style="'+thS+'">RM terpakai ('+uomDisp+')</th>'
       +'</tr></thead><tbody>';
     list.forEach(function(e){
       html+='<tr>'
         +'<td style="'+tdL+';font-family:var(--mono)">'+e.w+'</td>'
         +'<td style="'+tdL+';color:var(--muted)">'+String(e.n||'—').replace(/</g,'&lt;')+'</td>'
         +'<td style="'+tdR+';color:var(--purple,#8b5cf6);font-weight:600">'+n_id(Math.round((e.q||0)*f*100)/100)+'</td>'
-        +'<td style="'+tdR+'">'+n_id(Math.round(e.p||0))+'</td>'
         +'</tr>';
     });
     html+='<tr style="border-top:2px solid var(--border2);font-weight:700">'
       +'<td style="padding:6px 8px" colspan="2">TOTAL Obal</td>'
-      +'<td style="padding:6px 8px;text-align:right;font-family:var(--mono);color:var(--purple,#8b5cf6)">'+n_id(Math.round(obalKg*100)/100)+'</td>'
-      +'<td style="padding:6px 8px;text-align:right;font-family:var(--mono)">'+n_id(Math.round(obalPcs))+'</td></tr>';
+      +'<td style="padding:6px 8px;text-align:right;font-family:var(--mono);color:var(--purple,#8b5cf6)">'+n_id(Math.round(obalKg*100)/100)+'</td></tr>';
     html+='</tbody></table>';
   }
   // ── Bagian 2: pemakaian bulan berjalan (SAP) — per WIP kalau kolom ParentName ada ──
