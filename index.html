@@ -1154,6 +1154,17 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
       </div>
     </div>
     <div class="card">
+      <div class="card-hdr"><span class="card-title">📦 Obal WIP</span><span id="obal_sheet-status" class="dot off"></span></div>
+      <div style="padding:14px">
+        <div class="fg"><label style="font-size:11px">Google Sheets URL</label><input id="obal_sheet-url" placeholder="https://docs.google.com/spreadsheets/d/..." style="width:100%;font-size:11px"></div>
+        <div class="fg"><label style="font-size:11px">Nama Tab</label><input id="obal_sheet-sheet" placeholder="Obal WIP" style="width:100%;font-size:11px"></div>
+        <button class="btn btn-sm btn-primary" onclick="loadSheetData('obal_sheet')" style="width:100%;margin-top:6px">Muat Obal WIP</button>
+        <div id="obal_sheet-info" style="margin-top:8px;font-size:11px;color:var(--muted)"></div>
+        <div id="obal_sheet-ts" style="font-size:10px;color:var(--muted);margin-top:2px"></div>
+        <div style="margin-top:8px;font-size:10px;color:var(--muted);line-height:1.5"><b>Stock awal bulan WIP</b> = RM yang sudah dipakai mixing bulan lalu untuk FG bulan ini → ditambahkan ke <b>matcom bulan berjalan</b>. Header wajib: <b>FG_Item</b>, <b>Component_Item</b>, <b>OBAL WIP</b> (pcs), <b>Qty RM</b> (qty RM dlm obal). Muat ulang tiap awal bulan.</div>
+      </div>
+    </div>
+    <div class="card">
       <div class="card-hdr"><span class="card-title">🔧 BOM</span><span id="bom_sheet-status" class="dot off"></span></div>
       <div style="padding:14px">
         <div class="fg"><label style="font-size:11px">Google Sheets URL</label><input id="bom_sheet-url" placeholder="https://docs.google.com/spreadsheets/d/..." style="width:100%;font-size:11px"></div>
@@ -2124,6 +2135,18 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
     <div id="ckfgo-body" style="max-height:60vh;overflow:auto"></div>
     <div class="modal-footer">
       <button class="btn btn-primary" onclick="closeModal('modal-ckfg-other')">Tutup</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Rincian Matcom bulan berjalan (Obal WIP + pemakaian SAP) -->
+<div class="modal-bg" id="modal-matcom-detail">
+  <div class="modal" style="width:680px;max-width:96vw">
+    <h3 style="margin-bottom:2px">Rincian Matcom — <span id="mcd-code" style="color:var(--teal);font-size:14px"></span></h3>
+    <div id="mcd-sub" style="font-size:11.5px;color:var(--muted);margin-bottom:10px"></div>
+    <div id="mcd-body" style="max-height:60vh;overflow:auto"></div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="closeModal('modal-matcom-detail')">Tutup</button>
     </div>
   </div>
 </div>
@@ -3286,8 +3309,9 @@ var CLOUD_KEYS = [
   'schedule','sched_tombs','po_overrides','proj_comments','stock_history',
   // proj_history: disimpan lokal saja (14 snapshot terlalu besar untuk Firebase 1MB limit)
   'suppliers','proj_hidden_cols','proj_snapshots',
-  'sheet_url_master','sheet_url_mrp','sheet_url_realname','sheet_url_pallet_pm','sheet_url_pallet_rm','sheet_url_bom_sheet','sheet_url_cogm','sheet_url_mps_sheet',
-  'sheet_tab_master','sheet_tab_mrp','sheet_tab_realname','sheet_tab_pallet_pm','sheet_tab_pallet_rm','sheet_tab_bom_sheet','sheet_tab_cogm','sheet_tab_mps_sheet',
+  'sheet_url_master','sheet_url_mrp','sheet_url_realname','sheet_url_pallet_pm','sheet_url_pallet_rm','sheet_url_bom_sheet','sheet_url_cogm','sheet_url_mps_sheet','sheet_url_obal_sheet',
+  'sheet_tab_master','sheet_tab_mrp','sheet_tab_realname','sheet_tab_pallet_pm','sheet_tab_pallet_rm','sheet_tab_bom_sheet','sheet_tab_cogm','sheet_tab_mps_sheet','sheet_tab_obal_sheet',
+  'obal_wip',
   'cogm_data',
   'npd_data',
   'sap_url','sap_user','sap_pass','fonnte','wn','workdays','last_sync','proj_highlighted',
@@ -3298,7 +3322,7 @@ var CLOUD_KEYS = [
   'wh_capacity_rm','wh_capacity_pm','update_deldate_data',
   'fc_propose','fc_ospo_ovr','fc_ospr_ovr','fc_doi2','fc_doi2_suppliers','mrp_source',
   'fc_autopropose','fc_doi_item_month_ovr',
-  'matcom_monthly','matcom_data','matcom_count','last_matcom_sync',
+  'matcom_monthly','matcom_parent','matcom_data','matcom_count','last_matcom_sync',
   'mps_ui_status','bom_ui_status','mrp_last_calc','mrp_data_ts',
   'email_daily_data',
   'ai_api_key',
@@ -3733,6 +3757,19 @@ function _applyRealtimeChanges(keys, vals) {
         case 'pallet_rm': try { STATE.palletRM = JSON.parse(val || 'null'); } catch(e) {} break;
         case 'wh_capacity_rm': _whCapacityRM = parseInt(val)||0; break;
         case 'wh_capacity_pm': _whCapacityPM = parseInt(val)||0; break;
+        case 'obal_wip':
+          try {
+            STATE.obalWip = JSON.parse(val || 'null');
+            window._obalIdx = null;
+            localStorage.setItem('obal_wip', val || 'null');
+          } catch(e){ console.warn('[realtime] obal_wip parse gagal:', e.message); }
+          break;
+        case 'matcom_parent':
+          try {
+            STATE.matcomParent = JSON.parse(val || 'null');
+            localStorage.setItem('matcom_parent', val || 'null');
+          } catch(e){ console.warn('[realtime] matcom_parent parse gagal:', e.message); }
+          break;
         case 'matcom_monthly':
           try {
             STATE.matcomMonthly = JSON.parse(val || 'null');
@@ -4469,6 +4506,15 @@ function loadSheetData(type) {
       if(dotEl) dotEl.className='dot';
       toast('MPS: '+cntMps+' FG ✓ (GSheet)','ok');
 
+    } else if(type==='obal_sheet'){
+      var obRows2D = _csvTo2D(text);
+      var resOb = _obalParseRows(obRows2D, 'GSheet' + (sheet ? ' tab "'+sheet+'"' : ''));
+      localStorage.setItem('obal_sheet_upload_ts', ts);
+      if(infoEl) infoEl.textContent = resOb.rows+' baris · '+resOb.wips+' WIP · '+resOb.rms+' RM ✓';
+      if(dotEl) dotEl.className='dot';
+      if(typeof renderForecast==='function' && document.getElementById('fc-table')) renderForecast();
+      toast('Obal WIP: '+resOb.rows+' baris ✓','ok');
+
     } else if(type==='cogm'){
       STATE.cogmData = processCOGM(rows, headers);
       var cnt = Object.keys(STATE.cogmData).length;
@@ -4490,7 +4536,7 @@ function loadSheetData(type) {
 
 function loadAllSheets(autoBuild) {
   var promises = [];
-  ['master','mrp','realname','pallet_pm','pallet_rm','bom_sheet','mps_sheet','cogm'].forEach(function(t){
+  ['master','mrp','realname','pallet_pm','pallet_rm','bom_sheet','mps_sheet','obal_sheet','cogm'].forEach(function(t){
     if(localStorage.getItem('sheet_url_'+t)) promises.push(loadSheetData(t));
   });
   if(!promises.length) { toast('Belum ada URL Sheets. Buka menu Data Source terlebih dahulu.','err'); return Promise.resolve(); }
@@ -4505,7 +4551,7 @@ function loadAllSheets(autoBuild) {
 }
 
 function _restoreSheetUrls() {
-  ['master','mrp','realname','pallet_pm','pallet_rm','bom_sheet','mps_sheet','cogm'].forEach(function(t){
+  ['master','mrp','realname','pallet_pm','pallet_rm','bom_sheet','mps_sheet','obal_sheet','cogm'].forEach(function(t){
     var u=localStorage.getItem('sheet_url_'+t), s=localStorage.getItem('sheet_tab_'+t);
     var ue=document.getElementById(t+'-url'), se=document.getElementById(t+'-sheet');
     if(ue&&u) ue.value=u; if(se&&s) se.value=s;
@@ -4541,6 +4587,8 @@ var STATE = {
   grpoHistori: [],
   matcomData: JSON.parse(localStorage.getItem('matcom_data') || 'null'),
   matcomMonthly: JSON.parse(localStorage.getItem('matcom_monthly') || 'null'),
+  obalWip: JSON.parse(localStorage.getItem('obal_wip') || 'null'),   // {rows:[{w,n,r,q,p}], ts} — stock awal bulan WIP (konsumsi RM dini)
+  matcomParent: JSON.parse(localStorage.getItem('matcom_parent') || 'null'), // {code:{namaWIP:qty bln berjalan}} — rincian matcom SAP per parent
   realNameData: JSON.parse(localStorage.getItem('realname_data') || '{}'),
   masterData: JSON.parse(localStorage.getItem('master_data') || 'null'),
   projectionData: [],
@@ -4934,7 +4982,7 @@ function _existingReqByCode(code, nMonths) {
   var snapMon = new Date().getMonth()+1;
   var uom = ((STATE.masterData||{})[c]||{}).uom || '';
   var factor = (/^(g|gr|gram)$/i.test(uom.trim())) ? 0.001 : 1;
-  var matcomCur = (mm[snapMon]||0) * factor;
+  var matcomCur = ((mm[snapMon]||0) + _obalRmRaw(c)) * factor; // + Obal WIP
   var tot = 0;
   var lim = (nMonths && nMonths>0) ? Math.min(nMonths, FC_MONTHS.length) : FC_MONTHS.length;
   for(var i=0;i<lim;i++){
@@ -5133,7 +5181,7 @@ function _npdShowDetail(code) {
   var snapMon = new Date().getMonth()+1;
   var uom = m.uom || '';
   var factor = (/^(g|gr|gram)$/i.test(uom.trim())) ? 0.001 : 1;
-  var matcomCur = (mm[snapMon]||0) * factor;
+  var matcomCur = ((mm[snapMon]||0) + _obalRmRaw(c)) * factor; // + Obal WIP
   // NPD per bulan produksi
   var npdMon = (_npdActiveByCodeMonth()[c]) || {};
 
@@ -6877,18 +6925,28 @@ async function loadMatcomSAP() {
       'July':7,'August':8,'September':9,'October':10,'November':11,'December':12
     };
     var byItem = {};
+    var byParent = {}; // {itemCode: {namaWIP/parent: qty bulan BERJALAN}} — utk popup rincian matcom
+    var _curMoNum = _nowM.getMonth() + 1;
     raw.forEach(function(r) {
-      var code = (r.Material || r.ItemCode || r.item_code || '').toString().trim();
+      // Normalisasi key — kebal perubahan gaya alias kolom di node (spt kasus GRPO)
+      var k = {}; Object.keys(r||{}).forEach(function(key){ k[key.toLowerCase().replace(/[^a-z0-9]/g,'')] = r[key]; });
+      var code = (k.material || k.itemcode || '').toString().trim();
       if(!code || !/^\d/.test(code)) return;
+      var par = (k.parentname || k.parent || k.parentitem || '').toString().trim();
       Object.keys(MONTH_MAP).forEach(function(mName) {
         var mo  = MONTH_MAP[mName];
-        var qty = parseFloat(r[mName]) || 0;
+        var qty = parseFloat(k[mName.toLowerCase()]) || 0;
         // Simpan dari bulan lalu (prevMoNum) — untuk formula DOI sliding
         var _prevMoNum = new Date().getMonth() === 0 ? 12 : new Date().getMonth();
         if(mo < _prevMoNum || mo > 12) return;
         if(qty <= 0) return;
         if(!byItem[code]) byItem[code] = {};
         byItem[code][mo] = (byItem[code][mo] || 0) + qty;
+        // Rincian per parent (WIP) khusus bulan berjalan — kalau kolom ParentName ada
+        if(par && mo === _curMoNum) {
+          if(!byParent[code]) byParent[code] = {};
+          byParent[code][par] = (byParent[code][par] || 0) + qty;
+        }
       });
     });
 
@@ -6896,6 +6954,9 @@ async function loadMatcomSAP() {
     STATE.matcomMonthly = byItem;
     localStorage.setItem('matcom_monthly', JSON.stringify(byItem));
     cloudSave('matcom_monthly', JSON.stringify(byItem));
+    STATE.matcomParent = Object.keys(byParent).length ? byParent : null;
+    try { localStorage.setItem('matcom_parent', JSON.stringify(STATE.matcomParent)); } catch(_e){}
+    cloudSave('matcom_parent', JSON.stringify(STATE.matcomParent));
     var cnt = Object.keys(byItem).length;
     var matcomSyncTime = new Date().toLocaleString('id-ID',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
     localStorage.setItem('last_matcom_sync', matcomSyncTime);
@@ -7298,7 +7359,7 @@ function _cekFgRows(){
     var matcom=0;
     if(_ckfgShowMatcom && STATE.matcomMonthly && STATE.matcomMonthly[c]){
       var _mcf=(/^(g|gr|gram)$/i.test((m.uom||'').trim()))?0.001:1;
-      matcom=(STATE.matcomMonthly[c][new Date().getMonth()+1]||0)*_mcf;
+      matcom=((STATE.matcomMonthly[c][new Date().getMonth()+1]||0)+_obalRmRaw(c))*_mcf; // + Obal WIP
     }
     var fgs=Object.keys(perFg[c]);
     var bd=fgs.map(function(f){ return f+': '+_ckfgFmt(perFg[c][f]); }).join('\n');
@@ -7374,7 +7435,7 @@ function _cekFgRmTable(){
   // Matcom bulan berjalan — konversi sama dgn engine forecast (uom gram → ×0.001)
   var _rmCurMo=new Date().getMonth()+1;
   var _rmMcF=(/^(g|gr|gram)$/i.test((m0.uom||'').trim()))?0.001:1;
-  var matcomCur=((STATE.matcomMonthly&&STATE.matcomMonthly[code])?(STATE.matcomMonthly[code][_rmCurMo]||0):0)*_rmMcF;
+  var matcomCur=(((STATE.matcomMonthly&&STATE.matcomMonthly[code])?(STATE.matcomMonthly[code][_rmCurMo]||0):0)+_obalRmRaw(code))*_rmMcF; // + Obal WIP
   var _moLblId=['','Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'][_rmCurMo]||'';
   var chip=function(l,v,c){ return '<span style="font-size:10.5px;color:var(--muted)">'+l+' <b style="color:'+(c||'var(--text)')+'">'+_ckfgFmt(v)+'</b></span>'; };
   var h='';
@@ -10935,6 +10996,67 @@ function _dispName(p) {
   return p.description || p.productCode || '';
 }
 // Helper: display name for PO/GRPO/OSPR items (no itemType, uses itemCode prefix)
+// ═══ Obal WIP — stock awal bulan WIP = konsumsi RM dini (ikut matcom bln berjalan) ═══
+// STATE.obalWip = {rows:[{w:kodeWIP, n:namaWIP, r:kodeRM, q:qtyRM(kolom R), p:obalPcs(kolom Q)}], ts}
+function _obalParseRows(rows2d, originLabel) {
+  var norm=function(x){ return String(x==null?'':x).toLowerCase().replace(/[^a-z0-9]/g,''); };
+  var hdrIdx=-1, H=null;
+  for(var i=0;i<Math.min(rows2d.length,8);i++){
+    var hh=rows2d[i].map(norm);
+    if(hh.indexOf('fgitem')>=0 && hh.some(function(h){return h.indexOf('qtyrm')>=0;})){ hdrIdx=i; H=hh; break; }
+  }
+  if(hdrIdx<0) throw new Error('Header tidak ditemukan — butuh kolom "FG_Item" dan "Qty RM"');
+  var find=function(pats){ for(var p=0;p<pats.length;p++){ for(var c=0;c<H.length;c++){ if(H[c]===pats[p]||H[c].indexOf(pats[p])===0) return c; } } return -1; };
+  var cFg   = find(['fgitem']);
+  var cFgD  = find(['fgitemdescription','fgitemdesc']);
+  var cRm   = find(['componentitem']);
+  var cObal = find(['obalwip']);
+  var cQty  = find(['qtyrm']);
+  if(cRm<0)   throw new Error('Kolom "Component_Item" tidak ditemukan');
+  if(cQty<0)  throw new Error('Kolom "Qty RM" tidak ditemukan');
+  var out=[], wipSet={}, rmSet={};
+  for(var r=hdrIdx+1;r<rows2d.length;r++){
+    var row=rows2d[r];
+    var fg=String(row[cFg]||'').trim(), rm=String(row[cRm]||'').trim();
+    if(!fg || !rm || !/^[34]/.test(rm)) continue;
+    var q=_mpsNumCell(row[cQty]); if(!(q>0)) continue;
+    var p=cObal>=0 ? _mpsNumCell(row[cObal]) : 0;
+    out.push({ w:fg, n:(cFgD>=0?String(row[cFgD]||'').trim():''), r:rm, q:q, p:p });
+    wipSet[fg]=1; rmSet[rm]=1;
+  }
+  STATE.obalWip = { rows:out, ts:Date.now(), src:originLabel||'' };
+  window._obalIdx = null; // invalidate index
+  var js=JSON.stringify(STATE.obalWip);
+  try{ localStorage.setItem('obal_wip', js); }catch(e){}
+  cloudSave('obal_wip', js);
+  return { rows:out.length, wips:Object.keys(wipSet).length, rms:Object.keys(rmSet).length };
+}
+// Index per-RM (cache per ts)
+function _obalIndex(){
+  var d=STATE.obalWip;
+  if(!d || !d.rows || !d.rows.length) return {};
+  if(window._obalIdx && window._obalIdxStamp===d.ts) return window._obalIdx;
+  var ix={};
+  d.rows.forEach(function(e){ if(!ix[e.r]) ix[e.r]=[]; ix[e.r].push(e); });
+  window._obalIdx=ix; window._obalIdxStamp=d.ts;
+  return ix;
+}
+// Total qty obal utk satu RM — SATUAN ASLI sheet (sama dgn matcom mentah: gram utk item gram),
+// jadi di titik pakai dikalikan faktor gram yang sama dengan matcom.
+function _obalRmRaw(code){
+  var l=_obalIndex()[code]; if(!l) return 0;
+  var t=0; l.forEach(function(e){ t+=(e.q||0); }); return t;
+}
+// Obal basi? Data dimuat BUKAN di bulan berjalan → return label bulan dimuat (mis. "10/2026"),
+// null kalau masih segar / belum ada data. Dipakai sebagai PERINGATAN saja — angka tetap dihitung.
+function _obalStaleLabel(){
+  var d=STATE.obalWip;
+  if(!d || !d.ts || !(d.rows&&d.rows.length)) return null;
+  var t=new Date(d.ts), now=new Date();
+  if(t.getFullYear()===now.getFullYear() && t.getMonth()===now.getMonth()) return null;
+  return String(t.getMonth()+1).padStart(2,'0')+'/'+t.getFullYear();
+}
+
 // Mapper satu baris GRPO dari query 27 — KEBAL perubahan gaya nama kolom:
 // semua key dinormalisasi (lowercase, buang non-alfanumerik) lalu dicocokkan,
 // jadi GRPO_Date / "Grpo Date" / GrpoDate, Dscription / Itemname dll. semua kena.
@@ -15456,7 +15578,8 @@ function _calcForecast(code, ospoIdx) {
     var mrpVal = (mrp.months && mrp.months[m] != null) ? (mrp.months[m] || 0) : 0;
     var moNum  = FC_MONTH_NUMS[i];
     // Hanya kurangi matcom untuk bulan berjalan saja
-    var consumed = (moNum === snapMon) ? ((matcomM[moNum] || 0) * _matcomFactor) : 0;
+    // Konsumsi bln berjalan = matcom SAP + Obal WIP (RM sudah dipakai mixing utk FG bln ini)
+    var consumed = (moNum === snapMon) ? (((matcomM[moNum] || 0) + _obalRmRaw(code)) * _matcomFactor) : 0;
     var npdAdd = _npdByMonth[i] || 0; // NPD masuk di bulan produksi yg dipilih planner
     return Math.max(0, mrpVal - consumed) + npdAdd;
   });
@@ -15892,6 +16015,99 @@ function _fcVal(qty, code) {
 // Angka "raw MRP" ini = forecastRaw[mi]. Nilai Requirement yang tampil di tabel
 // bisa berbeda utk bulan berjalan (dikurangi matcom) atau saat "Sertakan NPD" aktif
 // (ditambah kebutuhan NPD) — perbedaan itu ditampilkan sebagai catatan di bawah.
+// Popup rincian Matcom bulan berjalan — dipisah: Obal WIP (per WIP: kg + pcs) vs
+// pemakaian bulan berjalan dari SAP (total per item; SAP tidak menyediakan rincian per WIP).
+function _fcShowMatcomDetail(code) {
+  var md = (STATE.masterData || {})[code] || {};
+  var rn = (STATE.realNameData || {})[code];
+  var nm = (_isAdmin && _rmDisplayMode === 'realname' && rn) ? rn : (md.desc || '');
+  var uom = md.uom || '';
+  var isGr = /^(g|gr|gram)$/i.test((uom||'').trim());
+  var f = isGr ? 0.001 : 1;
+  var uomDisp = isGr ? 'KG' : uom;
+  var curMo = new Date().getMonth()+1;
+  var MNM = ['','Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
+  var mm = (STATE.matcomMonthly || {})[code] || {};
+  var sapKg = (mm[curMo]||0) * f;
+  var list = (_obalIndex()[code] || []).slice().sort(function(a,b){ return (b.q||0)-(a.q||0); });
+  var obalKg = 0, obalPcs = 0;
+  list.forEach(function(e){ obalKg += (e.q||0)*f; obalPcs += (e.p||0); });
+  var total = sapKg + obalKg;
+  var _stale = _obalStaleLabel();
+  document.getElementById('mcd-code').textContent = code + (nm ? ' · ' + nm : '');
+  document.getElementById('mcd-sub').innerHTML = 'Bulan <strong style="color:var(--text)">'+MNM[curMo]+'</strong>'
+    + ' · Total matcom efektif <strong style="color:var(--teal)">' + n_id(Math.round(total*100)/100) + ' ' + uomDisp + '</strong>'
+    + ' = Obal WIP <strong style="color:var(--purple,#8b5cf6)">' + n_id(Math.round(obalKg*100)/100) + '</strong>'
+    + ' + pemakaian bln berjalan <strong style="color:var(--teal)">' + n_id(Math.round(sapKg*100)/100) + '</strong>'
+    + (_stale ? '<br><span style="color:var(--red);font-weight:700">⚠ Data Obal WIP dimuat '+_stale+' (bukan bulan ini) — muat ulang di Data Source → 📦 Obal WIP!</span>' : '');
+  var thS='text-align:right;padding:6px 8px;color:var(--muted);font-weight:600';
+  var thL='text-align:left;padding:6px 8px;color:var(--muted);font-weight:600';
+  var tdL='padding:5px 8px;border-bottom:1px dotted var(--border)';
+  var tdR='padding:5px 8px;text-align:right;font-family:var(--mono);border-bottom:1px dotted var(--border)';
+  var html='';
+  // ── Bagian 1: Obal WIP per WIP ──
+  html+='<div style="font-size:11px;font-weight:700;color:var(--purple,#8b5cf6);margin-bottom:4px">📦 Obal WIP — stock awal bulan (RM sudah terpakai mixing)</div>';
+  if(!list.length){
+    html+='<div style="padding:10px;color:var(--muted);font-size:11.5px">'
+      + (STATE.obalWip && STATE.obalWip.rows && STATE.obalWip.rows.length
+          ? 'RM ini tidak ada di data Obal WIP.'
+          : 'Data Obal WIP belum dimuat — muat di Data Source → 📦 Obal WIP.')
+      + '</div>';
+  } else {
+    html+='<table style="width:100%;border-collapse:collapse;font-size:11.5px">'
+      +'<thead><tr style="border-bottom:1px solid var(--border2)">'
+      +'<th style="'+thL+'">Kode WIP</th><th style="'+thL+'">Nama WIP</th>'
+      +'<th style="'+thS+'">RM terpakai ('+uomDisp+')</th><th style="'+thS+'">Obal WIP (pcs)</th>'
+      +'</tr></thead><tbody>';
+    list.forEach(function(e){
+      html+='<tr>'
+        +'<td style="'+tdL+';font-family:var(--mono)">'+e.w+'</td>'
+        +'<td style="'+tdL+';color:var(--muted)">'+String(e.n||'—').replace(/</g,'&lt;')+'</td>'
+        +'<td style="'+tdR+';color:var(--purple,#8b5cf6);font-weight:600">'+n_id(Math.round((e.q||0)*f*100)/100)+'</td>'
+        +'<td style="'+tdR+'">'+n_id(Math.round(e.p||0))+'</td>'
+        +'</tr>';
+    });
+    html+='<tr style="border-top:2px solid var(--border2);font-weight:700">'
+      +'<td style="padding:6px 8px" colspan="2">TOTAL Obal</td>'
+      +'<td style="padding:6px 8px;text-align:right;font-family:var(--mono);color:var(--purple,#8b5cf6)">'+n_id(Math.round(obalKg*100)/100)+'</td>'
+      +'<td style="padding:6px 8px;text-align:right;font-family:var(--mono)">'+n_id(Math.round(obalPcs))+'</td></tr>';
+    html+='</tbody></table>';
+  }
+  // ── Bagian 2: pemakaian bulan berjalan (SAP) — per WIP kalau kolom ParentName ada ──
+  html+='<div style="font-size:11px;font-weight:700;color:var(--teal);margin:14px 0 4px">🏭 Pemakaian bulan berjalan (Matcom SAP)</div>';
+  var parMap = (STATE.matcomParent || {})[code] || null;
+  if(parMap && Object.keys(parMap).length){
+    var parList = Object.keys(parMap).map(function(p){ return {p:p, q:(parMap[p]||0)*f}; })
+      .sort(function(a,b){ return b.q-a.q; });
+    var parTot = 0; parList.forEach(function(e){ parTot += e.q; });
+    html+='<table style="width:100%;border-collapse:collapse;font-size:11.5px">'
+      +'<thead><tr style="border-bottom:1px solid var(--border2)">'
+      +'<th style="'+thL+'">Dipakai untuk (Parent/WIP)</th><th style="'+thS+'">Qty ('+uomDisp+')</th>'
+      +'</tr></thead><tbody>';
+    parList.forEach(function(e){
+      html+='<tr><td style="'+tdL+'">'+String(e.p).replace(/</g,'&lt;')+'</td>'
+        +'<td style="'+tdR+';color:var(--teal);font-weight:600">'+n_id(Math.round(e.q*100)/100)+'</td></tr>';
+    });
+    html+='<tr style="border-top:2px solid var(--border2);font-weight:700">'
+      +'<td style="padding:6px 8px">TOTAL pemakaian '+MNM[curMo]+'</td>'
+      +'<td style="padding:6px 8px;text-align:right;font-family:var(--mono);color:var(--teal)">'+n_id(Math.round(parTot*100)/100)+'</td></tr>';
+    html+='</tbody></table>';
+    if(Math.abs(parTot - sapKg) > 0.01)
+      html+='<div style="font-size:10px;color:var(--amber);margin-top:3px">⚠ Jumlah rincian ('+n_id(Math.round(parTot*100)/100)+') ≠ total matcom item ('+n_id(Math.round(sapKg*100)/100)+') — ada baris tanpa ParentName di tarikan SAP.</div>';
+  } else {
+    html+='<table style="width:100%;border-collapse:collapse;font-size:11.5px"><tbody>'
+      +'<tr><td style="'+tdL+'">Total pemakaian '+MNM[curMo]+' <small style="color:var(--muted)">(rincian per WIP terisi setelah Sync Matcom — butuh kolom ParentName di query SAP)</small></td>'
+      +'<td style="'+tdR+';color:var(--teal);font-weight:700">'+n_id(Math.round(sapKg*100)/100)+' '+uomDisp+'</td></tr>'
+      +'</tbody></table>';
+  }
+  // ── Grand total ──
+  html+='<div style="margin-top:12px;padding:8px 10px;background:var(--bg3);border-radius:8px;font-size:12px;font-weight:700;display:flex;justify-content:space-between">'
+    +'<span>TOTAL matcom efektif (dipakai perhitungan bulan berjalan)</span>'
+    +'<span style="font-family:var(--mono);color:var(--teal)">'+n_id(Math.round(total*100)/100)+' '+uomDisp+'</span></div>';
+  document.getElementById('mcd-body').innerHTML = html;
+  document.getElementById('modal-matcom-detail').classList.add('open');
+}
+
 // Popup rincian SOH per gudang — dipanggil dari angka SOH di kartu info item Forecast.
 // Rincian per gudang tersimpan LOKAL (IndexedDB) dari sync stock terakhir di laptop ini;
 // laptop yang hanya restore dari cloud melihat subtotal per site saja sampai Sync sendiri.
@@ -16761,11 +16977,15 @@ function _fcDetailRow(code, fc, master) {
     +' <small style="color:var(--muted)">'+_mcUomDisplay+'</small>'
     +' <small style="color:var(--muted);font-size:9px">(dipakai DOI)</small>']);
 
-  // Matcom bulan berjalan (partial)
-  var _mcQty = _isGram ? (matcomM[curMo]||0)/1000 : (matcomM[curMo]||0);
+  // Matcom bulan berjalan (partial) = SAP + Obal WIP — klik utk rincian per WIP
+  var _mcSap  = _isGram ? (matcomM[curMo]||0)/1000 : (matcomM[curMo]||0);
+  var _mcObal = _isGram ? _obalRmRaw(code)/1000 : _obalRmRaw(code);
+  var _mcQty  = _mcSap + _mcObal;
   matcomRows.push(['Matcom '+_MNAME[curMo],
-    '<span style="color:'+(_mcQty>0?'var(--teal)':'var(--muted)')+';font-weight:600">'+n_id(_mcQty)+'</span>'
-    +' <small style="color:var(--muted)">'+_mcUomDisplay+'</small>']);
+    '<span onclick="_fcShowMatcomDetail(\''+code+'\')" title="Klik: rincian matcom — Obal WIP per WIP + pemakaian bulan berjalan" style="color:'+(_mcQty>0?'var(--teal)':'var(--muted)')+';font-weight:600;cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px">'+n_id(Math.round(_mcQty*100)/100)+'</span>'
+    +' <small style="color:var(--muted)">'+_mcUomDisplay+'</small>'
+    +(_mcObal>0?' <small style="color:var(--muted);font-size:9px">(SAP '+n_id(Math.round(_mcSap*100)/100)+' + Obal '+n_id(Math.round(_mcObal*100)/100)+')</small>':'')
+    +(_obalStaleLabel()?' <small style="color:var(--red);font-size:9px;font-weight:700">⚠ obal dimuat '+_obalStaleLabel()+' — muat ulang!</small>':'')]);
   // Forecast ASLI bulan berjalan (MRP sebelum dikurangi matcom) + % usage terhadap forecast asli
   var _fcRawCur = (fc.forecastRaw && fc.snapMoIdx!=null) ? (fc.forecastRaw[fc.snapMoIdx]||0) : 0;
   matcomRows.push(['Forecast '+_MNAME[curMo]+' (asli)',
@@ -17938,7 +18158,7 @@ function _fcUsagePctOf(code, fcData) {
   var curMo = new Date().getMonth()+1;
   var uom = ((STATE.masterData||{})[code]||{}).uom||'';
   var f = (/^(g|gr|gram)$/i.test(uom.trim())) ? 0.001 : 1;
-  var mc = (mm[curMo]||0)*f;
+  var mc = ((mm[curMo]||0) + _obalRmRaw(code))*f; // + Obal WIP
   var fc = (fcData||window._fcRekapFcData||{})[code];
   var raw = (fc && fc.forecastRaw && fc.snapMoIdx!=null) ? (fc.forecastRaw[fc.snapMoIdx]||0) : 0;
   if(raw>0){
