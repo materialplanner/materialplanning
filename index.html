@@ -16061,6 +16061,16 @@ function _fcShowMatcomDetail(code) {
     else { if(kode && !rowsMap[key].kode) rowsMap[key].kode = kode; if(nama && !rowsMap[key].nama) rowsMap[key].nama = nama; }
     return rowsMap[key];
   };
+  // Peta nama WIP → kode: dari data Obal (n→w) + BOM (fgDesc 2xxx → fg) —
+  // tarikan matcom SAP hanya membawa ParentName tanpa kode, jadi kode diisi dari sini.
+  var nameToCode = {};
+  list.forEach(function(e){ if(e.n) nameToCode[normN(e.n)] = e.w; });
+  (_bomData||[]).forEach(function(b){
+    if(b && b.fg && /^2/.test(b.fg) && b.fgDesc){
+      var k2 = normN(b.fgDesc);
+      if(!nameToCode[k2]) nameToCode[k2] = b.fg;
+    }
+  });
   list.forEach(function(e){
     var key = normN(e.n) || e.w;
     ensure(key, e.w, e.n).obal += (e.q||0)*f;
@@ -16069,7 +16079,7 @@ function _fcShowMatcomDetail(code) {
   if(parMap){
     Object.keys(parMap).forEach(function(p){
       var q = (parMap[p]||0)*f; if(!(q>0)) return;
-      ensure(normN(p), '', p).sap += q;
+      ensure(normN(p), nameToCode[normN(p)]||'', p).sap += q;
       sapBreakdown += q;
     });
   }
