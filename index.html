@@ -16052,59 +16052,65 @@ function _fcShowMatcomDetail(code) {
   var tdL='padding:5px 8px;border-bottom:1px dotted var(--border)';
   var tdR='padding:5px 8px;text-align:right;font-family:var(--mono);border-bottom:1px dotted var(--border)';
   var html='';
-  // ── Bagian 1: Obal WIP per WIP ──
-  html+='<div style="font-size:11px;font-weight:700;color:var(--purple,#8b5cf6);margin-bottom:4px">📦 Obal WIP — stock awal bulan (RM sudah terpakai mixing)</div>';
-  if(!list.length){
-    html+='<div style="padding:10px;color:var(--muted);font-size:11.5px">'
+  // ── Matriks per WIP: kolom Obal | Matcom bln ini | Total (baris & kolom di-total) ──
+  var parMap = (STATE.matcomParent || {})[code] || null;
+  var normN = function(x){ return String(x||'').toLowerCase().replace(/\s+/g,' ').trim(); };
+  var rowsMap = {}, order = [];
+  var ensure = function(key, kode, nama){
+    if(!rowsMap[key]){ rowsMap[key] = { kode:kode||'', nama:nama||'', obal:0, sap:0 }; order.push(key); }
+    else { if(kode && !rowsMap[key].kode) rowsMap[key].kode = kode; if(nama && !rowsMap[key].nama) rowsMap[key].nama = nama; }
+    return rowsMap[key];
+  };
+  list.forEach(function(e){
+    var key = normN(e.n) || e.w;
+    ensure(key, e.w, e.n).obal += (e.q||0)*f;
+  });
+  var sapBreakdown = 0;
+  if(parMap){
+    Object.keys(parMap).forEach(function(p){
+      var q = (parMap[p]||0)*f; if(!(q>0)) return;
+      ensure(normN(p), '', p).sap += q;
+      sapBreakdown += q;
+    });
+  }
+  var mrows = order.map(function(k){ var o=rowsMap[k]; o.tot=o.obal+o.sap; return o; })
+    .sort(function(a,b){ return b.tot-a.tot; });
+  html+='<table style="width:100%;border-collapse:collapse;font-size:11.5px">'
+    +'<thead><tr style="border-bottom:1px solid var(--border2)">'
+    +'<th style="'+thL+'">Kode WIP</th><th style="'+thL+'">Nama WIP</th>'
+    +'<th style="'+thS+';color:var(--purple,#8b5cf6)" title="Stock awal bulan WIP — RM sudah terpakai mixing">Obal WIP ('+uomDisp+')</th>'
+    +'<th style="'+thS+';color:var(--teal)" title="Pemakaian bulan berjalan dari Matcom SAP (per ParentName)">Matcom '+MNM[curMo]+' ('+uomDisp+')</th>'
+    +'<th style="'+thS+'">Total ('+uomDisp+')</th>'
+    +'</tr></thead><tbody>';
+  if(!mrows.length){
+    html+='<tr><td colspan="5" style="padding:12px;text-align:center;color:var(--muted)">'
       + (STATE.obalWip && STATE.obalWip.rows && STATE.obalWip.rows.length
-          ? 'RM ini tidak ada di data Obal WIP.'
-          : 'Data Obal WIP belum dimuat — muat di Data Source → 📦 Obal WIP.')
-      + '</div>';
+          ? 'RM ini tidak ada di data Obal WIP dan tidak ada rincian ParentName dari SAP.'
+          : 'Data Obal WIP belum dimuat (Data Source → 📦 Obal WIP) dan belum ada rincian ParentName dari Sync Matcom.')
+      +'</td></tr>';
   } else {
-    html+='<table style="width:100%;border-collapse:collapse;font-size:11.5px">'
-      +'<thead><tr style="border-bottom:1px solid var(--border2)">'
-      +'<th style="'+thL+'">Kode WIP</th><th style="'+thL+'">Nama WIP</th>'
-      +'<th style="'+thS+'">RM terpakai ('+uomDisp+')</th>'
-      +'</tr></thead><tbody>';
-    list.forEach(function(e){
+    mrows.forEach(function(o){
       html+='<tr>'
-        +'<td style="'+tdL+';font-family:var(--mono)">'+e.w+'</td>'
-        +'<td style="'+tdL+';color:var(--muted)">'+String(e.n||'—').replace(/</g,'&lt;')+'</td>'
-        +'<td style="'+tdR+';color:var(--purple,#8b5cf6);font-weight:600">'+n_id(Math.round((e.q||0)*f*100)/100)+'</td>'
+        +'<td style="'+tdL+';font-family:var(--mono)">'+(o.kode||'—')+'</td>'
+        +'<td style="'+tdL+';color:var(--muted)">'+String(o.nama||'—').replace(/</g,'&lt;')+'</td>'
+        +'<td style="'+tdR+';color:var(--purple,#8b5cf6);font-weight:600">'+(o.obal>0?n_id(Math.round(o.obal*100)/100):'<span style="color:var(--hint)">—</span>')+'</td>'
+        +'<td style="'+tdR+';color:var(--teal);font-weight:600">'+(o.sap>0?n_id(Math.round(o.sap*100)/100):'<span style="color:var(--hint)">—</span>')+'</td>'
+        +'<td style="'+tdR+';font-weight:700">'+n_id(Math.round(o.tot*100)/100)+'</td>'
         +'</tr>';
     });
-    html+='<tr style="border-top:2px solid var(--border2);font-weight:700">'
-      +'<td style="padding:6px 8px" colspan="2">TOTAL Obal</td>'
-      +'<td style="padding:6px 8px;text-align:right;font-family:var(--mono);color:var(--purple,#8b5cf6)">'+n_id(Math.round(obalKg*100)/100)+'</td></tr>';
-    html+='</tbody></table>';
   }
-  // ── Bagian 2: pemakaian bulan berjalan (SAP) — per WIP kalau kolom ParentName ada ──
-  html+='<div style="font-size:11px;font-weight:700;color:var(--teal);margin:14px 0 4px">🏭 Pemakaian bulan berjalan (Matcom SAP)</div>';
-  var parMap = (STATE.matcomParent || {})[code] || null;
-  if(parMap && Object.keys(parMap).length){
-    var parList = Object.keys(parMap).map(function(p){ return {p:p, q:(parMap[p]||0)*f}; })
-      .sort(function(a,b){ return b.q-a.q; });
-    var parTot = 0; parList.forEach(function(e){ parTot += e.q; });
-    html+='<table style="width:100%;border-collapse:collapse;font-size:11.5px">'
-      +'<thead><tr style="border-bottom:1px solid var(--border2)">'
-      +'<th style="'+thL+'">Dipakai untuk (Parent/WIP)</th><th style="'+thS+'">Qty ('+uomDisp+')</th>'
-      +'</tr></thead><tbody>';
-    parList.forEach(function(e){
-      html+='<tr><td style="'+tdL+'">'+String(e.p).replace(/</g,'&lt;')+'</td>'
-        +'<td style="'+tdR+';color:var(--teal);font-weight:600">'+n_id(Math.round(e.q*100)/100)+'</td></tr>';
-    });
-    html+='<tr style="border-top:2px solid var(--border2);font-weight:700">'
-      +'<td style="padding:6px 8px">TOTAL pemakaian '+MNM[curMo]+'</td>'
-      +'<td style="padding:6px 8px;text-align:right;font-family:var(--mono);color:var(--teal)">'+n_id(Math.round(parTot*100)/100)+'</td></tr>';
-    html+='</tbody></table>';
-    if(Math.abs(parTot - sapKg) > 0.01)
-      html+='<div style="font-size:10px;color:var(--amber);margin-top:3px">⚠ Jumlah rincian ('+n_id(Math.round(parTot*100)/100)+') ≠ total matcom item ('+n_id(Math.round(sapKg*100)/100)+') — ada baris tanpa ParentName di tarikan SAP.</div>';
-  } else {
-    html+='<table style="width:100%;border-collapse:collapse;font-size:11.5px"><tbody>'
-      +'<tr><td style="'+tdL+'">Total pemakaian '+MNM[curMo]+' <small style="color:var(--muted)">(rincian per WIP terisi setelah Sync Matcom — butuh kolom ParentName di query SAP)</small></td>'
-      +'<td style="'+tdR+';color:var(--teal);font-weight:700">'+n_id(Math.round(sapKg*100)/100)+' '+uomDisp+'</td></tr>'
-      +'</tbody></table>';
-  }
+  // Baris TOTAL kolom — Matcom pakai TOTAL ITEM dari SAP (sapKg), bukan jumlah rincian,
+  // supaya grand total = matcom efektif yang benar-benar dipakai perhitungan.
+  html+='<tr style="border-top:2px solid var(--border2);font-weight:700;background:var(--bg3)">'
+    +'<td style="padding:6px 8px" colspan="2">TOTAL</td>'
+    +'<td style="padding:6px 8px;text-align:right;font-family:var(--mono);color:var(--purple,#8b5cf6)">'+n_id(Math.round(obalKg*100)/100)+'</td>'
+    +'<td style="padding:6px 8px;text-align:right;font-family:var(--mono);color:var(--teal)">'+n_id(Math.round(sapKg*100)/100)+'</td>'
+    +'<td style="padding:6px 8px;text-align:right;font-family:var(--mono)">'+n_id(Math.round(total*100)/100)+'</td></tr>';
+  html+='</tbody></table>';
+  if(parMap && Math.abs(sapBreakdown - sapKg) > 0.01)
+    html+='<div style="font-size:10px;color:var(--amber);margin-top:3px">⚠ Jumlah rincian Matcom per WIP ('+n_id(Math.round(sapBreakdown*100)/100)+') ≠ total matcom item ('+n_id(Math.round(sapKg*100)/100)+') — ada pemakaian tanpa ParentName di tarikan SAP.</div>';
+  if(!parMap)
+    html+='<div style="font-size:10px;color:var(--muted);margin-top:3px">Kolom Matcom per WIP terisi setelah Sync Matcom (butuh kolom ParentName di query SAP) — baris TOTAL tetap memakai total item.</div>';
   // ── Grand total ──
   html+='<div style="margin-top:12px;padding:8px 10px;background:var(--bg3);border-radius:8px;font-size:12px;font-weight:700;display:flex;justify-content:space-between">'
     +'<span>TOTAL matcom efektif (dipakai perhitungan bulan berjalan)</span>'
