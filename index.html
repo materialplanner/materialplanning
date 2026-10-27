@@ -15403,7 +15403,7 @@ function _fcGrandTotalHTML(items, fcData) {
   var rows = [
     {key:'requirement', label:'Requirement', get:function(fc){return fc.forecast;}, color:'var(--text)'},
     {key:'ospo',        label:isFcView?'Adjusted OSPO':'OSPO', get:function(fc){return isFcView?(fc.forecastOspo||fc.ospo):fc.ospo;}, color:'var(--teal)'},
-    {key:'ospr',        label:'OSPR',        get:function(fc){return fc.ospr;}, color:'var(--accent)'},
+    {key:'ospr',        label:isFcView?'Adjusted OSPR':'OSPR', get:function(fc){return isFcView?(fc.forecastOspr||fc.ospr):fc.ospr;}, color:'var(--accent)'},
     {key:'stock',       label:'Stock Ending',get:function(fc){return isFcView?(fc.stockFc||fc.stock):fc.stock;}, color:'var(--green)'},
     {key:'propose',     label:'Propose PR',  get:function(fc){return fc.propose;}, color:'var(--purple,#8b5cf6)'}
   ];
@@ -15894,45 +15894,52 @@ function _calcForecast(code, ospoIdx) {
   }
   var doiAktual = calcDOI(stockWithProp);
 
-  // ── Forecast view: OSPO pool realokasi + propose ───────────────────────────
+  // ── Forecast view: realokasi pool — URUTAN SUPPLY: OSPO DULU, OSPR MENYUSUL ──
+  // Aturan: PR tidak boleh "datang" lebih dulu dari PO. Semua kebutuhan ditutup dari
+  // pool OSPO sampai habis; OSPR baru dialokasikan setelah pool OSPO 0. Sisa OSPR yang
+  // tak terserap kebutuhan diparkir di bulan terakhir horizon (total baris tetap utuh).
   var ospoPoolFc = ospo.reduce(function(a,v){ return a+v; }, 0);
+  var osprPoolFc = 0;
+  for(var _oi = snapMoIdx; _oi < FC_MONTHS.length; _oi++) osprPoolFc += (osprPool2[_oi]||0) + (osprPulled[_oi]||0);
   var forecastOspo = new Array(FC_MONTHS.length).fill(0);
+  var forecastOspr = new Array(FC_MONTHS.length).fill(0);
   var stockFc    = new Array(FC_MONTHS.length).fill(0);
   var prevStFc   = soh;
   var _hasOspoOvr = _fcOspoOverride[code] && Object.keys(_fcOspoOverride[code]).length > 0;
   for(var fm2 = snapMoIdx; fm2 < FC_MONTHS.length; fm2++) {
     var fm_DOI = _fcGetDOIForItem(code, fm2);
     var req_f  = forecast[fm2];
-    var ospr_f = (osprPool2[fm2]||0) + (osprPulled[fm2]||0);
+    var ospr_f = (osprPool2[fm2]||0) + (osprPulled[fm2]||0); // efektif — dipakai mode override
     var prop_f = totalProp[fm2] || 0;
-    var _fmOvr = _fcOspoOverride[code] && _fcOspoOverride[code][fm2] != null;
     if(_hasOspoOvr) {
-      // Ada adjust manual → pakai OSPO apa adanya (raw ospo), JANGAN distribusi pool.
-      // ospo[fm2] sudah mencerminkan override (di-set di bagian ospo build).
+      // Ada adjust manual → pakai OSPO & OSPR apa adanya, JANGAN distribusi pool.
       forecastOspo[fm2] = ospo[fm2] || 0;
+      forecastOspr[fm2] = ospr_f;
     } else {
       // Stok minimal versi mesin DOI (rate smoothed 3 bln) — konsisten dgn Generate.
-      // Dulu pakai req bulan ini × DOI/WD → bulan yg propose-nya tersimpan terlihat
-      // "cukup" padahal DOI tampilan < target, sehingga PO diparkir ke bulan belakang
-      // (kasus Permethyl Okt'26: PO 200 malah ke Nov/Des, DOI Okt 27 < target 30).
       var _rF    = _doiMonthlyRate(fm2);
       var minStF = req_f > 0 ? (_rF > 0 ? fm_DOI * _rF / WD : req_f * (fm_DOI / WD)) : 0;
-      // ⭐ PO DULU, propose belakangan — urutan yang sama dgn mesin Generate (Step 1
-      // tarik OSPO sampai target, Step 2 propose sisanya). Kebutuhan dihitung TANPA
-      // mengurangi propose tersimpan, supaya PO yang ada ditarik ke bulan defisit
-      // paling awal (Permethyl: 200 semua ke Okt, bukan 150 Okt + 50 Des).
-      // Catatan dobel-hitung lama (Liponate): akarnya minStF berbasis req bulan ini yg
-      // menggelembung di bulan spike — sudah diganti rate-based di atas. Propose hasil
-      // Generate baru dihitung SETELAH tarik PO, jadi PO + propose saling melengkapi;
-      // propose lama/manual yg tumpang-tindih beres dengan klik Generate ulang.
-      var needF  = Math.max(0, minStF + req_f - prevStFc - ospr_f);
+      // Kebutuhan bulan ini TANPA mengurangi OSPR di bulan aslinya — OSPR ikut antre
+      // di belakang OSPO, bukan parkir di bulan req date PR.
+      var needF  = Math.max(0, minStF + req_f - prevStFc);
       var fromPool = Math.min(needF > 0 ? Math.max(moq, Math.ceil(needF/_step)*_step) : 0, ospoPoolFc);
       // Sisa pool < 1 kelipatan tak bisa dialokasikan rapi ke bulan lain — sapu sekalian
       if(fromPool > 0 && (ospoPoolFc - fromPool) > 0 && (ospoPoolFc - fromPool) < _step) fromPool = ospoPoolFc;
       ospoPoolFc -= fromPool;
       forecastOspo[fm2] = fromPool;
+      // OSPR hanya boleh keluar SETELAH pool OSPO habis
+      var fromPr = 0;
+      if(ospoPoolFc <= 0 && osprPoolFc > 0) {
+        var needPr = Math.max(0, needF - fromPool);
+        fromPr = Math.min(needPr > 0 ? Math.max(moq, Math.ceil(needPr/_step)*_step) : 0, osprPoolFc);
+        if(fromPr > 0 && (osprPoolFc - fromPr) > 0 && (osprPoolFc - fromPr) < _step) fromPr = osprPoolFc;
+      }
+      // Bulan terakhir horizon: sisa OSPR diparkir di sini supaya total baris tetap
+      if(fm2 === FC_MONTHS.length - 1 && osprPoolFc - fromPr > 0) fromPr = osprPoolFc;
+      osprPoolFc -= fromPr;
+      forecastOspr[fm2] = fromPr;
     }
-    stockFc[fm2] = prevStFc + forecastOspo[fm2] + ospr_f + prop_f - req_f;
+    stockFc[fm2] = prevStFc + forecastOspo[fm2] + forecastOspr[fm2] + prop_f - req_f;
     prevStFc = stockFc[fm2];
   }
   var doiFc = calcDOI(stockFc);
@@ -15966,7 +15973,7 @@ function _calcForecast(code, ospoIdx) {
   return {
     forecast: forecast, ospo: ospoEffective, ospoRaw: ospo, ospoBase: ospoBase, ospr: osprPool2.map(function(v,i){ return v + osprPulled[i]; }), ospr_base: ospr_base,
     stock: stockWithProp, doi: doiAktual, stockBase: stockProj,
-    forecastOspo: forecastOspo, stockFc: stockFc, doiFc: doiFc,
+    forecastOspo: forecastOspo, forecastOspr: forecastOspr, stockFc: stockFc, doiFc: doiFc,
     propose: totalProp, pullNotifs: pullNotifs,
     lt_days: lt_days, moq: moq, multiple: multiple, maxDOI: maxDOI,
     soh: soh, suggestions: suggestions, npdAdd: npdAddArr,
@@ -17182,7 +17189,7 @@ function _fcDetailRow(code, fc, master) {
       }
       return '<td style="text-align:right;padding:5px 5px;font-family:var(--mono);font-size:11px;'+style+'">'+disp+'</td>';
     }).join('');
-    var rowLabel = label==='Stock (Ending)'?'stock':label==='DOI (hari)'?'doi':label==='Propose PR'?'propose':label==='Adjusted OSPO'?'fcospo':label==='OSPR'?'fcospr':'';
+    var rowLabel = label==='Stock (Ending)'?'stock':label==='DOI (hari)'?'doi':label==='Propose PR'?'propose':label==='Adjusted OSPO'?'fcospo':(label==='OSPR'||label==='Adjusted OSPR')?'fcospr':'';
     var rowAttr  = rowLabel ? ' data-rowlabel="'+rowLabel+'"' : '';
     // Kolom Total per baris. Stock & DOI tidak dijumlah (Stock=nilai akhir, DOI=tak bermakna).
     var totalCell;
@@ -17271,7 +17278,7 @@ function _fcDetailRow(code, fc, master) {
         : gRowOspo('OSPO', _fcValArr(fc.ospo, code), _fcValArr(fc.ospoBase, code), code, 'ospo')
       )
     + (isFcView
-        ? gRow('OSPR', _fcValArr(fc.ospr, code), function(v){ return v>0?'color:var(--accent)':'color:var(--hint)'; })
+        ? gRow('Adjusted OSPR', _fcValArr(fc.forecastOspr || fc.ospr, code), function(v){ return v>0?'color:var(--accent)':'color:var(--hint)'; })
         : gRowOspo('OSPR', _fcValArr(fc.ospr, code), _fcValArr(fc.ospr_base || fc.ospr, code), code, 'ospr')
       )
     + gRow('Stock (Ending)', _fcValArr(isFcView ? fc.stockFc : fc.stock, code), stockClsFn)
@@ -21410,7 +21417,7 @@ function _fcLiveRecalc(code) {
     } else if(lbl === 'fcospo' || lbl === 'fcospr') {
       // Baris Adjusted OSPO / OSPR mode Forecast (plain text via gRow) — ikut berubah
       // kalau Target DOI diedit, karena keduanya hasil pool-distribution yang dipengaruhi target.
-      var srcArr = lbl === 'fcospo' ? fc.forecastOspo : fc.ospr;
+      var srcArr = lbl === 'fcospo' ? fc.forecastOspo : (fc.forecastOspr || fc.ospr);
       var cls0   = lbl === 'fcospo' ? 'color:var(--teal);font-weight:600' : 'color:var(--accent)';
       var tds4 = tr.querySelectorAll('td:not(:first-child)');
       (srcArr||[]).forEach(function(v, i){
@@ -21424,7 +21431,8 @@ function _fcLiveRecalc(code) {
     if(lbl==='fcospo'||lbl==='fcospr'||lbl==='ospo'||lbl==='ospr'||lbl==='propose'||lbl==='requirement'){
       var _srcTot = null;
       if(lbl==='ospo'||lbl==='fcospo') _srcTot = ospoVals;
-      else if(lbl==='ospr'||lbl==='fcospr') _srcTot = fc.ospr;
+      else if(lbl==='fcospr') _srcTot = fc.forecastOspr || fc.ospr;
+      else if(lbl==='ospr') _srcTot = fc.ospr;
       else if(lbl==='propose') _srcTot = propVals;
       else if(lbl==='requirement') _srcTot = fc.forecast;
       if(_srcTot){
