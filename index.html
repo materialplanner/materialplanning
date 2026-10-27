@@ -15409,9 +15409,11 @@ function _fcGrandTotalHTML(items, fcData) {
   ];
   var monthTotals = {}; // key -> [per bulan]
   rows.forEach(function(r){ monthTotals[r.key] = new Array(FC_MONTHS.length).fill(0); });
+  var sohToday = 0; // total SOH saat ini (ikut mode Qty/Value) — semua item yang tampil
   items.forEach(function(code){
     var fc = fcData[code]; if(!fc) return;
     var cogm = isValue ? _fcCOGM(code) : 1;
+    sohToday += (fc.soh||0) * cogm;
     rows.forEach(function(r){
       var src = r.get(fc)||[];
       for(var i=0;i<FC_MONTHS.length;i++){ monthTotals[r.key][i] += (src[i]||0) * cogm; }
@@ -15435,6 +15437,7 @@ function _fcGrandTotalHTML(items, fcData) {
     + '<div onclick="_fcToggleGrandTotal()" title="Klik untuk sembunyikan / tampilkan" style="padding:6px 10px;background:var(--bg3);font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--text);cursor:pointer;display:flex;align-items:center;gap:6px;user-select:none">'
     +   '<span id="fc-grand-caret" style="font-size:9px;color:var(--muted);transition:transform .15s;display:inline-block;transform:rotate('+(collapsed?'-90':'0')+'deg)">▼</span>'
     +   '<span>📊 Total Keseluruhan '+items.length+' Item — '+(isValue?'<span style="color:var(--teal)">Value (Rp)</span>':'<span style="color:var(--teal)">Qty</span>')+'</span>'
+    +   '<span title="Total SOH saat ini semua item yang tampil'+(isValue?' × COGM (Rp)':' (campuran satuan per item)')+'" style="font-size:10px;font-weight:700;color:var(--green);text-transform:none;letter-spacing:0;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:2px 9px">SOH today: '+(isValue?'Rp ':'')+n_id(Math.round(sohToday*100)/100)+'</span>'
     +   '<span id="fc-grand-lbl" style="margin-left:auto;font-size:9px;font-weight:600;color:var(--muted);text-transform:none;letter-spacing:0">'+(collapsed?'tampilkan':'sembunyikan')+'</span>'
     + '</div>'
     + '<div id="fc-grand-body" style="overflow-x:auto;'+(collapsed?'display:none':'')+'"><table style="width:100%;border-collapse:collapse">'
