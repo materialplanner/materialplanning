@@ -11681,9 +11681,18 @@ function _generateScheduleImpl(typeFilter) {
       var needed = Math.max(0, (p.actualMRP || 0) - stockTotal);
       if(needed > 0 && totalCover >= needed) return false;
     }
-    // Pakai coverage SETELAH incoming (stock + totalOpenPOQty), bukan coverage sebelum incoming.
-    // Kalau item sudah punya PO open/confirmed yg bikin coverage aman s/d cutoff, jangan generate lagi.
-    var covForFilter = p.coverageDateAfterIncoming || p.coverageDate;
+    // Coverage utk filter = stock + qty yang SUDAH TERKONFIRMASI/TERJADWAL saja.
+    // JANGAN pakai coverageDateAfterIncoming (menghitung SEMUA PO open): PO open yang
+    // BELUM dijadwal justru alasan item harus digenerate — kasus Serasilk: PO besar
+    // belum dijadwal bikin coverage "after incoming" lewat cutoff → item malah di-skip.
+    var covForFilter;
+    if(estUsg > 0 && totalCover > 0) {
+      var dcov = (stockTotal + totalCover) / estUsg;
+      covForFilter = new Date(today);
+      covForFilter.setDate(today.getDate() + Math.floor(Math.min(dcov, 999)));
+    } else {
+      covForFilter = p.coverageDate; // tak ada konfirmasi/jadwal → pakai coverage stock
+    }
     return covForFilter <= coverageCutoff;
   });
 
