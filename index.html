@@ -17013,7 +17013,7 @@ function _fcDetailRow(code, fc, master) {
   // Meta panel
   // minmax(0,1fr) + min-width:0 di dd: nilai panjang (anotasi kecil dsb) WRAP di dalam
   // kartu, bukan meluber keluar kotak (default min-width:auto bikin grid melar).
-  var meta = '<div style="display:grid;grid-template-columns:auto minmax(0,1fr);gap:3px 10px;font-size:11px;padding:12px 14px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);min-width:0;max-width:100%;overflow:hidden">';
+  var meta = '<div style="display:grid;grid-template-columns:auto minmax(0,1fr);gap:3px 10px;font-size:11px;padding:12px 14px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);min-width:0;max-width:100%;overflow-x:auto">';
   var matcomM = (STATE.matcomMonthly || {})[code] || {};
   var _MNAME = ['','Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agt','Sep','Okt','Nov','Des'];
   var curMo  = new Date().getMonth() + 1;
@@ -17097,8 +17097,8 @@ function _fcDetailRow(code, fc, master) {
   matcomRows.forEach(function(r,i){ mRows.splice(mRows.length-1, 0, r); });
   if(rn && _isAdmin) mRows.splice(1,0,['Real Name','<span style="color:var(--teal)">'+rn+'</span>']);
   mRows.forEach(function(r){
-    meta += '<dt style="color:var(--muted);font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:600;padding-top:2px;max-width:92px">'+r[0]+'</dt>'
-          + '<dd style="margin:0;font-family:var(--mono);font-size:11.5px;min-width:0;overflow-wrap:anywhere;word-break:break-word">'+r[1]+'</dd>';
+    meta += '<dt style="color:var(--muted);font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:600;padding-top:2px;white-space:nowrap">'+r[0]+'</dt>'
+          + '<dd style="margin:0;font-family:var(--mono);font-size:11.5px;white-space:nowrap">'+r[1]+'</dd>';
   });
   meta += '</div>';
 
