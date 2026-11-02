@@ -6698,6 +6698,8 @@ async function loadOSPR() {
       if(!/^[1234]/.test(ic)) return false; // hanya FG(1)/WIP(2)/RM(3)/PM(4)
       return true;
     }).map(function(r) {
+      // CATATAN SATUAN: qty PO/PR dari SAP SUDAH dalam KG, termasuk item ber-UoM gram
+      // (beda dgn query stock yang mengirim gram). JANGAN dikonversi.
       return { docNum: r.DocNum, itemCode: r.ItemCode, itemName: r.Dscription,
         supplierName: r.CardName, openQty: r.OpenQty, uom: r.unitMsr,
         prReqDate: fmtSAPDate(r.PR_Req_Date), site: r.U_ReqSite||'' };
@@ -6731,6 +6733,7 @@ async function loadPO() {
       if(!/^[1234]/.test(ic)) return false; // hanya FG(1)/WIP(2)/RM(3)/PM(4)
       return true;
     }).map(function(r){
+      // CATATAN SATUAN: qty PO dari SAP SUDAH dalam KG utk item gram — jangan dikonversi
       return { docNum: r.DocNum, docDate: fmtSAPDate(r.DocDate),
         prReqDate: fmtSAPDate(r.PR_Req_Date), site: r.U_ReqSite||'',
         // PO Req Date (tgl kirim di PO) — baru terisi kalau query SAP report 28
@@ -11076,6 +11079,7 @@ function _grpoMapRow(r) {
   var ic = String(k.itemcode || '');
   if(/^6/.test(ic) && k.cardname !== 'Berkat Asia Kemasindo, PT') return null;
   if(!/^[1234]/.test(ic)) return null; // hanya FG(1)/WIP(2)/RM(3)/PM(4)
+  // CATATAN SATUAN: qty GRPO dari SAP SUDAH dalam KG utk item gram — jangan dikonversi
   return {
     grpoDate: fmtSAPDate(k.grpodate || k.date || ''),
     itemCode: ic,
@@ -16026,7 +16030,16 @@ function _fcSetValueView(on) {
   renderForecast();
 }
 // COGM per item (0 kalau tak ada). Value = qty × COGM.
-function _fcCOGM(code) { return (STATE.cogmData && STATE.cogmData[code]) ? STATE.cogmData[code] : 0; }
+function _fcCOGM(code) {
+  var c = (STATE.cogmData && STATE.cogmData[code]) ? STATE.cogmData[code] : 0;
+  if(!c) return 0;
+  // Item ber-UoM gram: COGM tercatat per GRAM, sedangkan semua qty di dashboard
+  // (SOH, requirement, OSPO, dll.) berjalan dalam KG → konversi ke Rp per KG (×1000)
+  // supaya qty × COGM menghasilkan value yang benar.
+  var _u = (((STATE.masterData||{})[code]||{}).uom || '').trim();
+  if(/^(g|gr|gram)$/i.test(_u)) c *= 1000;
+  return c;
+}
 // Konversi 1 angka qty → value kalau mode value aktif
 function _fcVal(qty, code) {
   if(!window._fcValueView) return qty;
@@ -17059,22 +17072,21 @@ function _fcDetailRow(code, fc, master) {
   // Total PO (OSPO open) & Total PR (OSPR open) untuk item ini
   var _totPO = (fc.ospoBase||[]).reduce(function(s,v){ return s+(v||0); }, 0);
   var _totPR = (fc.ospr_base||[]).reduce(function(s,v){ return s+(v||0); }, 0);
-  var mRows = [['Kode','<span style="font-family:var(--mono)">'+code+'</span>'],['Tipe',iType],['UoM',master.uom||'—'],
+  var mRows = [['Kode','<span style="font-family:var(--mono)">'+code+'</span>'],['Tipe',iType],
+    ['UoM', _isGram ? 'GR <small style="color:var(--amber);font-size:9px">⚠ semua angka tampil dalam KG</small>' : (master.uom||'—')],
     ['MOQ',n_id(master.moq||0)],['Multiple',n_id(master.multiple||1)],['Lead Time',fc.lt_days+' hari'],
     ['SOH','<span onclick="_fcShowSOHDetail(\''+code+'\')" title="Klik: rincian SOH per gudang" style="cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px">'+_sohDisplay+'</span>'],
     ['Total PO', _totPO>0
-      ? '<span onclick="_fcShowPODetail(\''+code+'\')" title="Klik: detail semua PO open item ini" style="color:var(--teal);font-weight:600;cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px">'+n_id(_totPO)+'</span> <small style="color:var(--muted)">'+(master.uom||'')+'</small>'
-      : '<span style="color:var(--muted);font-weight:600">'+n_id(_totPO)+'</span> <small style="color:var(--muted)">'+(master.uom||'')+'</small>'],
-    ['Total PR','<span style="color:'+(_totPR>0?'var(--accent)':'var(--muted)')+';font-weight:600">'+n_id(_totPR)+'</span> <small style="color:var(--muted)">'+(master.uom||'')+'</small>'],
+      ? '<span onclick="_fcShowPODetail(\''+code+'\')" title="Klik: detail semua PO open item ini" style="color:var(--teal);font-weight:600;cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px">'+n_id(_totPO)+'</span> <small style="color:var(--muted)">'+_mcUomDisplay+'</small>'
+      : '<span style="color:var(--muted);font-weight:600">'+n_id(_totPO)+'</span> <small style="color:var(--muted)">'+_mcUomDisplay+'</small>'],
+    ['Total PR','<span style="color:'+(_totPR>0?'var(--accent)':'var(--muted)')+';font-weight:600">'+n_id(_totPR)+'</span> <small style="color:var(--muted)">'+_mcUomDisplay+'</small>'],
     ['GRPO '+_MNAME[curMo], (function(){
       // GRPO bulan berjalan — STATE.grpoData memang selalu berisi bulan ini saja
       if(!(STATE.grpoData && STATE.grpoData.length)) return '<span style="color:var(--muted)">—</span> <small style="color:var(--muted);font-size:9px">(GRPO belum dimuat)</small>';
       var g=0;
       STATE.grpoData.forEach(function(x){
         if(x.itemCode!==code) return;
-        var q=x.qty||0;
-        if((x.uom||'').toUpperCase()==='GR') q/=1000; // samakan dgn konversi stock
-        g+=q;
+        g+=(x.qty||0); // qty GRPO dari SAP sudah KG utk item gram — tanpa konversi
       });
       return '<span style="color:'+(g>0?'var(--green)':'var(--muted)')+';font-weight:600">'+n_id(Math.round(g*100)/100)+'</span>'
         +' <small style="color:var(--muted)">'+_mcUomDisplay+'</small>'
@@ -17104,7 +17116,7 @@ function _fcDetailRow(code, fc, master) {
       var lb = s.isOverdue?'⚠ Terlambat':(s.isUrgent?'⚡ '+s.daysLeft+'h lagi':'✓ '+s.daysLeft+'h lagi');
       sug += '<div style="display:flex;align-items:center;gap:8px;padding:5px 10px;background:'+bg+';border-radius:var(--r);margin-bottom:4px;font-size:11px">'
         + '<span style="font-family:var(--mono);color:var(--muted)">'+s.proposeMonth+'</span>'
-        + '<span style="font-family:var(--mono);font-weight:600;color:var(--text)">'+n_id(s.qty)+' '+(master.uom||'')+'</span>'
+        + '<span style="font-family:var(--mono);font-weight:600;color:var(--text)">'+n_id(s.qty)+' '+_mcUomDisplay+'</span>'
         + '<span style="margin-left:auto;font-size:10px;color:'+cl+';font-weight:600">'+lb+'</span>'
         + '<span style="font-family:var(--mono);font-size:10px;color:var(--muted)">Buat PR sebelum '+ds+'</span>'
         + '</div>';
@@ -18158,7 +18170,7 @@ function _fcRenderRekap(el, items, fcData, fStatus) {
     fc.suggestions.forEach(function(s) {
       propRows.push({
         code: code, name: name, iType: iType,
-        site: site, uom: master.uom||'',
+        site: site, uom: (/^(g|gr|gram)$/i.test((master.uom||'').trim()) ? 'KG' : (master.uom||'')),
         supplier: master.supplier||master.sup||'',
         lt: master.lt||0,
         qty: s.qty,
