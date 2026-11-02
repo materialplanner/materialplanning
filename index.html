@@ -17013,7 +17013,7 @@ function _fcDetailRow(code, fc, master) {
   // Meta panel
   // minmax(0,1fr) + min-width:0 di dd: nilai panjang (anotasi kecil dsb) WRAP di dalam
   // kartu, bukan meluber keluar kotak (default min-width:auto bikin grid melar).
-  var meta = '<div style="display:grid;grid-template-columns:auto minmax(0,1fr);gap:3px 10px;font-size:11px;padding:12px 14px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r)">';
+  var meta = '<div style="display:grid;grid-template-columns:auto minmax(0,1fr);gap:3px 10px;font-size:11px;padding:12px 14px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);min-width:0;max-width:100%;overflow:hidden">';
   var matcomM = (STATE.matcomMonthly || {})[code] || {};
   var _MNAME = ['','Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agt','Sep','Okt','Nov','Des'];
   var curMo  = new Date().getMonth() + 1;
@@ -17075,7 +17075,7 @@ function _fcDetailRow(code, fc, master) {
   var mRows = [['Kode','<span style="font-family:var(--mono)">'+code+'</span>'],['Tipe',iType],
     ['UoM', _isGram ? 'GR <small style="color:var(--amber);font-size:9px">⚠ semua angka tampil dalam KG</small>' : (master.uom||'—')],
     ['MOQ',n_id(master.moq||0)],['Multiple',n_id(master.multiple||1)],['Lead Time',fc.lt_days+' hari'],
-    ['SOH','<span onclick="_fcShowSOHDetail(\''+code+'\')" title="Klik: rincian SOH per gudang" style="cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px">'+_sohDisplay+'</span>'],
+    ['SOH','<span onclick="_fcShowSOHDetail(\''+code+'\')" title="Klik: rincian SOH per gudang" style="cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px">'+_sohDisplay+'</span> <small style="color:var(--muted)">'+_mcUomDisplay+'</small>'],
     ['Total PO', _totPO>0
       ? '<span onclick="_fcShowPODetail(\''+code+'\')" title="Klik: detail semua PO open item ini" style="color:var(--teal);font-weight:600;cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px">'+n_id(_totPO)+'</span> <small style="color:var(--muted)">'+_mcUomDisplay+'</small>'
       : '<span style="color:var(--muted);font-weight:600">'+n_id(_totPO)+'</span> <small style="color:var(--muted)">'+_mcUomDisplay+'</small>'],
@@ -17097,8 +17097,8 @@ function _fcDetailRow(code, fc, master) {
   matcomRows.forEach(function(r,i){ mRows.splice(mRows.length-1, 0, r); });
   if(rn && _isAdmin) mRows.splice(1,0,['Real Name','<span style="color:var(--teal)">'+rn+'</span>']);
   mRows.forEach(function(r){
-    meta += '<dt style="color:var(--muted);font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:600;padding-top:2px;white-space:nowrap">'+r[0]+'</dt>'
-          + '<dd style="margin:0;font-family:var(--mono);font-size:11.5px;min-width:0;overflow-wrap:break-word">'+r[1]+'</dd>';
+    meta += '<dt style="color:var(--muted);font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:600;padding-top:2px;max-width:92px">'+r[0]+'</dt>'
+          + '<dd style="margin:0;font-family:var(--mono);font-size:11.5px;min-width:0;overflow-wrap:anywhere;word-break:break-word">'+r[1]+'</dd>';
   });
   meta += '</div>';
 
@@ -17347,7 +17347,7 @@ function _fcDetailRow(code, fc, master) {
   return '<tr id="fc-detail-'+code+'" style="border-bottom:2px solid var(--border2)">'
     + '<td colspan="'+colspan+'" style="padding:0;background:var(--bg)">'
     + '<div style="padding:16px 20px;display:grid;grid-template-columns:220px 1fr;gap:16px">'
-    + '<div>'+meta+sug+'</div>'
+    + '<div style="min-width:0">'+meta+sug+'</div>'
     + '<div>'+grid+pullHtml+'</div>'
     + '</div></td></tr>';
 }
