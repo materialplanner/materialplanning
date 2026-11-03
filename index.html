@@ -5008,8 +5008,12 @@ function _npdRmAnalysis(code, npdKg, existingKg) {
   var pr = 0;
   (STATE.osprData||[]).forEach(function(o){ if(_npdNormCode(o.itemCode)===c) pr += (o.openQty||0); });
   var avail = stock + po + pr;
-  var moq = parseFloat(m.moq)||0;
-  var mult = parseFloat(m.multiple)||1;
+  // Item ber-UoM gram: MOQ & multiple di master tercatat GRAM, sedangkan semua angka
+  // di sini KG → ÷1000 (konversi yang SAMA dgn engine Forecast). Tanpa ini suggest PR
+  // item gram meledak (kasus Vit E Acetate: kurang <1 KG → suggest 20.000).
+  var _uGr = /^(g|gr|gram)$/i.test(String(m.uom||'').trim());
+  var moq = (parseFloat(m.moq)||0) / (_uGr ? 1000 : 1);
+  var mult = (parseFloat(m.multiple)||1) / (_uGr ? 1000 : 1);
   var lt = m.lt!=null ? m.lt : '';
   // Kurang & saran PR untuk 2 skenario
   function calcShort(need){
@@ -5017,7 +5021,9 @@ function _npdRmAnalysis(code, npdKg, existingKg) {
     if(raw<=0) return {short:0, prSuggest:0};
     var sug = raw;
     if(moq>0 && sug<moq) sug=moq;
-    if(mult>1) sug = Math.ceil(sug/mult)*mult;
+    // mult !== 1: pembulatan ke kelipatan — berlaku juga utk kelipatan pecahan
+    // hasil konversi gram (mis. 500 GR → 0,5 KG)
+    if(mult>0 && mult!==1) sug = Math.ceil(sug/mult)*mult;
     return {short:raw, prSuggest:sug};
   }
   var sNpd = calcShort(npdKg);
@@ -6182,14 +6188,39 @@ function _npdPrintGroup(grp){
       +'<td class="r">'+fmt(ex)+'</td><td class="r">'+fmt(a.shortBoth)+'</td><td class="r"><b>'+fmt(a.prBoth)+'</b></td>'
       +'</tr>';
   }).join('');
+  // ── Tabel Plan per Varian (pivot grup) — tiap FG: formula aktif, plan pcs, netto, bulan produksi ──
+  var _pmLbl=function(fm){
+    var i=(fm && fm.prodMonthIdx!=null)?fm.prodMonthIdx:null;
+    if(i==null) return '—';
+    var mk=(FC_MONTHS||[])[i]||'';
+    var yr=(typeof _fcYearForMonthIdx==='function' && mk)?_fcYearForMonthIdx(i):'';
+    return mk ? (mk+" '"+yr) : '—';
+  };
+  var _planRows='', _planTot=0;
+  pv.fgs.forEach(function(fg){
+    var fm=(fg.formulas||[]).filter(function(f){return f.active;})[0];
+    var plan=fm?(parseFloat(fm.plan)||0):0;
+    _planTot+=plan;
+    _planRows+='<tr><td>'+fg.name+'</td><td>'+(fm?(fm.name||'—'):'—')+'</td>'
+      +'<td class="r">'+n_id(plan)+'</td>'
+      +'<td class="r">'+((fm && fm.netto!=null && fm.netto!=='')?fm.netto:'—')+'</td>'
+      +'<td>'+_pmLbl(fm)+'</td></tr>';
+  });
+  var _planTable='<h3 style="margin:12px 0 0;font-size:12px">Plan per Varian</h3>'
+    +'<table style="width:auto;min-width:55%"><thead><tr><th>FG / Varian</th><th>Formula</th><th>Plan (pcs)</th><th>Netto (gr)</th><th>Bulan Produksi</th></tr></thead>'
+    +'<tbody>'+_planRows
+    +'<tr><td colspan="2"><b>TOTAL</b></td><td class="r"><b>'+n_id(_planTot)+'</b></td><td></td><td></td></tr>'
+    +'</tbody></table>';
   var doc='<!DOCTYPE html><html><head><meta charset="utf-8"><title>Lampiran PR NPD — Grup</title>'
     +'<style>@page{margin:12mm;size:A4 landscape}body{font-family:Arial,sans-serif;color:#1a1a1a;padding:16px;font-size:11px}'
     +'h2{margin:0 0 2px}table{width:100%;border-collapse:collapse;margin-top:10px;font-size:10px}'
     +'th,td{border:1px solid #ccc;padding:4px 6px}th{background:#eef2f5;font-size:9px;text-transform:uppercase}'
     +'.r{text-align:right;font-family:monospace}.meta{font-size:10px;color:#666;margin:4px 0}</style></head><body>'
     +'<h2>Lampiran Permintaan Material — NPD (Grup)</h2>'
-    +'<div class="meta"><b>Grup:</b> '+grp+' &nbsp;·&nbsp; <b>'+pv.fgs.length+' varian:</b> '+pv.fgs.map(function(f){return f.name;}).join(', ')+(_vis?' &nbsp;·&nbsp; <b style="color:#c0392b">Terfilter:</b> '+_srcRows.length+' dari '+pv.rows.length+' RM':'')+'</div>'
+    +'<div class="meta"><b>Grup:</b> '+grp+' &nbsp;·&nbsp; <b>'+pv.fgs.length+' varian</b> — rincian plan per varian di tabel pertama'+(_vis?' &nbsp;·&nbsp; <b style="color:#c0392b">Terfilter:</b> '+_srcRows.length+' dari '+pv.rows.length+' RM':'')+'</div>'
     +'<div class="meta">Data stock/PO/PR per Sync SAP: '+_syncTs+' &nbsp;·&nbsp; Existing forecast: '+exM+' bulan ke depan &nbsp;·&nbsp; Mat req Grup = gabungan semua varian; NPD Lain = kebutuhan project NPD di luar grup &nbsp;·&nbsp; Kurang = kebutuhan − (Stock+PO+PR), PR dibulatkan ke MOQ/kelipatan &nbsp;·&nbsp; Semua angka dalam KG</div>'
+    +_planTable
+    +'<h3 style="margin:14px 0 0;font-size:12px">Kebutuhan Material (gabungan grup)</h3>'
     +'<table><thead><tr><th>Kode RM</th><th>Nama</th><th>Mat req Grup</th><th>NPD Lain</th><th>Total NPD</th><th>MOQ</th><th>Mult</th><th>LT</th><th>Stock</th><th>PO</th><th>PR</th><th>Kurang (NPD)</th><th>PR (NPD saja)</th><th>Exist '+exM+'bln</th><th>Kurang (+Exist)</th><th>PR (NPD+Exist)</th></tr></thead>'
     +'<tbody>'+rowsHtml+'</tbody></table>'
     +'</body></html>';
