@@ -15647,8 +15647,15 @@ function _calcForecast(code, ospoIdx) {
   });
 
   // OSPO per month — manual override jika ada
+  // ⚠ YEAR-WRAP: horizon bisa lintas tahun (Nov'26 → Mei'27). Bulan yang nomornya
+  // lebih kecil dari bulan pertama = tahun BERIKUTNYA. Dulu semua pakai curYear →
+  // PO ber-PR Req Date 2027 tidak pernah match slot (kasus Olivem: 1.080 KG hilang,
+  // Total PO tampil 360 padahal popup 1.440).
+  var _fcFirstMoNum = FC_MONTH_NUMS[0];
   var ospoBase = FC_MONTHS.map(function(_, i) {
-    var yyyymm = curYear * 100 + FC_MONTH_NUMS[i];
+    var _mn = FC_MONTH_NUMS[i];
+    var _yr = (_mn < _fcFirstMoNum) ? curYear + 1 : curYear;
+    var yyyymm = _yr * 100 + _mn;
     return ((ospoIdx[code] || {})[yyyymm]) || 0;
   });
   var ospoOvr = _fcOspoOverride[code] || null;
@@ -17100,9 +17107,12 @@ function _fcDetailRow(code, fc, master) {
       + n_id(_asmSoh) + '</span>';
   })();
 
-  // Total PO (OSPO open) & Total PR (OSPR open) untuk item ini
-  var _totPO = (fc.ospoBase||[]).reduce(function(s,v){ return s+(v||0); }, 0);
-  var _totPR = (fc.ospr_base||[]).reduce(function(s,v){ return s+(v||0); }, 0);
+  // Total PO & Total PR = jumlah MENTAH semua PO/PR open item ini (sumber sama dgn
+  // popup Detail PO), BUKAN jumlah slot bulan horizon — PO yang req date-nya di luar
+  // horizon tetap terhitung, jadi angka kartu selalu = angka popup.
+  var _totPO = 0;
+  (STATE.poData||[]).forEach(function(p){ if(p.itemCode === code) _totPO += (p.openQty||0); });
+  var _totPR = (STATE.osprByItem||{})[code] || 0;
   var mRows = [['Kode','<span style="font-family:var(--mono)">'+code+'</span>'],['Tipe',iType],
     ['UoM', _isGram ? 'GR <small style="color:var(--amber);font-size:9px">⚠ semua angka tampil dalam KG</small>' : (master.uom||'—')],
     ['MOQ',n_id(master.moq||0)],['Multiple',n_id(master.multiple||1)],['Lead Time',fc.lt_days+' hari'],
