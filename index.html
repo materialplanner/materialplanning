@@ -1551,6 +1551,7 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
         <div style="display:flex;gap:8px;margin-top:8px">
           <button class="btn btn-primary btn-sm" onclick="saveGSheetSyncConfig()" style="font-size:11px">💾 Simpan Config</button>
           <button class="btn btn-sm" onclick="testGSheetSync()" style="font-size:11px">🔗 Test Koneksi</button>
+          <button class="btn btn-sm" onclick="gsheetResyncAllApproved()" title="Kirim ulang tanggal semua kartu approved/sent/confirmed ke GSheet — untuk recovery kalau sync sempat gagal" style="font-size:11px">🔁 Push Ulang Approved</button>
         </div>
         <div id="gsheet-sync-status" style="margin-top:8px;font-size:11px;color:var(--muted)"></div>
         <div style="margin-top:10px;padding:8px;background:var(--bg3);border-radius:5px;font-size:10.5px;color:var(--muted);line-height:1.6">
@@ -3309,6 +3310,7 @@ var CLOUD_KEYS = [
   'schedule','sched_tombs','po_overrides','proj_comments','stock_history',
   // proj_history: disimpan lokal saja (14 snapshot terlalu besar untuk Firebase 1MB limit)
   'suppliers','proj_hidden_cols','proj_snapshots',
+  'gsheet_sync_url','gsheet_sync_token',
   'sheet_url_master','sheet_url_mrp','sheet_url_realname','sheet_url_pallet_pm','sheet_url_pallet_rm','sheet_url_bom_sheet','sheet_url_cogm','sheet_url_mps_sheet','sheet_url_obal_sheet',
   'sheet_tab_master','sheet_tab_mrp','sheet_tab_realname','sheet_tab_pallet_pm','sheet_tab_pallet_rm','sheet_tab_bom_sheet','sheet_tab_cogm','sheet_tab_mps_sheet','sheet_tab_obal_sheet',
   'obal_wip',
@@ -13215,7 +13217,11 @@ function testGSheetSync() {
 function syncApprovedToGSheet(entries) {
   var url   = localStorage.getItem('gsheet_sync_url')   || '';
   var token = localStorage.getItem('gsheet_sync_token') || '';
-  if(!url || !token) return; // belum dikonfigurasi — skip silently
+  if(!url || !token) {
+    // JANGAN diam: dulu skip silently -> tanggal tidak pernah masuk GSheet tanpa ada yang sadar
+    toast('⚠ Jadwal di-approve TAPI GSheet sync belum dikonfigurasi di laptop ini (Settings → GSheet Sync)', 'err');
+    return;
+  }
 
   var updates = [];
   (entries||[]).forEach(function(en){
@@ -13243,7 +13249,24 @@ function syncApprovedToGSheet(entries) {
       else toast('GSheet sync gagal: ' + (d.msg||''), 'err');
     }).catch(function(e){
       console.warn('[GSheet sync] failed:', e.message);
+      toast('⚠ GSheet sync GAGAL terkirim: ' + e.message + ' — tanggal belum masuk sheet, cek Test Koneksi di Settings', 'err');
     });
+}
+
+// Kirim ulang SEMUA kartu ber-status approved/sent/confirmed ke GSheet — untuk
+// recovery saat sync sempat gagal/belum terkonfigurasi waktu approve.
+function gsheetResyncAllApproved(){
+  var url = localStorage.getItem('gsheet_sync_url') || '';
+  var tok = localStorage.getItem('gsheet_sync_token') || '';
+  if(!url || !tok){ toast('Config GSheet Sync belum ada — simpan dulu di atas', 'err'); return; }
+  var n = 0;
+  (STATE.scheduleData||[]).forEach(function(e){
+    if(['approved','sent','confirmed','partial'].indexOf(e.status) < 0 || !e.entries) return;
+    var delivISO = (e.date||'').split('/').reverse().join('-');
+    syncApprovedToGSheet(e.entries.map(function(en){ return {pos:en.pos, supName:e.supName, delivISO:delivISO}; }));
+    n++;
+  });
+  toast(n ? ('Kirim ulang ' + n + ' kartu jadwal ke GSheet…') : 'Tidak ada kartu approved untuk dikirim', n ? 'ok' : 'err');
 }
 
 function exportConfigHTML() {
