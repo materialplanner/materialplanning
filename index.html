@@ -355,7 +355,7 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
         <div>
           <div class="logo-text" style="font-size:12px;font-weight:700;color:#fff;line-height:1.2">Material Planner</div>
           <div class="logo-text" style="font-size:10px;color:rgba(255,255,255,.45);margin-top:1px">Eka Jaya Internasional</div>
-          <div class="logo-text" id="app-build-label" style="font-size:9px;color:rgba(255,255,255,.3);margin-top:1px;font-family:monospace">build 2026-11-09.4</div>
+          <div class="logo-text" id="app-build-label" style="font-size:9px;color:rgba(255,255,255,.3);margin-top:1px;font-family:monospace">build 2026-11-09.5</div>
         </div>
       </div>
     </div>
@@ -17730,9 +17730,17 @@ function _grpoHistoriIdbLoad(cb) {
       tx.objectStore('grpo_histori').get('grpo_data').onsuccess = function(e){
         if(e.target.result && e.target.result.data) {
           // Filter data lama yang mungkin belum kefilter (buang non-FG/WIP/RM/PM)
-          STATE.grpoHistori = (e.target.result.data||[]).filter(function(g){
+          var _rows = (e.target.result.data||[]).filter(function(g){
             return g.itemCode && /^[1234]/.test(String(g.itemCode));
           });
+          // ⭐ Cache dianggap SAH hanya kalau ada baris ber-tanggal. Cache kosong/rusak
+          // (mis. hasil fetch saat kolom node SAP berubah nama → 0 baris tersimpan)
+          // → anggap BELUM ada supaya Sync memfetch ulang otomatis (self-healing).
+          if(!_rows.length || !_rows.some(function(g){ return g.grpoDate; })) {
+            console.warn('[grpo histori] cache IDB kosong/tidak valid ('+_rows.length+' baris) → akan di-fetch ulang');
+            cb && cb(false); return;
+          }
+          STATE.grpoHistori = _rows;
           window._grpoHistoriLoaded = true;
           console.log('[grpo histori] loaded dari IDB:', STATE.grpoHistori.length, 'baris');
           cb && cb(true);
@@ -17765,19 +17773,24 @@ async function _grpoHistoriFetchAll(showToast) {
     var ed = wEnd.getFullYear()+'-'+String(wEnd.getMonth()+1).padStart(2,'0')+'-'+String(wEnd.getDate()).padStart(2,'0')+'T23:59:59.000Z';
     try {
       var raw = await sapFetchTO(27, { '[%0]': sd, '[%1]': ed });
+      // ⭐ Pakai mapper alias-proof yang SAMA dengan GRPO bulan berjalan (_grpoMapRow).
+      // Dulu mapping manual pakai nama kolom LAMA (GRPO_Date/ItemCode/Dscription/...)
+      // → saat node SAP ganti nama kolom, fetch menghasilkan 0 baris dan cache IDB
+      // terisi kosong → grafik GRPO bulan-bulan sebelumnya hilang.
       (raw||[]).forEach(function(r){
-        var s=(r.DocStatus||'').toLowerCase();
-        if(s==='cancelled'||s==='cancellation') return;
-        var ic=(r.ItemCode||'').toString();
-        if(/^6/.test(ic) && r.CardName !== 'Berkat Asia Kemasindo, PT') return;
-        if(!/^[1234]/.test(ic)) return; // hanya FG/WIP/RM/PM
-        all.push({ grpoDate: fmtSAPDate(r.GRPO_Date), itemCode: r.ItemCode,
-          itemName: r.Dscription, supplierName: r.CardName, qty: r.Quantity, uom: r.unitMsr,
-          grpoDocNum: String(r.DocNum||r.DocEntry||'') });
+        var m = _grpoMapRow(r);
+        if(m && m.grpoDate) all.push(m);
       });
     } catch(e){ console.warn('[grpo histori] window '+sd+' gagal:', e.message); }
     // maju 3 bulan
     cm += 3; while(cm>12){ cm-=12; cy++; } guard++;
+  }
+  if(!all.length){
+    // 0 baris = SAP bermasalah / mapping gagal — JANGAN simpan & jangan tandai loaded,
+    // supaya cache lama (kalau ada) tetap dipakai dan Sync berikutnya mencoba lagi.
+    console.warn('[grpo histori] fetch menghasilkan 0 baris — tidak disimpan, akan dicoba lagi');
+    if(showToast) toast('⚠ GRPO historis: 0 baris dari SAP — tidak disimpan, dicoba lagi di Sync berikutnya','err');
+    return false;
   }
   STATE.grpoHistori = all;
   window._grpoHistoriLoaded = true;
