@@ -355,6 +355,7 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
         <div>
           <div class="logo-text" style="font-size:12px;font-weight:700;color:#fff;line-height:1.2">Material Planner</div>
           <div class="logo-text" style="font-size:10px;color:rgba(255,255,255,.45);margin-top:1px">Eka Jaya Internasional</div>
+          <div class="logo-text" id="app-build-label" style="font-size:9px;color:rgba(255,255,255,.3);margin-top:1px;font-family:monospace">build 2026-11-09.4</div>
         </div>
       </div>
     </div>
@@ -3322,7 +3323,7 @@ var CLOUD_KEYS = [
   'master_data','mrp_data','realname_data','pallet_pm','pallet_rm',
   'mps_compare_result',
   'wh_capacity_rm','wh_capacity_pm','update_deldate_data',
-  'fc_propose','fc_ospo_ovr','fc_ospr_ovr','fc_doi2','fc_doi2_suppliers','mrp_source',
+  'fc_propose','fc_ospo_ovr','fc_ospr_ovr','fc_konf_ovr','fc_doi2','fc_doi2_suppliers','mrp_source',
   'fc_autopropose','fc_doi_item_month_ovr',
   'matcom_monthly','matcom_parent','matcom_data','matcom_count','last_matcom_sync',
   'mps_ui_status','bom_ui_status','mrp_last_calc','mrp_data_ts',
@@ -3762,6 +3763,9 @@ function _applyRealtimeChanges(keys, vals, docTs) {
             localStorage.setItem('fc_autopropose', val||'');
           } catch(e) {}
           break;
+        case 'fc_konf_ovr':
+          try { _fcKonfOverride = JSON.parse(val || '{}'); localStorage.setItem('fc_konf_ovr', val); if(document.getElementById('fc-table')) setTimeout(renderForecast, 100); } catch(e) {}
+          break;
         case 'fc_ospo_ovr':
           try { _fcOspoOverride = JSON.parse(val || '{}'); localStorage.setItem('fc_ospo_ovr', val); } catch(e) {}
           break;
@@ -3857,11 +3861,14 @@ function _applyRealtimeChanges(keys, vals, docTs) {
             var _docTsIn    = (docTs && docTs[k]) || 0;
             var _incomingTs = _docTsIn || (parseInt(localStorage.getItem('mrp_data_ts') || '0', 10) || 0);
             var _localTs    = window._mrpDataTs || 0;
-            var _skipOld = _docTsIn > 0
-              ? (_docTsIn <= _localTs)                                   // ts atomik: terapkan HANYA jika lebih baru
-              : (_localTs > 0 && _incomingTs > 0 && _incomingTs < _localTs); // legacy: skip hanya jika jelas lebih tua
+            var _hasLocalData = STATE.mrpData && Object.keys(STATE.mrpData||{}).length > 0;
+            // Terapkan HANYA jika jelas lebih baru. Push TANPA ts tertanam berasal dari
+            // laptop berversi LAMA (jalur GSheet lamanya menimpa tanpa menaikkan ts) —
+            // selama lokal punya data dan ts incoming tidak lebih baru, TOLAK.
+            // (Dulu ts sama = diterima → hasil Terapkan baru ditimpa balik angka lama.)
+            var _skipOld = _hasLocalData && (_docTsIn > 0 ? (_docTsIn <= _localTs) : !(_incomingTs > _localTs));
             if(_skipOld) {
-              console.log('[mrp_data] skip realtime — lokal lebih baru/sama ('+_localTs+' vs '+_incomingTs+')');
+              console.log('[mrp_data] skip realtime — tidak lebih baru dari lokal ('+_localTs+' vs '+_incomingTs+', docTs '+_docTsIn+')');
               break;
             }
             STATE.mrpData = JSON.parse(val || 'null');
@@ -14499,6 +14506,7 @@ function _appInit() {
     _fcOspoOverride = JSON.parse(localStorage.getItem('fc_ospo_ovr')      || '{}');
   STATE.poConfirmations = JSON.parse(localStorage.getItem('po_confirmations') || '{}');
     _fcOsprOverride = JSON.parse(localStorage.getItem('fc_ospr_ovr')      || '{}');
+    _fcKonfOverride = JSON.parse(localStorage.getItem('fc_konf_ovr')      || '{}');
     _fcDOI2         = parseInt(localStorage.getItem('fc_doi2') || '60')   || 60;
     _fcDOI2Suppliers= JSON.parse(localStorage.getItem('fc_doi2_suppliers')|| '[]');
     _fcDOIItemMonthOvr = JSON.parse(localStorage.getItem('fc_doi_item_month_ovr') || '{}');
@@ -15358,6 +15366,46 @@ var _fcPropose       = (function(){ try{ return JSON.parse(localStorage.getItem(
 var _fcAutoPropose   = localStorage.getItem('fc_autopropose') === '1';
 var _fcOspoOverride  = (function(){ try{ return JSON.parse(localStorage.getItem('fc_ospo_ovr')||'{}'); }catch(e){return {};} })();
 var _fcOsprOverride  = (function(){ try{ return JSON.parse(localStorage.getItem('fc_ospr_ovr')||'{}'); }catch(e){return {};} })();
+// Override manual baris Konfirmasi: { code: { mi: qty } } — sync cloud (fc_konf_ovr)
+var _fcKonfOverride  = (function(){ try{ return JSON.parse(localStorage.getItem('fc_konf_ovr')||'{}'); }catch(e){return {};} })();
+
+// Auto-fill baris Konfirmasi: HANYA dari konfirmasi supplier (confDate di List
+// Pengiriman PO). Qty = conf qty kalau diisi, kalau tidak open qty PO-nya.
+// Dipetakan ke slot bulan FC sesuai tanggal konfirmasi (tahun ikut year-wrap).
+function _fcKonfAuto(code) {
+  var arr = (window.FC_MONTHS||[]).map(function(){ return 0; });
+  if(!(STATE.poData && STATE.poData.length) || typeof _poResolveConf !== 'function') return arr;
+  var nums = window.FC_MONTH_NUMS || [];
+  var baseYear = new Date().getFullYear();
+  STATE.poData.forEach(function(po){
+    if(po.itemCode !== code) return;
+    var cc = {};
+    try { cc = _poResolveConf(po) || {}; } catch(e){ return; }
+    var cd = cc.confDate; if(!cd) return;             // hanya yang SUDAH dikonfirmasi supplier
+    var p = String(cd).split('-'); if(p.length < 2) return;
+    var y = parseInt(p[0],10), mn = parseInt(p[1],10);
+    var mi = nums.indexOf(mn); if(mi < 0) return;
+    var expY = (mn < nums[0]) ? baseYear + 1 : baseYear; // year-wrap: Jan dst = tahun depan
+    if(y !== expY) return;
+    arr[mi] += (parseFloat(cc.confQty) || po.openQty || 0); // qty SAP sudah KG utk item gram — tanpa konversi
+  });
+  return arr;
+}
+
+// Edit manual sel baris Konfirmasi — kosong/sama dgn otomatis = hapus override
+function _fcKonfEdit(input) {
+  var code = input.getAttribute('data-code');
+  var mi   = parseInt(input.getAttribute('data-mi'), 10);
+  var auto = parseFloat(input.getAttribute('data-base')) || 0;
+  var raw  = String(input.value||'').trim();
+  var v    = raw === '' ? NaN : parseFloat(raw.replace(/\./g,'').replace(',','.'));
+  if(!_fcKonfOverride[code]) _fcKonfOverride[code] = {};
+  if(isNaN(v) || v === auto) delete _fcKonfOverride[code][mi];
+  else _fcKonfOverride[code][mi] = v;
+  if(!Object.keys(_fcKonfOverride[code]).length) delete _fcKonfOverride[code];
+  try { localStorage.setItem('fc_konf_ovr', JSON.stringify(_fcKonfOverride)); } catch(e){} // patched setItem → ikut cloudSave
+  if(typeof renderForecast === 'function') renderForecast();
+}
 var _fcDOI       = 30;
 var _fcDOI2      = (function(){ return parseInt(localStorage.getItem('fc_doi2')||'60')||60; })();
 var _fcDOI2Suppliers = (function(){ try{ return JSON.parse(localStorage.getItem('fc_doi2_suppliers')||'[]'); }catch(e){return [];} })();
@@ -17288,25 +17336,9 @@ function _fcDetailRow(code, fc, master) {
 
 
 
-  // Suggestions
+  // Blok "Suggest Buat PR" DIHAPUS (permintaan user 9/11/26) — diganti baris
+  // Konfirmasi + Stock Ending Konfirmasi di grid. Tombol Generate/Reset tetap.
   var sug = '';
-  if(fc.suggestions.length) {
-    sug = '<div style="margin-top:10px"><div style="font-size:9.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);font-weight:600;margin-bottom:5px">Suggest Buat PR</div>';
-    fc.suggestions.forEach(function(s) {
-      var d  = s.createPRBy;
-      var ds = String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();
-      var cl = s.isOverdue?'var(--red)':(s.isUrgent?'var(--amber)':'var(--green)');
-      var bg = s.isOverdue?'var(--red-bg)':(s.isUrgent?'var(--amber-bg)':'var(--green-bg)');
-      var lb = s.isOverdue?'⚠ Terlambat':(s.isUrgent?'⚡ '+s.daysLeft+'h lagi':'✓ '+s.daysLeft+'h lagi');
-      sug += '<div style="display:flex;align-items:center;gap:8px;padding:5px 10px;background:'+bg+';border-radius:var(--r);margin-bottom:4px;font-size:11px">'
-        + '<span style="font-family:var(--mono);color:var(--muted)">'+s.proposeMonth+'</span>'
-        + '<span style="font-family:var(--mono);font-weight:600;color:var(--text)">'+n_id(s.qty)+' '+_mcUomDisplay+'</span>'
-        + '<span style="margin-left:auto;font-size:10px;color:'+cl+';font-weight:600">'+lb+'</span>'
-        + '<span style="font-family:var(--mono);font-size:10px;color:var(--muted)">Buat PR sebelum '+ds+'</span>'
-        + '</div>';
-    });
-    sug += '</div>';
-  }
   // Per-item generate button + reset button (buat benerin item yang kena bug lama)
   sug += '<div style="display:flex;gap:6px;margin-top:8px">'
     + '<button class="btn btn-sm" onclick="_fcGenerateItem(this)" data-code="'+code+'" style="font-size:10.5px;flex:1">&#x26A1; Generate Propose PR</button>'
@@ -17403,7 +17435,7 @@ function _fcDetailRow(code, fc, master) {
     var totalCell;
     if(isDOI) {
       totalCell = '<td style="background:var(--bg3);border-left:2px solid var(--border2)"></td>';
-    } else if(label==='Stock (Ending)') {
+    } else if(label==='Stock (Ending)' || label==='Stock Ending Konfirmasi') {
       totalCell = '<td style="background:var(--bg3);border-left:2px solid var(--border2)"></td>';
     } else {
       var sum = 0;
@@ -17492,6 +17524,53 @@ function _fcDetailRow(code, fc, master) {
     + gRow('Stock (Ending)', _fcValArr(isFcView ? fc.stockFc : fc.stock, code), stockClsFn)
     + gRow('DOI (hari)',     isFcView ? fc.doiFc   : fc.doi,   doiClsFn)
     + gRow('Propose PR', _fcValArr(fc.propose, code), null, true, code)
+    + (function(){
+        // ── Baris KONFIRMASI + STOCK ENDING KONFIRMASI ─────────────────────────
+        // Konfirmasi: otomatis dari konfirmasi supplier (List Pengiriman PO),
+        // bisa dioverride manual per sel (ungu). Ending Konfirmasi: SOH − req +
+        // konfirmasi SAJA — OSPO, OSPR, dan Propose PR DIABAIKAN.
+        var kAuto = _fcKonfAuto(code);
+        var kOvr  = _fcKonfOverride[code] || {};
+        var kVals = kAuto.map(function(v,i){ return (kOvr[i] != null) ? kOvr[i] : v; });
+        var kEnd  = []; var _prevK = fc.soh || 0;
+        for(var ki = 0; ki < FC_MONTHS.length; ki++) {
+          _prevK = _prevK - (fc.forecast[ki] || 0) + (kVals[ki] || 0);
+          kEnd.push(Math.round(_prevK * 100) / 100);
+        }
+        var isValueMode = window._fcValueView;
+        var html = '';
+        // Baris Konfirmasi (editable)
+        if(isValueMode) {
+          html += gRow('Konfirmasi', _fcValArr(kVals, code), function(v){ return v>0?'color:var(--green);font-weight:600':'color:var(--hint)'; });
+        } else {
+          var kCells = kVals.map(function(v, i) {
+            var isEdited = (kOvr[i] != null);
+            var cur   = v || 0;
+            var haVal = cur > 0;
+            var bdr = isEdited ? 'rgba(139,92,246,.4)' : (haVal ? 'rgba(34,197,94,.35)' : 'var(--border2)');
+            var clr = isEdited ? 'var(--purple,#8b5cf6)' : (haVal ? 'var(--green)' : 'var(--muted)');
+            var bg  = isEdited ? 'rgba(139,92,246,.08)' : (haVal ? 'rgba(34,197,94,.06)' : 'var(--bg3)');
+            return '<td style="padding:2px;width:92px;overflow:hidden;text-align:right" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()">'
+              + '<div style="display:inline-flex;align-items:stretch;border:1px solid '+bdr+';border-radius:4px;overflow:hidden;background:'+bg+'">'
+              + '<input type="text" inputmode="numeric" value="'+(cur>0?n_id(cur):'0')+'"'
+              +   ' data-code="'+code+'" data-mi="'+i+'" data-base="'+(kAuto[i]||0)+'"'
+              +   ' onchange="_fcKonfEdit(this)" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()"'
+              +   ' style="width:58px;text-align:right;font-family:var(--mono);font-size:11px;font-weight:'+(haVal?'600':'400')+';color:'+clr+';background:transparent;border:none;padding:3px 4px 3px 3px;outline:none"'
+              +   ' title="'+(isEdited ? 'Otomatis: '+n_id(kAuto[i]||0)+' (diedit manual — isi sama/kosongkan utk balik otomatis)' : 'Otomatis dari konfirmasi supplier (List Pengiriman PO) — klik untuk edit manual')+'">'
+              + '</div></td>';
+          }).join('');
+          var _kSum = 0; kVals.forEach(function(v){ _kSum += (v||0); });
+          html += '<tr style="border-bottom:1px dotted var(--border)" data-rowlabel="konf">'
+            + '<td style="padding:5px 8px;font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--green);white-space:nowrap;width:140px" title="Otomatis dari konfirmasi supplier; sel bisa diedit manual">Konfirmasi</td>'
+            + kCells
+            + '<td style="text-align:right;padding:5px 8px;font-family:var(--mono);font-size:11px;font-weight:700;background:var(--bg3);border-left:2px solid var(--border2)">'+(_kSum===0?'<span style="color:var(--hint)">—</span>':n_id(Math.round(_kSum*100)/100))+'</td></tr>';
+        }
+        // Baris Stock Ending Konfirmasi (read-only)
+        html += gRow('Stock Ending Konfirmasi', _fcValArr(kEnd, code), function(v){
+          return v < 0 ? 'color:var(--red);font-weight:700' : 'color:var(--green);font-weight:600';
+        });
+        return html;
+      })()
     + (function(){
         var master=(STATE.masterData||{})[code]||{}, uom=master.uom||'';
         var pv=(isFcView?fc.stockFc:fc.stock||[]).map(function(v){return _fcCalcPallet(code,v||0,uom);});
@@ -21054,6 +21133,20 @@ function _mrpIdbLoad() {
     // Load MRP result
     var tx2 = db.transaction('mrp','readonly');
     tx2.objectStore('mrp').get('mrp_data').onsuccess = function(e) {
+      // ⭐ Umur dibandingkan dulu: hasil Hitung di IndexedDB laptop INI bisa LEBIH
+      // LAMA daripada hasil Terapkan terbaru di cloud (dihitung di laptop lain).
+      // Dulu IDB selalu menang → tabel Hasil MRP + kolom BULAN balik ke horizon
+      // lama (mis. Nov–May padahal sudah s/d Sept). Sekarang: cloud lebih baru
+      // → pakai fallback cloud, IDB basi diabaikan.
+      var _idbTs = 0;
+      try { _idbTs = (e.target.result && e.target.result.ts) ? new Date(e.target.result.ts).getTime() : 0; } catch(_e){}
+      var _cldTs = window._mrpDataTs || 0;
+      if(e.target.result && _cldTs && _idbTs && (_cldTs - _idbTs) > 60000 &&
+         STATE.mrpData && Object.keys(STATE.mrpData).length) {
+        console.log('[mrp] hasil MRP di IndexedDB lebih lama dari cloud ('+new Date(_idbTs).toLocaleString('id-ID')+' < '+new Date(_cldTs).toLocaleString('id-ID')+') → pakai cloud');
+        _mrpFallbackFromFirebase();
+        return;
+      }
       if(e.target.result) {
         _mrpResult = e.target.result.data;
         if(e.target.result.months && e.target.result.months.length) {
@@ -21119,6 +21212,20 @@ function _mrpFallbackFromFirebase() {
     });
   });
   _mrpResult = rebuilt;
+
+  // ⭐ Kolom bulan ikut ISI data cloud — bukan horizon lama yang tersisa di laptop
+  // ini. Tanpa ini, hasil s/d September dari laptop lain tetap tampil Nov–May.
+  try {
+    var _mSeen = {};
+    Object.keys(rebuilt).forEach(function(c){
+      Object.keys(rebuilt[c]).forEach(function(m){ if((rebuilt[c][m]||0) > 0) _mSeen[m] = 1; });
+    });
+    var _mList = Object.keys(_mSeen);
+    if(_mList.length && typeof _mpsSortChrono === 'function') {
+      _mpsActiveMonths = _mpsSortChrono(_mList);
+      if(typeof _syncFcMonthsToMps === 'function') _syncFcMonthsToMps();
+    }
+  } catch(_e){}
 
   var _savedTs = localStorage.getItem('mrp_last_calc') || '';
   var _tsLbl = document.getElementById('mrp-last-calc-label');
