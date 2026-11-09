@@ -3326,6 +3326,7 @@ var CLOUD_KEYS = [
   'fc_autopropose','fc_doi_item_month_ovr',
   'matcom_monthly','matcom_parent','matcom_data','matcom_count','last_matcom_sync',
   'mps_ui_status','bom_ui_status','mrp_last_calc','mrp_data_ts',
+  'bom_meta','mps_meta',
   'email_daily_data',
   'ai_api_key',
   'ai_model'
@@ -3423,9 +3424,26 @@ function cloudSave(key, value) {
   _myLastWrite[key] = Date.now();
   clearTimeout(_saveTimers[key]);
   _saveTimers[key] = setTimeout(function(){
-    _db.collection('kv').doc(key).set({v: value})
+    // ⭐ mrp_data: cap waktu ditanam DI DOKUMEN YANG SAMA (atomik).
+    // Dulu ts terpisah di dokumen 'mrp_data_ts' — kalau salah satu write gagal,
+    // cloud bisa menyimpan ts BARU + data LAMA. Boot/realtime di laptop manapun
+    // lalu memilih data lama yang "tampak baru" → angka forecast balik sendiri
+    // ke angka lama dan user harus Terapkan ulang.
+    var payload = {v: value};
+    if(key === 'mrp_data'){
+      var _t = 0; try { _t = parseInt(localStorage.getItem('mrp_data_ts')||'0',10)||0; } catch(e){}
+      payload.ts = _t || (window._mrpDataTs||0) || Date.now();
+    }
+    _db.collection('kv').doc(key).set(payload)
       .then(function(){ _setSyncStatus('saved'); })
-      .catch(function(e){ _setSyncStatus('error'); console.warn('cloudSave FAILED:',key,e.message); });
+      .catch(function(e){
+        _setSyncStatus('error'); console.warn('cloudSave FAILED:',key,e.message);
+        // Data terapan MRP gagal naik ke cloud = sumber klasik "angka balik lama".
+        // Jangan diam-diam: beri tahu user dengan jelas.
+        if(key === 'mrp_data'){
+          try { toast('⚠ GAGAL simpan hasil MRP ke cloud: '+e.message+' — angka AMAN di laptop ini, tapi laptop lain tidak terupdate. Cek koneksi lalu klik Terapkan ulang.', 'err'); } catch(_){}
+        }
+      });
   }, 400);
 }
 
@@ -3440,7 +3458,8 @@ function cloudLoad(callback) {
     _db.collection('kv').get()
       .then(function(snapshot){
         var data = {};
-        snapshot.forEach(function(doc){ data[doc.id] = doc.data().v; });
+        window._cloudKvTs = {}; // ts tertanam per-dokumen (mis. mrp_data) — dipakai reconcile boot
+        snapshot.forEach(function(doc){ var d = doc.data(); data[doc.id] = d.v; if(d.ts) window._cloudKvTs[doc.id] = d.ts; });
         callback(data);
       })
       .catch(function(e){
@@ -3466,23 +3485,29 @@ function cloudStartRealtime() {
 
     var changed = [];
     var changedVals = {};
+    var changedDocTs = {}; // ts tertanam di dokumen (mrp_data) — pembanding umur yang atomik
     snapshot.docChanges().forEach(function(change) {
       if(change.type === 'added' || change.type === 'modified') {
         var key = change.doc.id;
-        var val = change.doc.data().v;
+        var _d = change.doc.data();
+        var val = _d.v;
         // Skip own write (dalam 5 detik terakhir)
         if(_myLastWrite[key] && (Date.now() - _myLastWrite[key]) < 5000) return;
         // Skip jika value identik
         try { if(localStorage.getItem(key) === val) return; } catch(e){}
-        try { _origSetItem.call(localStorage, key, val); } catch(e){} // bypass cloudSave; quota-safe (disk penuh → skip cache lokal, data tetap dari cloud)
+        // ⭐ mrp_data JANGAN ditulis buta ke localStorage di sini — handler-nya yang
+        // memutuskan setelah cek umur. Dulu data LAMA dari laptop lain sudah terlanjur
+        // menimpa localStorage walau handler men-skip → setelah reload angka balik lama.
+        if(key !== 'mrp_data') { try { _origSetItem.call(localStorage, key, val); } catch(e){} } // bypass cloudSave; quota-safe (disk penuh → skip cache lokal, data tetap dari cloud)
         changed.push(key);
         // ⭐ Bawa NILAINYA ikut (in-memory). Dulu apply membaca ulang dari localStorage —
         // saat kuota penuh tulisan di atas gagal diam-diam dan yang diterapkan nilai LAMA
         // → update dari laptop lain / snapshot susulan tidak pernah tampil ("harus sync ulang").
         changedVals[key] = val;
+        if(_d.ts) changedDocTs[key] = _d.ts;
       }
     });
-    if(changed.length) { console.log('[realtime] Changes from other laptop:', changed); _applyRealtimeChanges(changed, changedVals); }
+    if(changed.length) { console.log('[realtime] Changes from other laptop:', changed); _applyRealtimeChanges(changed, changedVals, changedDocTs); }
   }, function(err) {
     console.warn('Realtime listener error:', err.message);
     _realtimeActive = false;
@@ -3496,7 +3521,7 @@ function cloudStartRealtime() {
   if(msg) msg.textContent = '☁ Firebase aktif — Real-time sync ● Live';
 }
 
-function _applyRealtimeChanges(keys, vals) {
+function _applyRealtimeChanges(keys, vals, docTs) {
   var renderFlags = { proj:false, sched:false, po:false, dash:false };
 
   keys.forEach(function(k) {
@@ -3804,7 +3829,7 @@ function _applyRealtimeChanges(keys, vals) {
             var _mpsStatusEl = document.getElementById('mps-status');
             var _mpsHasLocal = _mpsData && Object.keys(_mpsData).length > 0;
             if(_mpsStatusEl && val) {
-              _mpsStatusEl.textContent = val + (_mpsHasLocal ? ' \u2605Firebase' : ' — data mentah lokal di laptop lain, upload ulang di sini utk Where Used/Export');
+              _mpsStatusEl.textContent = val + (_mpsHasLocal ? ' \u2605Firebase' : ' — data mentah tidak ada di browser ini, upload ulang / Muat dari GSheet utk Where Used/Export');
               _mpsStatusEl.style.color = _mpsHasLocal ? 'var(--teal)' : 'var(--amber)';
             }
           } catch(e) {} break;
@@ -3814,7 +3839,7 @@ function _applyRealtimeChanges(keys, vals) {
             var _bomStatusEl = document.getElementById('bom-status');
             var _bomHasLocal = _bomData && _bomData.length > 0;
             if(_bomStatusEl && val) {
-              _bomStatusEl.textContent = val + (_bomHasLocal ? ' \u2605Firebase' : ' — data mentah lokal di laptop lain, upload ulang di sini utk Where Used/Export');
+              _bomStatusEl.textContent = val + (_bomHasLocal ? ' \u2605Firebase' : ' — data mentah tidak ada di browser ini, upload ulang / Muat dari GSheet utk Where Used/Export');
               _bomStatusEl.style.color = _bomHasLocal ? 'var(--teal)' : 'var(--amber)';
             }
           } catch(e) {} break;
@@ -3827,15 +3852,23 @@ function _applyRealtimeChanges(keys, vals) {
         case 'mrp_data':
           try {
             // Newer-wins: jangan timpa kalau versi LOKAL lebih baru dari yang datang.
-            // Di realtime, mrp_data_ts incoming sudah tersimpan ke localStorage oleh handler.
-            // Bandingkan dengan ts yang kita ingat di window._mrpDataTs (versi lokal terakhir).
-            var _incomingTs = parseInt(localStorage.getItem('mrp_data_ts') || '0', 10) || 0;
+            // Prioritas pembanding: ts yang TERTANAM di dokumen (atomik, selalu seumur
+            // dengan datanya). Fallback (pengirim versi lama): localStorage mrp_data_ts.
+            var _docTsIn    = (docTs && docTs[k]) || 0;
+            var _incomingTs = _docTsIn || (parseInt(localStorage.getItem('mrp_data_ts') || '0', 10) || 0);
             var _localTs    = window._mrpDataTs || 0;
-            if(_localTs > 0 && _incomingTs > 0 && _incomingTs < _localTs) {
-              console.log('[mrp_data] skip realtime — lokal lebih baru ('+_localTs+' > '+_incomingTs+')');
+            var _skipOld = _docTsIn > 0
+              ? (_docTsIn <= _localTs)                                   // ts atomik: terapkan HANYA jika lebih baru
+              : (_localTs > 0 && _incomingTs > 0 && _incomingTs < _localTs); // legacy: skip hanya jika jelas lebih tua
+            if(_skipOld) {
+              console.log('[mrp_data] skip realtime — lokal lebih baru/sama ('+_localTs+' vs '+_incomingTs+')');
               break;
             }
             STATE.mrpData = JSON.parse(val || 'null');
+            // Baru di sini ditulis ke localStorage (loop di atas sengaja tidak menulis
+            // mrp_data buta — mencegah data lama menimpa lokal walau handler skip).
+            try { _origSetItem.call(localStorage, 'mrp_data', val || ''); } catch(e){}
+            if(_incomingTs > 0) { try { _origSetItem.call(localStorage, 'mrp_data_ts', String(_incomingTs)); } catch(e){} }
             if(_incomingTs > 0) window._mrpDataTs = _incomingTs;
             // Refresh MPS page jika terbuka (terima data baru dari laptop lain)
             var _mrpPg = document.getElementById('pg-mps-mrp');
@@ -4373,8 +4406,33 @@ function saveSheetUrl(type) {
   localStorage.setItem('sheet_tab_'+type, sheet.trim());
 }
 
-function loadSheetData(type) {
-  saveSheetUrl(type);
+// ── Meta umur sumber MPS/BOM ("yang lebih baru yang menang") ─────────────────
+// bom_meta / mps_meta = {ts: epoch ms, src: 'xlsx'|'gsheet'} — ikut sync cloud.
+// Upload xlsx = momen update konten yang PASTI → ts = sekarang.
+// GSheet: umur kontennya tidak bisa dibaca dari CSV → didekati dengan hash isi:
+//   isi berubah sejak terakhir dilihat = sheet habis diedit → dianggap baru;
+//   isi sama = masih konten lama → pakai cap waktu lama (fetch ulang TIDAK
+//   membuat data lama jadi "baru").
+function _srcMetaGet(k){ try { return JSON.parse(localStorage.getItem(k)||'{}')||{}; } catch(e){ return {}; } }
+function _srcHash(t){
+  var h = 5381, i = t.length;
+  while(i) h = ((h * 33) ^ t.charCodeAt(--i)) >>> 0;
+  return h + '_' + t.length;
+}
+function _gsheetFreshTs(pfx, text, hasCurrentData, metaTs){
+  var prevHash = localStorage.getItem(pfx+'_gsheet_hash')||'';
+  var prevTs   = parseInt(localStorage.getItem(pfx+'_gsheet_ts')||'0',10)||0;
+  var curHash  = _srcHash(text);
+  var tsOut;
+  if(prevHash && curHash === prevHash) tsOut = prevTs;        // konten sama → umur lama
+  else if(prevHash)                    tsOut = Date.now();    // konten BERUBAH → baru
+  else tsOut = (hasCurrentData && metaTs) ? 0 : Date.now();   // pertama dilihat: umur tak diketahui → jangan kalahkan data yang ada
+  try { localStorage.setItem(pfx+'_gsheet_hash', curHash); localStorage.setItem(pfx+'_gsheet_ts', String(tsOut)); } catch(e){}
+  return tsOut;
+}
+
+function loadSheetData(type, isAuto) {
+  if(!isAuto) saveSheetUrl(type); // auto-load (boot/massal): jangan baca input DOM — bisa kosong & menghapus URL tersimpan
   var url   = localStorage.getItem('sheet_url_'+type)||'';
   var sheet = localStorage.getItem('sheet_tab_'+type)||'';
   if(!url){ toast('Masukkan URL Google Sheets untuk '+type,'err'); return Promise.reject('no url'); }
@@ -4416,8 +4474,19 @@ function loadSheetData(type) {
     } else if(type==='mrp'){
       if(localStorage.getItem('mrp_source') === 'mps') {
         // MRP months sudah dari MPS→MRP — hanya ambil max3MRP dari GSheet, jangan overwrite months
+        var _base = STATE.mrpData || {};
+        var _baseHasMonths = Object.keys(_base).some(function(c){ return _base[c] && _base[c].months && Object.keys(_base[c].months).length; });
+        if(!_baseHasMonths){
+          // ⭐ Hasil Terapkan MPS→MRP BELUM termuat di device ini (cloud belum masuk /
+          // localStorage kosong). JANGAN tulis mrp_data — merge dari basis kosong akan
+          // menghasilkan data TANPA months, lalu ter-push ke cloud dan MENIMPA angka
+          // bagus di semua laptop ("angka forecast tiba-tiba balik/hilang").
+          if(infoEl) infoEl.textContent = 'Dilewati — hasil MPS→MRP belum termuat di device ini. Tunggu sync cloud selesai, lalu muat ulang.';
+          if(dotEl) dotEl.className='dot warn';
+          toast('⚠ MRP GSheet DILEWATI — hasil Terapkan MPS belum termuat di device ini (mencegah menimpa angka di laptop lain)', 'err');
+        } else {
         var gsheetMRP = processMRP(rows, headers);
-        var merged = JSON.parse(JSON.stringify(STATE.mrpData || {}));
+        var merged = JSON.parse(JSON.stringify(_base));
         Object.keys(gsheetMRP).forEach(function(code){
           if(!merged[code]) merged[code] = {};
           merged[code].max3MRP = gsheetMRP[code].max3MRP || 0;
@@ -4425,14 +4494,21 @@ function loadSheetData(type) {
           // months TIDAK disentuh — tetap dari MPS→MRP
         });
         STATE.mrpData = merged;
+        // Cap waktu NAIK: ini perubahan data sah → laptop lain harus menganggapnya
+        // lebih baru (ts ditanam di dokumen cloud oleh cloudSave).
+        var _mTs1 = Date.now(); window._mrpDataTs = _mTs1;
+        localStorage.setItem('mrp_data_ts', String(_mTs1));
         localStorage.setItem('mrp_data', JSON.stringify(merged));
         localStorage.setItem('mrp_upload_ts', ts);
         var cnt = Object.keys(merged).length;
         if(infoEl) infoEl.textContent = cnt+' item — max3MRP diperbarui dari GSheet, months dari MPS→MRP';
         if(dotEl) dotEl.className='dot';
         toast('MRP: max3MRP diperbarui dari GSheet ✓ (months tetap dari MPS→MRP)', 'ok');
+        }
       } else {
         STATE.mrpData = processMRP(rows, headers);
+        var _mTs2 = Date.now(); window._mrpDataTs = _mTs2;
+        localStorage.setItem('mrp_data_ts', String(_mTs2));
         localStorage.setItem('mrp_data', JSON.stringify(STATE.mrpData));
         localStorage.setItem('mrp_upload_ts', ts);
         var cnt = Object.keys(STATE.mrpData).length;
@@ -4481,6 +4557,18 @@ function loadSheetData(type) {
       toast('Pallet RM: '+cnt+' item ✓','ok');
 
     } else if(type==='bom_sheet'){
+      // ⭐ "Yang lebih baru yang menang": auto-load (boot / Muat Semua) membandingkan
+      // umur konten GSheet vs data yang sedang dipakai (upload xlsx / gsheet lama).
+      // Klik manual tombol "Muat BOM" = perintah langsung → selalu diterapkan.
+      var _bmMeta = _srcMetaGet('bom_meta');
+      var _bmHas  = (typeof _bomData !== 'undefined') && _bomData && _bomData.length > 0;
+      var _bmGts  = _gsheetFreshTs('bom', text, _bmHas, _bmMeta.ts||0);
+      if(isAuto && _bmHas && (_bmMeta.ts||0) > _bmGts){
+        var _bmLbl = _bmMeta.src==='xlsx' ? 'Upload xlsx' : 'GSheet';
+        if(infoEl) infoEl.textContent = '⏭ GSheet tidak lebih baru — BOM saat ini ('+_bmLbl+', '+new Date(_bmMeta.ts).toLocaleString('id-ID')+') dipertahankan';
+        console.log('[bom_sheet] auto-load dilewati: data saat ini lebih baru (meta '+_bmMeta.ts+' > gsheet '+_bmGts+')');
+        return;
+      }
       // Parse dari CSV MENTAH (by-index), IDENTIK dengan _bomUpload — supaya perhitungan
       // MRP persis sama. TIDAK pakai object `rows` (yang bisa rusak kalau ada header duplikat).
       var bomRows = _parseBomCSVByIndex(text);
@@ -4489,6 +4577,7 @@ function loadSheetData(type) {
       _mrpIdbSaveBom(_bomData);              // simpan ke IndexedDB (sama seperti upload xlsx)
       localStorage.setItem('bom_sheet_upload_ts', ts);
       try { localStorage.setItem('bom_source', 'gsheet'); localStorage.setItem('bom_source_ts', ts); } catch(e){}
+      try { localStorage.setItem('bom_meta', JSON.stringify({ts: (isAuto && _bmGts) ? _bmGts : Date.now(), src:'gsheet'})); } catch(e){}
       var bomStatusText = '✓ BOM tersimpan: ' + _bomData.length + ' baris (' + ts + ')';
       try { localStorage.setItem('bom_ui_status', bomStatusText); cloudSave('bom_ui_status', bomStatusText); } catch(e){}
       var bomStEl = document.getElementById('bom-status');
@@ -4500,10 +4589,21 @@ function loadSheetData(type) {
       toast('BOM: '+_bomData.length+' baris ✓','ok');
 
     } else if(type==='mps_sheet'){
+      // ⭐ "Yang lebih baru yang menang" — sama persis dengan BOM Sheet di atas.
+      var _mmMeta = _srcMetaGet('mps_meta');
+      var _mmHas  = (typeof _mpsData !== 'undefined') && _mpsData && Object.keys(_mpsData).length > 0;
+      var _mmGts  = _gsheetFreshTs('mps', text, _mmHas, _mmMeta.ts||0);
+      if(isAuto && _mmHas && (_mmMeta.ts||0) > _mmGts){
+        var _mmLbl = _mmMeta.src==='xlsx' ? 'Upload xlsx' : 'GSheet';
+        if(infoEl) infoEl.textContent = '⏭ GSheet tidak lebih baru — MPS saat ini ('+_mmLbl+', '+new Date(_mmMeta.ts).toLocaleString('id-ID')+') dipertahankan';
+        console.log('[mps_sheet] auto-load dilewati: data saat ini lebih baru (meta '+_mmMeta.ts+' > gsheet '+_mmGts+')');
+        return;
+      }
       // Parse CSV mentah → 2D array → parser MPS yang SAMA dgn upload xlsx (alur = BOM)
       var mpsRows2D = _csvTo2D(text);
       var cntMps = _mpsParseRows(mpsRows2D, 'gsheet', 'GSheet' + (sheet ? ' tab "'+sheet+'"' : ''));
       localStorage.setItem('mps_sheet_upload_ts', ts);
+      try { localStorage.setItem('mps_meta', JSON.stringify({ts: (isAuto && _mmGts) ? _mmGts : Date.now(), src:'gsheet'})); } catch(e){}
       if(infoEl) infoEl.textContent = cntMps+' FG dimuat ✓';
       if(dotEl) dotEl.className='dot';
       toast('MPS: '+cntMps+' FG ✓ (GSheet)','ok');
@@ -4538,8 +4638,12 @@ function loadSheetData(type) {
 
 function loadAllSheets(autoBuild) {
   var promises = [];
+  // ⭐ isAuto=true: untuk BOM/MPS, "Muat Semua" membandingkan umur konten GSheet vs
+  // data yang sedang dipakai — yang LEBIH BARU yang menang (upload xlsx baru tidak
+  // ditimpa GSheet lama; GSheet yang habis diedit menggantikan upload lama).
+  // Pakai tombol muat per-dataset di Data Source untuk memaksa ganti sumber.
   ['master','mrp','realname','pallet_pm','pallet_rm','bom_sheet','mps_sheet','obal_sheet','cogm'].forEach(function(t){
-    if(localStorage.getItem('sheet_url_'+t)) promises.push(loadSheetData(t));
+    if(localStorage.getItem('sheet_url_'+t)) promises.push(loadSheetData(t, true));
   });
   if(!promises.length) { toast('Belum ada URL Sheets. Buka menu Data Source terlebih dahulu.','err'); return Promise.resolve(); }
   return Promise.allSettled(promises).then(function(){
@@ -9405,6 +9509,9 @@ function processFile(file, type) {
 
       if(type === 'mrp') {
         STATE.mrpData = processMRP(json, headers);
+        // Cap waktu naik supaya laptop lain menganggap upload file ini lebih baru
+        var _mTsU = Date.now(); window._mrpDataTs = _mTsU;
+        localStorage.setItem('mrp_data_ts', String(_mTsU));
         localStorage.setItem('mrp_data', JSON.stringify(STATE.mrpData));
         document.getElementById('mrp-fname').textContent = file.name;
         document.getElementById('mrp-status').className = 'dot';
@@ -14312,18 +14419,31 @@ function _appInit() {
   (function(){
     var _cbdM   = window._bootCloudData || {};
     var _cldTsM = parseInt(_cbdM['mrp_data_ts']||'0',10)||0;
+    // Ts yang TERTANAM di dokumen mrp_data (atomik — selalu seumur dengan datanya)
+    // lebih dipercaya daripada dokumen mrp_data_ts yang bisa "lari sendiri" kalau
+    // salah satu write gagal.
+    try { var _embTs = parseInt((window._cloudKvTs||{})['mrp_data']||'0',10)||0; if(_embTs > 0) _cldTsM = _embTs; } catch(e){}
     var _locTsM = window._bootMrpLocalTs || 0;
     var _locM   = (window._bootMrpLocalData != null) ? window._bootMrpLocalData
                 : (function(){ try{ return localStorage.getItem('mrp_data'); }catch(e){ return null; } })();
-    var _pickCloud = _cbdM['mrp_data'] != null && _cldTsM >= _locTsM;
+    // ⭐ '>' bukan '>=': seri waktu → LOKAL menang. Dulu seri dimenangkan cloud —
+    // kalau write data ke cloud sempat gagal (ts naik, data tidak), boot memilih
+    // data LAMA dari cloud padahal ts-nya sama → angka balik lama setelah refresh.
+    var _pickCloud = _cbdM['mrp_data'] != null && _cldTsM > _locTsM;
     var _srcM = _pickCloud ? _cbdM['mrp_data'] : (_locM != null ? _locM : (_cbdM['mrp_data'] || null));
     try { STATE.mrpData = _srcM ? JSON.parse(_srcM) : null; } catch(e){ STATE.mrpData = null; }
     window._mrpDataTs = Math.max(_cldTsM, _locTsM);
-    if(!_pickCloud && _locM != null && _locTsM > _cldTsM){
-      // Lokal lebih baru → tulis balik ke localStorage (dump cloud tadi menimpanya) & sembuhkan cloud
-      try { localStorage.setItem('mrp_data', _locM); localStorage.setItem('mrp_data_ts', String(_locTsM)); } catch(e){}
-      try { cloudSave('mrp_data', _locM); cloudSave('mrp_data_ts', String(_locTsM)); } catch(e){}
-      console.log('[boot] mrp_data LOKAL lebih baru dari cloud (ts '+_locTsM+' > '+_cldTsM+') → dipakai & cloud disembuhkan');
+    if(!_pickCloud && _locM != null){
+      // Lokal dipakai → tulis balik ke localStorage (dump cloud tadi menimpanya).
+      try { _origSetItem.call(localStorage, 'mrp_data', _locM); _origSetItem.call(localStorage, 'mrp_data_ts', String(_locTsM)); } catch(e){}
+      // Sembuhkan cloud hanya kalau isinya memang beda (ts lokal lebih baru, ATAU
+      // ts seri tapi data cloud beda = sisa write yang dulu gagal separuh).
+      if(_locTsM > _cldTsM || (_cbdM['mrp_data'] != null && _cbdM['mrp_data'] !== _locM)){
+        try { cloudSave('mrp_data', _locM); cloudSave('mrp_data_ts', String(_locTsM)); } catch(e){}
+        console.log('[boot] mrp_data LOKAL dipakai (ts '+_locTsM+' vs cloud '+_cldTsM+') → cloud disembuhkan');
+      } else {
+        console.log('[boot] mrp_data source: localStorage (ts cloud '+_cldTsM+' | lokal '+_locTsM+')');
+      }
     } else {
       console.log('[boot] mrp_data source:', _pickCloud ? 'CLOUD' : 'localStorage', '(ts cloud '+_cldTsM+' | lokal '+_locTsM+')');
     }
@@ -19835,6 +19955,9 @@ function _mpsParseRows(rows, source, originLabel) {
       var _mts = new Date();
       var _mtsStr = _mts.getDate()+'/'+(_mts.getMonth()+1)+'/'+_mts.getFullYear()+' '+String(_mts.getHours()).padStart(2,'0')+':'+String(_mts.getMinutes()).padStart(2,'0');
       try { localStorage.setItem('mps_source', source||'xlsx'); localStorage.setItem('mps_source_ts', _mtsStr); } catch(e){}
+      // Meta umur (sync cloud) — khusus upload xlsx; jalur gsheet mengatur metanya
+      // sendiri di loadSheetData('mps_sheet') dengan umur hasil pembanding hash.
+      if(source !== 'gsheet') { try { localStorage.setItem('mps_meta', JSON.stringify({ts: Date.now(), src:'xlsx'})); } catch(e){} }
       statusEl.textContent = '✓ ' + count + ' FG item dari ' + (originLabel||'upload') + ' · Sumber: ' + (source==='gsheet'?'GSheet':'Upload xlsx');
       statusEl.style.color = 'var(--green)';
       _mrpCheckReady();
@@ -19907,6 +20030,8 @@ function _bomUpload(input) {
       _mrpIdbSaveBom(_bomData);
       var _bomTs = (function(){ var d=new Date(); return d.getDate()+'/'+(d.getMonth()+1)+'/'+d.getFullYear()+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); })();
       try { localStorage.setItem('bom_source', 'xlsx'); localStorage.setItem('bom_source_ts', _bomTs); } catch(e){}
+      // Meta umur (sync cloud): upload file = update konten PASTI pada saat ini
+      try { localStorage.setItem('bom_meta', JSON.stringify({ts: Date.now(), src:'xlsx'})); } catch(e){}
 
       statusEl.textContent = '✓ ' + count + ' baris RM/PM dari file "' + file.name + '" · Sumber: Upload xlsx';
       statusEl.style.color = 'var(--green)';
@@ -20430,8 +20555,9 @@ function _mrpApplyToState(result) {
   var _mrpTs = Date.now();
   window._mrpDataTs = _mrpTs;
   var _mrpJson = JSON.stringify(mrpData);
-  localStorage.setItem('mrp_data', _mrpJson);
+  // ts DULU baru data — cloudSave menanam ts dari localStorage ke dokumen mrp_data
   localStorage.setItem('mrp_data_ts', String(_mrpTs));
+  localStorage.setItem('mrp_data', _mrpJson);
   // Auto-sync ke Firebase supaya laptop lain langsung update
   cloudSave('mrp_data', _mrpJson);
   cloudSave('mrp_data_ts', String(_mrpTs));
@@ -20766,13 +20892,22 @@ function _mrpUpdateDetailStatus() {
 function _autoLoadBomFromSheet() {
   if(window._bomAutoLoadDone) return;          // cegah dobel
   if(_bomData && _bomData.length) return;      // sudah ada data, tidak perlu
+  // ⭐ Tunggu pengecekan IndexedDB selesai. Dulu timer boot bisa menang balapan
+  // vs pembacaan IDB (BOM 50rb+ baris butuh waktu) → _bomData masih kosong
+  // SESAAT → auto-load menarik GSheet dan MENIMPA BOM hasil upload xlsx
+  // diam-diam ("aku upload file, kok sumbernya berubah jadi GSheet?").
+  if(!window._bomIdbChecked) {
+    var _n = (window._bomAutoRetry||0) + 1; window._bomAutoRetry = _n;
+    if(_n <= 15) setTimeout(_autoLoadBomFromSheet, 800);
+    return;
+  }
   var url = localStorage.getItem('sheet_url_bom_sheet') || '';
   if(!url) return;                             // belum ada URL tersimpan
   window._bomAutoLoadDone = true;
   var el = document.getElementById('bom-status');
   if(el) { el.textContent = '⏳ Memuat BOM otomatis dari GSheet...'; el.style.color = 'var(--muted)'; }
   // loadSheetData sudah handle: parse → simpan IndexedDB → set _bomData → update status/label
-  loadSheetData('bom_sheet').then(function(){
+  loadSheetData('bom_sheet', true).then(function(){
     if(typeof _whereUsedRender === 'function' && document.getElementById('wu-result')) _whereUsedRender();
   }).catch(function(){
     if(el) { el.textContent = '⚠ BOM belum termuat — buka Data Source → Muat BOM'; el.style.color = 'var(--amber)'; }
@@ -20785,12 +20920,18 @@ function _autoLoadBomFromSheet() {
 function _autoLoadMpsFromSheet() {
   if(window._mpsAutoLoadDone) return;              // cegah dobel
   if(_mpsData && Object.keys(_mpsData).length) return; // sudah ada data
+  // Tunggu pengecekan IndexedDB selesai (sama seperti BOM — anti menimpa upload)
+  if(!window._mpsIdbChecked) {
+    var _n = (window._mpsAutoRetry||0) + 1; window._mpsAutoRetry = _n;
+    if(_n <= 15) setTimeout(_autoLoadMpsFromSheet, 800);
+    return;
+  }
   var url = localStorage.getItem('sheet_url_mps_sheet') || '';
   if(!url) return;
   window._mpsAutoLoadDone = true;
   var el = document.getElementById('mps-status');
   if(el) { el.textContent = '⏳ Memuat MPS otomatis dari GSheet...'; el.style.color = 'var(--muted)'; }
-  loadSheetData('mps_sheet').catch(function(){
+  loadSheetData('mps_sheet', true).catch(function(){
     if(el) { el.textContent = '⚠ MPS belum termuat — buka Data Source → Muat MPS'; el.style.color = 'var(--amber)'; }
   });
 }
@@ -20831,10 +20972,18 @@ function _mrpIdbLoad() {
     });
   }
   _mrpIdbOpen(function(db) {
-    if(!db) return;
+    if(!db) {
+      // IDB tidak bisa dibuka → anggap pengecekan selesai (kosong) supaya
+      // auto-load GSheet tetap bisa jalan di laptop yang IDB-nya bermasalah.
+      window._bomIdbChecked = true; window._mpsIdbChecked = true;
+      _autoLoadBomFromSheet();
+      if(typeof _autoLoadMpsFromSheet === 'function') _autoLoadMpsFromSheet();
+      return;
+    }
     // Load BOM
     var tx1 = db.transaction('bom','readonly');
     tx1.objectStore('bom').get('bom_data').onsuccess = function(e) {
+      window._bomIdbChecked = true; // pengecekan IDB BOM selesai (ada ataupun kosong)
       if(e.target.result) {
         _bomData = e.target.result.data;
         var ts   = e.target.result.ts ? new Date(e.target.result.ts).toLocaleDateString('id-ID') : '';
@@ -20843,6 +20992,15 @@ function _mrpIdbLoad() {
         var _srcLbl = _src === 'gsheet' ? ' · Sumber: GSheet' : (_src === 'xlsx' ? ' · Sumber: Upload xlsx' : '');
         var bomStatusText = '✓ BOM tersimpan: ' + _bomData.length + ' baris (' + ts + ')';
         if(el) { el.textContent = bomStatusText + _srcLbl; el.style.color='var(--green)'; }
+        // ⚠ Lintas-laptop: cloud mencatat update BOM yang lebih baru dari data di browser ini
+        try {
+          var _bmC = _srcMetaGet('bom_meta');
+          var _locIngest = e.target.result.ts ? new Date(e.target.result.ts).getTime() : 0;
+          if(el && _bmC.ts && _locIngest && (_bmC.ts - _locIngest) > 2*60*1000) {
+            el.textContent += ' · ⚠ versi lebih baru di-update di laptop lain ('+new Date(_bmC.ts).toLocaleString('id-ID')+') — upload/muat ulang di sini sebelum Hitung MRP';
+            el.style.color = 'var(--amber)';
+          }
+        } catch(_e){}
         localStorage.setItem('bom_ui_status', bomStatusText);
         cloudSave('bom_ui_status', bomStatusText);
         _mrpCheckReady();
@@ -20857,6 +21015,7 @@ function _mrpIdbLoad() {
     try {
       var tx3 = db.transaction('mps','readonly');
       tx3.objectStore('mps').get('mps_data').onsuccess = function(e3) {
+        window._mpsIdbChecked = true; // pengecekan IDB MPS selesai (ada ataupun kosong)
         if(e3.target.result) {
           _mpsData = e3.target.result.data;
           if(e3.target.result.fgDescs)  _fgDescFromMps   = e3.target.result.fgDescs;
@@ -20872,6 +21031,15 @@ function _mrpIdbLoad() {
           var _msrc = localStorage.getItem('mps_source');
           var _msrcLbl = _msrc==='gsheet' ? ' · Sumber: GSheet' : (_msrc==='xlsx' ? ' · Sumber: Upload xlsx' : '');
           if(el3) { el3.textContent = mpsStatusText + _msrcLbl; el3.style.color='var(--green)'; }
+          // ⚠ Lintas-laptop: cloud mencatat update MPS yang lebih baru dari data di browser ini
+          try {
+            var _mmC = _srcMetaGet('mps_meta');
+            var _locIngest3 = e3.target.result.ts ? new Date(e3.target.result.ts).getTime() : 0;
+            if(el3 && _mmC.ts && _locIngest3 && (_mmC.ts - _locIngest3) > 2*60*1000) {
+              el3.textContent += ' · ⚠ versi lebih baru di-update di laptop lain ('+new Date(_mmC.ts).toLocaleString('id-ID')+') — upload/muat ulang di sini sebelum Hitung MRP';
+              el3.style.color = 'var(--amber)';
+            }
+          } catch(_e){}
           localStorage.setItem('mps_ui_status', mpsStatusText);
           cloudSave('mps_ui_status', mpsStatusText);
           _mrpCheckReady();
@@ -20880,7 +21048,9 @@ function _mrpIdbLoad() {
           if(typeof _autoLoadMpsFromSheet === 'function') _autoLoadMpsFromSheet();
         }
       };
-    } catch(e3) {}
+      tx3.onerror = function(){ window._mpsIdbChecked = true; };
+    } catch(e3) { window._mpsIdbChecked = true; }
+    tx1.onerror = function(){ window._bomIdbChecked = true; };
     // Load MRP result
     var tx2 = db.transaction('mrp','readonly');
     tx2.objectStore('mrp').get('mrp_data').onsuccess = function(e) {
@@ -20913,17 +21083,23 @@ function _mrpIdbLoad() {
 function _mrpFallbackFromFirebase() {
   if(!STATE.mrpData || !Object.keys(STATE.mrpData).length) return;
 
-  // Tampilkan status dari Firebase — bisa dari localStorage (setelah cloudLoad) atau realtime
+  // Tampilkan status dari Firebase — bisa dari localStorage (setelah cloudLoad) atau realtime.
+  // ⭐ HANYA cat oranye kalau data mentahnya MEMANG tidak ada di browser ini.
+  // Dulu dicat oranye tanpa cek → balapan urutan event IndexedDB bikin label
+  // "data mentah di laptop lain" muncul PADAHAL BOM/MPS sudah termuat di sini
+  // (header "Siap (N baris)" hijau tapi status oranye — membingungkan).
   var mpsStatus = localStorage.getItem('mps_ui_status') || '';
   var bomStatus = localStorage.getItem('bom_ui_status') || '';
   var mpsEl = document.getElementById('mps-status');
   var bomEl = document.getElementById('bom-status');
-  if(mpsEl) {
-    if(mpsStatus) { mpsEl.textContent = mpsStatus + ' — data mentah lokal di laptop lain, upload ulang di sini untuk pakai Where Used/Export'; mpsEl.style.color='var(--amber)'; }
+  var _mpsLocal = (typeof _mpsData !== 'undefined') && _mpsData && Object.keys(_mpsData).length > 0;
+  var _bomLocal = (typeof _bomData !== 'undefined') && _bomData && _bomData.length > 0;
+  if(mpsEl && !_mpsLocal) {
+    if(mpsStatus) { mpsEl.textContent = mpsStatus + ' — data mentah (file MPS) tidak ada di browser ini. Upload ulang / Muat dari GSheet untuk pakai Where Used/Export'; mpsEl.style.color='var(--amber)'; }
     else { mpsEl.textContent = 'Data dari Firebase (file tidak di-upload lokal)'; mpsEl.style.color='var(--muted)'; }
   }
-  if(bomEl) {
-    if(bomStatus) { bomEl.textContent = bomStatus + ' — data mentah lokal di laptop lain, upload ulang di sini untuk pakai Where Used/Export'; bomEl.style.color='var(--amber)'; }
+  if(bomEl && !_bomLocal) {
+    if(bomStatus) { bomEl.textContent = bomStatus + ' — data mentah (file BOM) tidak ada di browser ini. Upload ulang / Muat dari GSheet untuk pakai Where Used/Export'; bomEl.style.color='var(--amber)'; }
     else { bomEl.textContent = 'Data dari Firebase (file tidak di-upload lokal)'; bomEl.style.color='var(--muted)'; }
   }
 
