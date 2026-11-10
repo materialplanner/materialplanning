@@ -12412,7 +12412,9 @@ function _renderScheduleImpl() {
               + '</div>'
             + '</td>';
           }
-          html += '<td style="'+_td+';font-family:var(--mono);font-size:10.5px;color:var(--muted)">' + (po ? po.docNum : '—') + '</td>'
+          html += '<td style="'+_td+';font-family:var(--mono);font-size:10.5px;color:var(--muted);white-space:nowrap">' + (po ? po.docNum : '—')
+            + ((_isAdmin && po) ? ' <span onclick="removeSchedPoRow('+idx+','+enIdx+','+pi+')" title="Hapus PO ini dari jadwal" style="cursor:pointer;font-size:10px;color:var(--red);padding:0 2px">✕</span>' : '')
+            + '</td>'
             + '<td style="'+_td+';padding-left:4px;padding-right:4px;text-align:right;white-space:nowrap">'
               + (_isAdmin && po ? '<span onclick="_schedQtyStepPO(\''+uid+'\',-'+multiple+')" style="cursor:pointer;font-size:11px;color:var(--muted);padding:2px 3px;user-select:none" title="-'+n_id(multiple)+'">▼</span>' : '')
               + '<input type="text" id="'+uid+'" class="sched-qty-po" value="' + n_id(qVal) + '" style="width:70px;background:var(--bg4);border:1px solid var(--border2);color:var(--text);border-radius:3px;padding:2px 4px;font-size:11px;font-family:var(--mono);text-align:right" '
@@ -12656,6 +12658,34 @@ function _getEntryReqQty(en) {
   }, 0);
 }
 // ── Handler tabel flat per-PO (rombak 10/11/26) ───────────────────────────────
+// Hapus SATU baris PO dari entry jadwal (kebalikan tombol +)
+function removeSchedPoRow(idx, enIdx, pi) {
+  if(!_requireAdmin('edit jadwal')) return;
+  var e = STATE.scheduleData[idx]; if(!e) return;
+  var en = (e.entries||[])[enIdx]; if(!en || !en.pos || !en.pos[pi]) return;
+  var po = en.pos[pi];
+  // PO terakhir item ini → pakai jalur hapus item (beserta cleanup & tombstone-nya)
+  if(en.pos.length <= 1) { removeSchedItem(idx, enIdx); return; }
+  if(!confirm('Hapus PO ' + po.docNum + ' (' + n_id(po.openQty||0) + ') dari jadwal ini?')) return;
+  en.pos.splice(pi, 1);
+  // Bersihkan override PO ini di SEMUA kandidat key: sisa reqQtyOverride bikin
+  // generate/form membaca qty basi; tanggal auto (dari approve) ikut dicabut,
+  // tanggal manual user dibiarkan.
+  var _now = new Date().toISOString();
+  _poCandidateKeys(po).forEach(function(k){
+    var o = STATE.poOverrides[k];
+    if(!o) return;
+    delete o.reqQtyOverride;
+    if(!o.isManual && o.date) { delete o.date; delete o.isAuto; o.dateUpd = _now; }
+  });
+  localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
+  cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
+  e._upd = Date.now();
+  localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData));
+  _cloudSaveSchedule(JSON.stringify(STATE.scheduleData));
+  renderSchedule();
+  toast('PO ' + po.docNum + ' dihapus dari jadwal \u2713', 'ok');
+}
 // Tambah baris PO lain (item & supplier sama) ke entry jadwal ini
 function addSchedPoRow(idx, enIdx) {
   if(!_requireAdmin('edit jadwal')) return;
@@ -12672,6 +12702,17 @@ function addSchedPoRow(idx, enIdx) {
       && (x.openQty||0) > 0;
   });
   if(!cand.length) { toast('Tidak ada PO open lain untuk item ini dari supplier ini', 'inf'); return; }
+  // Urutan tambah: PR Req Date paling awal dulu (FIFO kebutuhan), lalu Doc Date
+  // paling tua, lalu No. PO terkecil. (Dulu: urutan mentah hasil query SAP — acak.)
+  var _dKey = function(d){ // 'dd/mm/yyyy' → 'yyyymmdd'; kosong → paling akhir
+    var p = String(d||'').split('/');
+    return p.length === 3 ? (p[2]+p[1].padStart(2,'0')+p[0].padStart(2,'0')) : '99999999';
+  };
+  cand.sort(function(a,b){
+    return _dKey(a.prReqDate).localeCompare(_dKey(b.prReqDate))
+        || _dKey(a.docDate).localeCompare(_dKey(b.docDate))
+        || String(a.docNum).localeCompare(String(b.docNum));
+  });
   en.pos.push(cand[0]);
   e._upd = Date.now();
   localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData));
