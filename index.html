@@ -12382,6 +12382,7 @@ function _renderScheduleImpl() {
           var pkCanon = po ? _poKey(po) : '';
           var oq = po ? (po.openQty||0) : 0;
           var qVal = _qVals[pi];
+          var ovr = pkCanon ? (STATE.poOverrides[pkCanon] || STATE.poOverrides[po.docNum+'_'+po.itemCode] || {}) : {};
           var rowDateISO = ovr.date || dateISO;
           var cc = pkCanon ? _poConfData(pkCanon) : {};
           var isConf = !!cc.confDate;
