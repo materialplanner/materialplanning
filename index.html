@@ -12299,7 +12299,10 @@ function _renderScheduleImpl() {
       + '</tr></thead><tbody>';
     entries.forEach(function(e){
       var idx = STATE.scheduleData.indexOf(e);
-      var isOn = ['approved','sent','confirmed'].indexOf(e.status) >= 0;
+      // 'partial' (sebagian PO terkonfirmasi) adalah tahap SETELAH approve —
+      // ceklis approve harus tetap ✓. Dulu partial tidak masuk daftar → konfirmasi
+      // 1 dari 2 PO bikin ceklis approve "hilang", konfirmasi semua muncul lagi.
+      var isOn = ['approved','sent','confirmed','partial'].indexOf(e.status) >= 0;
       var sb = {pending:'<span class="badge b-gray">Pending</span>',approved:'<span class="badge b-green">Approved</span>',sent:'<span class="badge b-blue">Terkirim</span>',confirmed:'<span class="badge b-teal">Konfirmasi</span>',partial:'<span class="badge b-amber">Partial</span>'}[e.status]||'';
       var types = {};
       (e.entries||[]).forEach(function(en){ if(en.item && en.item.itemType) types[en.item.itemType]=true; });
@@ -12383,7 +12386,11 @@ function _renderScheduleImpl() {
           var oq = po ? (po.openQty||0) : 0;
           var qVal = _qVals[pi];
           var ovr = pkCanon ? (STATE.poOverrides[pkCanon] || STATE.poOverrides[po.docNum+'_'+po.itemCode] || {}) : {};
-          var rowDateISO = ovr.date || dateISO;
+          // Tgl baris: override per-PO dipakai hanya kalau MANUAL (sengaja diset user),
+          // atau kartu sudah approved (tanggalnya hasil stamp approve). Kartu PENDING
+          // dengan sisa tanggal auto dari jadwal/approve LAMA → tampilkan tanggal kartu,
+          // bukan sisa lama (sumber bingung "kok ada tgl 10?").
+          var rowDateISO = (ovr.date && (ovr.isManual || isOn)) ? ovr.date : dateISO;
           var cc = pkCanon ? _poConfData(pkCanon) : {};
           var isConf = !!cc.confDate;
           var uid = 'sqp_' + idx + '_' + enIdx + '_' + pi;
