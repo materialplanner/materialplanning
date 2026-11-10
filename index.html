@@ -12355,7 +12355,9 @@ function _renderScheduleImpl() {
         var masterUOM = master ? (master.uom||'').toUpperCase() : '';
         if(multiple > 0 && /^(G|GR|GRAM)$/.test(masterUOM)) multiple = multiple / 1000;
         if(multiple < 1) multiple = 1;
-        var stockNow = (STATE.stockData||{})[code] || 0;
+        // stockData[code] = {btg,sng,jtk,pjt} per site → jumlahkan (bukan angka tunggal)
+        var _stO = (STATE.stockData||{})[code] || {};
+        var stockNow = (_stO.btg||0) + (_stO.sng||0) + (_stO.jtk||0) + (_stO.pjt||0);
         var mrpThisMo = proj ? (proj.actualMRP||0) : 0;
         var _mmU = (STATE.matcomMonthly||{})[code]||{};
         var _fU = (/^(G|GR|GRAM)$/.test(masterUOM)) ? 0.001 : 1;
