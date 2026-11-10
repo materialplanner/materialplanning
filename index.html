@@ -12365,17 +12365,23 @@ function _renderScheduleImpl() {
         var usePct = mrpThisMo > 0 ? usedMo/mrpThisMo*100 : (usedMo > 0 ? 100 : null);
         var useCol = usePct==null ? 'var(--muted)' : (usePct>=100 ? 'var(--red)' : (usePct>=80 ? 'var(--amber)' : 'var(--muted)'));
         var multiItem = rendIdx.length > 1;
+        // DOI SATU PER ITEM (seperti Stock/MRP): sekarang → setelah SEMUA kiriman
+        // item ini masuk. Qty per PO dihitung dulu (pre-pass) supaya totalnya ketemu.
+        var _qVals = posArr.map(function(po){
+          if(!po) return 0;
+          var _pk = _poKey(po);
+          var _ov = STATE.poOverrides[_pk] || STATE.poOverrides[po.docNum+'_'+po.itemCode] || {};
+          var _oq = po.openQty||0;
+          return (_ov.reqQtyOverride != null && !(Number(_ov.reqQtyOverride)===0 && _oq>0) && _ov.reqQtyOverride > 0) ? _ov.reqQtyOverride : _oq;
+        });
+        var entryQty = _qVals.reduce(function(a,b){ return a+b; }, 0);
+        var doiAfterAll = doiNow + (dailyUsg > 0 ? Math.round(entryQty / dailyUsg) : 0);
         posArr.forEach(function(po, pi){
           var cardFirst  = !cardFirstRowDone; cardFirstRowDone = true;
           var entryFirst = (pi === 0);
           var pkCanon = po ? _poKey(po) : '';
           var oq = po ? (po.openQty||0) : 0;
-          var ovr = pkCanon ? (STATE.poOverrides[pkCanon] || STATE.poOverrides[po.docNum+'_'+po.itemCode] || {}) : {};
-          // Qty default = open qty PO (maksimal PO); override >0 dipakai; sisa 0 nyangkut diabaikan
-          var qVal = (ovr.reqQtyOverride != null && !(Number(ovr.reqQtyOverride)===0 && oq>0) && ovr.reqQtyOverride > 0) ? ovr.reqQtyOverride : oq;
-          var addDays = dailyUsg > 0 ? Math.round(qVal / dailyUsg) : 0;
-          var doiAfter = doiNow + addDays;
-          var doiAfterColor = doiAfter > doiNow ? 'var(--green)' : 'var(--muted)';
+          var qVal = _qVals[pi];
           var rowDateISO = ovr.date || dateISO;
           var cc = pkCanon ? _poConfData(pkCanon) : {};
           var isConf = !!cc.confDate;
@@ -12392,8 +12398,17 @@ function _renderScheduleImpl() {
                 + (en.isManual ? ' <span class="badge b-amber" style="font-size:8.5px">Manual</span>' : '')
                 + (_isAdmin && multiItem ? ' <span onclick="splitSchedItem('+idx+','+enIdx+')" title="Pisahkan ke jadwal terpisah" style="cursor:pointer;font-size:10px;color:var(--accent)">↗</span>' : '')
                 + (_isAdmin ? ' <span onclick="removeSchedItem('+idx+','+enIdx+')" title="Hapus item" style="cursor:pointer;font-size:10px;color:var(--red)">✕</span>' : '')
+                + (_isAdmin ? ' <span onclick="addSchedPoRow('+idx+','+enIdx+')" title="Tambah baris PO item ini" style="cursor:pointer;font-size:11px;color:var(--green);font-weight:700">+</span>' : '')
               + '</div>'
-              + '<div style="font-size:9px;color:var(--muted);margin-top:1px">' + _enUOM(en) + '</div>'
+              + '<div style="font-size:9px;color:var(--muted);margin-top:1px">' + _enUOM(en)
+                + (function(){
+                    var _tp = 0;
+                    (STATE.poData||[]).forEach(function(x){
+                      if(x.itemCode === code && (x.supplierName||'').toLowerCase() === (e.supName||'').toLowerCase()) _tp += (x.openQty||0);
+                    });
+                    return _tp > 0 ? ' · Total PO: <b style="color:var(--text)">' + n_id(_tp) + '</b>' : '';
+                  })()
+              + '</div>'
             + '</td>';
           }
           html += '<td style="'+_td+';font-family:var(--mono);font-size:10.5px;color:var(--muted)">' + (po ? po.docNum : '—') + '</td>'
@@ -12404,13 +12419,13 @@ function _renderScheduleImpl() {
               + 'onchange="saveSchedQtyPO(this)" onfocus="this.value=this.value.replace(/\\./g,\'\')" onblur="_schedQtyBlur(this)" title="Qty · multiple: '+n_id(multiple)+'"' + ((_isAdmin && po)?'':' disabled') + '>'
               + (_isAdmin && po ? '<span onclick="_schedQtyStepPO(\''+uid+'\','+multiple+')" style="cursor:pointer;font-size:11px;color:var(--muted);padding:2px 3px;user-select:none" title="+'+n_id(multiple)+'">▲</span>' : '')
               + (oq > 0 ? '<div style="font-size:9px;color:var(--muted);padding-right:18px">max: '+n_id(oq)+'</div>' : '')
-            + '</td>'
-            + '<td style="'+_td+';white-space:nowrap;font-family:var(--mono);font-size:11px">'
-              + '<span style="color:'+doiColor+';font-weight:600">'+doiNow+'</span>'
-              + ' → <span id="doi-after-'+uid+'" style="color:'+doiAfterColor+';font-weight:600">'+doiAfter+'</span>'
             + '</td>';
           if(entryFirst){
-            html += '<td rowspan="'+nPos+'" style="'+_tdE+';text-align:right;font-family:var(--mono);font-size:11px;vertical-align:top">' + (stockNow > 0 ? n_id(Math.round(stockNow*100)/100) : '—') + '</td>'
+            html += '<td rowspan="'+nPos+'" style="'+_tdE+';white-space:nowrap;font-family:var(--mono);font-size:11px;vertical-align:top" title="DOI sekarang → setelah semua kiriman item ini masuk">'
+                + '<span style="color:'+doiColor+';font-weight:600">'+doiNow+'</span>'
+                + ' → <span style="color:'+(doiAfterAll>doiNow?'var(--green)':'var(--muted)')+';font-weight:600">'+doiAfterAll+'</span>'
+              + '</td>'
+              + '<td rowspan="'+nPos+'" style="'+_tdE+';text-align:right;font-family:var(--mono);font-size:11px;vertical-align:top">' + (stockNow > 0 ? n_id(Math.round(stockNow*100)/100) : '—') + '</td>'
               + '<td rowspan="'+nPos+'" style="'+_tdE+';text-align:right;font-family:var(--mono);font-size:11px;vertical-align:top">' + (mrpThisMo > 0 ? n_id(Math.round(mrpThisMo)) : '—') + '</td>'
               + '<td rowspan="'+nPos+'" style="'+_tdE+';text-align:right;font-family:var(--mono);font-size:11px;vertical-align:top"><span style="color:'+useCol+';font-weight:600">' + (usePct==null ? '—' : n_id(Math.round(usePct))+'%') + '</span></td>';
           }
@@ -12640,6 +12655,29 @@ function _getEntryReqQty(en) {
   }, 0);
 }
 // ── Handler tabel flat per-PO (rombak 10/11/26) ───────────────────────────────
+// Tambah baris PO lain (item & supplier sama) ke entry jadwal ini
+function addSchedPoRow(idx, enIdx) {
+  if(!_requireAdmin('edit jadwal')) return;
+  var e = STATE.scheduleData[idx]; if(!e) return;
+  var en = (e.entries||[])[enIdx]; if(!en || !en.item) return;
+  var code = en.item.productCode;
+  if(!en.pos) en.pos = [];
+  var linked = {};
+  en.pos.forEach(function(p){ linked[_poKey(p)] = true; });
+  var cand = (STATE.poData||[]).filter(function(x){
+    return x.itemCode === code
+      && (x.supplierName||'').toLowerCase() === (e.supName||'').toLowerCase()
+      && !linked[_poKey(x)]
+      && (x.openQty||0) > 0;
+  });
+  if(!cand.length) { toast('Tidak ada PO open lain untuk item ini dari supplier ini', 'inf'); return; }
+  en.pos.push(cand[0]);
+  e._upd = Date.now();
+  localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData));
+  _cloudSaveSchedule(JSON.stringify(STATE.scheduleData));
+  renderSchedule();
+  toast('PO ' + cand[0].docNum + ' (' + n_id(cand[0].openQty||0) + ') ditambahkan \u2713', 'ok');
+}
 function saveSchedQtyPO(input) {
   if(!_requireAdmin('edit jadwal')) return;
   var pk = input.getAttribute('data-po-key-canon'); if(!pk) return;
@@ -12652,6 +12690,8 @@ function saveSchedQtyPO(input) {
   localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
   cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
   _updateSchedDOI(input);
+  // Re-render supaya rantai DOI baris-baris PO di bawahnya (item sama) ikut terhitung ulang
+  renderSchedule();
 }
 function _schedQtyStepPO(uid, step) {
   var el = document.getElementById(uid); if(!el) return;
