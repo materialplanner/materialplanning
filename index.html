@@ -355,7 +355,6 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
         <div>
           <div class="logo-text" style="font-size:12px;font-weight:700;color:#fff;line-height:1.2">Material Planner</div>
           <div class="logo-text" style="font-size:10px;color:rgba(255,255,255,.45);margin-top:1px">Eka Jaya Internasional</div>
-          <div class="logo-text" id="app-build-label" style="font-size:9px;color:rgba(255,255,255,.3);margin-top:1px;font-family:monospace">build 2026-11-10.7</div>
         </div>
       </div>
     </div>
@@ -12277,10 +12276,10 @@ function _renderScheduleImpl() {
     var d = new Date(date.includes('/') ? date.split('/').reverse().join('-') : date);
     var dayName = ['Min','Sen','Sel','Rab','Kam','Jum','Sab'][d.getDay()] || '';
     html += '<div class="sday"><div class="sday-hdr">📅 ' + date + ' <span style="color:var(--muted);font-weight:400">' + dayName + '</span><span class="sday-pill">' + entries.length + ' supplier</span>' + (dailyQty > 0 ? '<span class="sday-pill" style="background:var(--accent-bg);color:var(--accent)">Total qty: ' + n_id(dailyQty) + '</span>' : '') + '</div>';
-    // ── ROMBAK 10/11/26: tabel flat ala List Pengiriman PO (bukan kartu) ──────
-    // Logika TIDAK berubah: semua handler lama dipakai ulang (toggleApprove,
-    // saveSchedQty/_schedQtyStep/_updateSchedDOI dgn id & data-attr yang sama,
-    // saveSchedDate, openFbModal, previewWA, removeSchedule, split/removeSchedItem).
+    // ── ROMBAK 10/11/26 v2: tabel flat — SATU BARIS PER PO ─────────────────────
+    // Qty per PO (default & max = open qty PO), tgl kirim per baris (po_overrides.date),
+    // konfirmasi inline (ceklis + tgl konfirmasi → po_confirmations + po_overrides,
+    // store yang sama dengan modal lama & List Pengiriman PO).
     var _thS='padding:6px 8px;text-align:left;font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);white-space:nowrap';
     html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11.5px">'
       + '<thead><tr style="background:var(--bg3)">'
@@ -12289,11 +12288,13 @@ function _renderScheduleImpl() {
       + '<th style="'+_thS+'">Item</th>'
       + '<th style="'+_thS+'">No. PO</th>'
       + '<th style="'+_thS+';text-align:right">Qty Kirim</th>'
-      + '<th style="'+_thS+'">UoM</th>'
       + '<th style="'+_thS+'">DOI → Setelah</th>'
+      + '<th style="'+_thS+';text-align:right">Stock</th>'
       + '<th style="'+_thS+';text-align:right">MRP Bln Ini</th>'
-      + '<th style="'+_thS+';text-align:right">Usage % Bln Ini</th>'
+      + '<th style="'+_thS+';text-align:right">Usage %</th>'
       + '<th style="'+_thS+'">Tgl Kirim</th>'
+      + '<th style="'+_thS+'">✓ Konf</th>'
+      + '<th style="'+_thS+'">Tgl Konfirmasi</th>'
       + '<th style="'+_thS+'">Aksi</th>'
       + '</tr></thead><tbody>';
     entries.forEach(function(e){
@@ -12309,100 +12310,122 @@ function _renderScheduleImpl() {
           ? String(e.entries[0].pos[0].docNum) : null;
         return (_firstDocNum && _supByDocNum[_firstDocNum]) ? _supByDocNum[_firstDocNum] : (e.supName||'—');
       })();
-      // enIdx handler (split/remove) HARUS index asli di e.entries — jangan pakai index hasil filter
       var entsAll = e.entries||[];
       var rendIdx = []; entsAll.forEach(function(en,i){ if(en.item) rendIdx.push(i); });
-      var nRows = Math.max(rendIdx.length, 1);
+      // total baris kartu = jumlah PO semua entry (entry tanpa PO tetap 1 baris)
+      var nRows = 0;
+      rendIdx.forEach(function(i){ nRows += Math.max((entsAll[i].pos||[]).length, 1); });
+      nRows = Math.max(nRows, 1);
       var rowBg = isOn ? 'rgba(34,197,94,.045)' : 'transparent';
       var _tdF = 'padding:8px;vertical-align:top;border-bottom:1px solid var(--border);border-top:2px solid var(--border2)';
       var firstCells =
           '<td rowspan="'+nRows+'" style="'+_tdF+';padding-left:6px;padding-right:2px">'
           + '<div class="chk ' + (isOn?'on':'') + '" onclick="' + (_isAdmin?'toggleApprove('+idx+')':'_requireAdmin(\'approve\')') + '">' + (isOn?'✓':'') + '</div></td>'
-        + '<td rowspan="'+nRows+'" style="'+_tdF+';max-width:170px">'
+        + '<td rowspan="'+nRows+'" style="'+_tdF+';max-width:160px">'
           + '<div style="font-size:12px;font-weight:500">' + supLive + '</div>'
           + '<div style="margin-top:3px;display:flex;gap:4px;flex-wrap:wrap">' + sb + typeTags + (e.isManual?'<span class="badge b-amber" style="font-size:9px">Manual</span>':'') + '</div>'
           + (e.feedback ? '<div class="sinfo-fb">✓ ' + e.feedback + '</div>' : '')
           + (e.coverageDate ? '<div style="font-size:9.5px;color:var(--muted);margin-top:2px">Coverage: ' + e.coverageDate + '</div>' : '')
         + '</td>';
       var lastCells =
-          '<td rowspan="'+nRows+'" style="'+_tdF+'">'
-          + '<input type="date" value="' + dateISO + '" data-sched-idx="' + idx + '" onchange="saveSchedDate(this)" ' + (_isAdmin?'':' disabled ')
-          + 'style="background:var(--bg4);border:1px solid var(--border2);color:var(--text);border-radius:3px;padding:2px 6px;font-size:11px;font-family:var(--mono)">'
-        + '</td>'
-        + '<td rowspan="'+nRows+'" style="'+_tdF+';white-space:nowrap">'
-          + '<button class="btn btn-sm" onclick="openFbModal(' + idx + ')" title="Form konfirmasi">📝</button> '
+          '<td rowspan="'+nRows+'" style="'+_tdF+';white-space:nowrap">'
           + '<button class="btn btn-sm btn-green" onclick="previewWA(' + idx + ')" title="Preview WA">📲</button> '
           + '<button class="btn btn-sm btn-red" onclick="removeSchedule(' + idx + ')" title="Hapus jadwal">✕</button>'
         + '</td>';
       if(!rendIdx.length){
         html += '<tr style="background:'+rowBg+'">' + firstCells
-          + '<td colspan="7" style="'+_tdF+';color:var(--muted)">— tidak ada item —</td>'
+          + '<td colspan="10" style="'+_tdF+';color:var(--muted)">— tidak ada item —</td>'
           + lastCells + '</tr>';
         return;
       }
-      rendIdx.forEach(function(enIdx, rpos){
+      var cardFirstRowDone = false;
+      rendIdx.forEach(function(enIdx){
         var en = entsAll[enIdx];
-        var first = (rpos === 0);
-        var po = en.pos && en.pos[0];
-        var poKey = po ? (po.docNum + '_' + po.itemCode) : '';
-        var reqQty = en.pos ? en.pos.reduce(function(s,p){return s+(p.openQty||0);},0) : 0;
-        var dispQty = _getEntryReqQty(en);
-        var proj = STATE.projectionData.find(function(x){ return x.productCode === en.item.productCode; });
+        var code = en.item.productCode;
+        var posArr = (en.pos && en.pos.length) ? en.pos : [null];
+        var nPos = posArr.length;
+        // Metrik level item (sama utk semua PO item ini) → rowspan per entry
+        var proj = STATE.projectionData.find(function(x){ return x.productCode === code; });
         var doiNow = proj ? Math.round(proj.doiAfterIncoming != null ? proj.doiAfterIncoming : (proj.doiFC||0)) : 0;
         var daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth()+1, 0).getDate();
         var dailyUsg = (proj && proj.actualMRP > 0) ? proj.actualMRP / daysInMonth : 0;
-        var addDays = dailyUsg > 0 ? Math.round(dispQty / dailyUsg) : 0;
-        var doiAfter = doiNow + addDays;
         var doiColor = doiNow < 7 ? 'var(--red)' : (doiNow < 14 ? 'var(--amber)' : 'var(--muted)');
-        var doiAfterColor = doiAfter > doiNow ? 'var(--green)' : 'var(--muted)';
-        var master = STATE.masterData && STATE.masterData[en.item.productCode];
+        var master = STATE.masterData && STATE.masterData[code];
         var multiple = master ? (master.multiple || 1) : 1;
         var masterUOM = master ? (master.uom||'').toUpperCase() : '';
         if(multiple > 0 && /^(G|GR|GRAM)$/.test(masterUOM)) multiple = multiple / 1000;
         if(multiple < 1) multiple = 1;
-        var allItemPOs = STATE.poData.filter(function(x){
-          return x.itemCode === en.item.productCode && (x.supplierName||'').toLowerCase() === (e.supName||'').toLowerCase();
-        });
-        var maxAvail = allItemPOs.reduce(function(s,x){ return s+(x.openQty||0); }, 0);
-        var multiItem = rendIdx.length > 1;
-        var uid = 'sq_' + idx + '_' + enIdx;
-        // MRP bulan ini & usage % bulan ini (matcom SAP + Obal WIP vs MRP bln ini)
+        var stockNow = (STATE.stockData||{})[code] || 0;
         var mrpThisMo = proj ? (proj.actualMRP||0) : 0;
-        var _mmU = (STATE.matcomMonthly||{})[en.item.productCode]||{};
+        var _mmU = (STATE.matcomMonthly||{})[code]||{};
         var _fU = (/^(G|GR|GRAM)$/.test(masterUOM)) ? 0.001 : 1;
-        var usedMo = ((_mmU[new Date().getMonth()+1]||0) + (typeof _obalRmRaw==='function'?_obalRmRaw(en.item.productCode):0)) * _fU;
+        var usedMo = ((_mmU[new Date().getMonth()+1]||0) + (typeof _obalRmRaw==='function'?_obalRmRaw(code):0)) * _fU;
         var usePct = mrpThisMo > 0 ? usedMo/mrpThisMo*100 : (usedMo > 0 ? 100 : null);
         var useCol = usePct==null ? 'var(--muted)' : (usePct>=100 ? 'var(--red)' : (usePct>=80 ? 'var(--amber)' : 'var(--muted)'));
-        var bTop = first ? 'border-top:2px solid var(--border2);' : '';
-        var _td = 'padding:6px 8px;'+bTop+'border-bottom:1px solid var(--border)';
-        html += '<tr style="background:'+rowBg+'">'
-          + (first ? firstCells : '')
-          + '<td style="'+_td+';max-width:230px">'
-            + '<div style="font-size:9.5px;font-family:var(--mono);color:var(--muted)">' + en.item.productCode + '</div>'
-            + '<div style="font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + _dispName(en.item) + '">' + _dispName(en.item)
-              + (en.isManual ? ' <span class="badge b-amber" style="font-size:8.5px">Manual</span>' : '')
-              + (_isAdmin && multiItem ? ' <span onclick="splitSchedItem('+idx+','+enIdx+')" title="Pisahkan ke jadwal terpisah" style="cursor:pointer;font-size:10px;color:var(--accent)">↗</span>' : '')
-              + (_isAdmin ? ' <span onclick="removeSchedItem('+idx+','+enIdx+')" title="Hapus item" style="cursor:pointer;font-size:10px;color:var(--red)">✕</span>' : '')
-            + '</div>'
-          + '</td>'
-          + '<td style="'+_td+';font-family:var(--mono);font-size:10px;color:var(--muted)">' + ((en.pos&&en.pos.length) ? en.pos.map(function(p){return p.docNum;}).join('<br>') : '—') + '</td>'
-          + '<td style="'+_td+';padding-left:4px;padding-right:4px;text-align:right;white-space:nowrap">'
-            + (_isAdmin ? '<span onclick="_schedQtyStep(\''+uid+'\',-'+multiple+')" style="cursor:pointer;font-size:11px;color:var(--muted);padding:2px 3px;user-select:none" title="-'+n_id(multiple)+'">▼</span>' : '')
-            + '<input type="text" id="'+uid+'" value="' + n_id(dispQty) + '" style="width:70px;background:var(--bg4);border:1px solid var(--border2);color:var(--text);border-radius:3px;padding:2px 4px;font-size:11px;font-family:var(--mono);text-align:right" '
-            + 'data-sched-idx="' + idx + '" data-po-key="' + poKey + '" data-default-qty="' + reqQty + '" data-doi-now="' + doiNow + '" data-daily-usg="' + dailyUsg.toFixed(4) + '" data-multiple="' + multiple + '" '
-            + 'onchange="saveSchedQty(this)" onfocus="this.value=this.value.replace(/\\./g,\'\')" onblur="_schedQtyBlur(this)" title="Qty · multiple: '+n_id(multiple)+'"' + (_isAdmin?'':' disabled') + '>'
-            + (_isAdmin ? '<span onclick="_schedQtyStep(\''+uid+'\','+multiple+')" style="cursor:pointer;font-size:11px;color:var(--muted);padding:2px 3px;user-select:none" title="+'+n_id(multiple)+'">▲</span>' : '')
-            + (maxAvail > 0 ? '<div style="font-size:9px;color:var(--muted);padding-right:18px">max: '+n_id(maxAvail)+'</div>' : '')
-          + '</td>'
-          + '<td style="'+_td+';font-size:10px;color:var(--muted)">' + _enUOM(en) + '</td>'
-          + '<td style="'+_td+';white-space:nowrap;font-family:var(--mono);font-size:11px">'
-            + '<span style="color:'+doiColor+';font-weight:600">'+doiNow+'</span>'
-            + ' → <span id="doi-after-'+uid+'" style="color:'+doiAfterColor+';font-weight:600">'+doiAfter+'</span>'
-          + '</td>'
-          + '<td style="'+_td+';text-align:right;font-family:var(--mono);font-size:11px">' + (mrpThisMo > 0 ? n_id(Math.round(mrpThisMo)) : '—') + '</td>'
-          + '<td style="'+_td+';text-align:right;font-family:var(--mono);font-size:11px"><span style="color:'+useCol+';font-weight:600">' + (usePct==null ? '—' : n_id(Math.round(usePct))+'%') + '</span></td>'
-          + (first ? lastCells : '')
-          + '</tr>';
+        var multiItem = rendIdx.length > 1;
+        posArr.forEach(function(po, pi){
+          var cardFirst  = !cardFirstRowDone; cardFirstRowDone = true;
+          var entryFirst = (pi === 0);
+          var pkCanon = po ? _poKey(po) : '';
+          var oq = po ? (po.openQty||0) : 0;
+          var ovr = pkCanon ? (STATE.poOverrides[pkCanon] || STATE.poOverrides[po.docNum+'_'+po.itemCode] || {}) : {};
+          // Qty default = open qty PO (maksimal PO); override >0 dipakai; sisa 0 nyangkut diabaikan
+          var qVal = (ovr.reqQtyOverride != null && !(Number(ovr.reqQtyOverride)===0 && oq>0) && ovr.reqQtyOverride > 0) ? ovr.reqQtyOverride : oq;
+          var addDays = dailyUsg > 0 ? Math.round(qVal / dailyUsg) : 0;
+          var doiAfter = doiNow + addDays;
+          var doiAfterColor = doiAfter > doiNow ? 'var(--green)' : 'var(--muted)';
+          var rowDateISO = ovr.date || dateISO;
+          var cc = pkCanon ? _poConfData(pkCanon) : {};
+          var isConf = !!cc.confDate;
+          var uid = 'sqp_' + idx + '_' + enIdx + '_' + pi;
+          var bTop = cardFirst ? 'border-top:2px solid var(--border2);' : '';
+          var _td = 'padding:6px 8px;'+bTop+'border-bottom:1px solid var(--border)';
+          var _tdE = 'padding:6px 8px;'+(entryFirst&&cardFirst?'border-top:2px solid var(--border2);':'')+'border-bottom:1px solid var(--border)';
+          html += '<tr style="background:'+rowBg+'">'
+            + (cardFirst ? firstCells : '');
+          if(entryFirst){
+            html += '<td rowspan="'+nPos+'" style="'+_tdE+';max-width:220px;vertical-align:top">'
+              + '<div style="font-size:9.5px;font-family:var(--mono);color:var(--muted)">' + code + '</div>'
+              + '<div style="font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + _dispName(en.item) + '">' + _dispName(en.item)
+                + (en.isManual ? ' <span class="badge b-amber" style="font-size:8.5px">Manual</span>' : '')
+                + (_isAdmin && multiItem ? ' <span onclick="splitSchedItem('+idx+','+enIdx+')" title="Pisahkan ke jadwal terpisah" style="cursor:pointer;font-size:10px;color:var(--accent)">↗</span>' : '')
+                + (_isAdmin ? ' <span onclick="removeSchedItem('+idx+','+enIdx+')" title="Hapus item" style="cursor:pointer;font-size:10px;color:var(--red)">✕</span>' : '')
+              + '</div>'
+              + '<div style="font-size:9px;color:var(--muted);margin-top:1px">' + _enUOM(en) + '</div>'
+            + '</td>';
+          }
+          html += '<td style="'+_td+';font-family:var(--mono);font-size:10.5px;color:var(--muted)">' + (po ? po.docNum : '—') + '</td>'
+            + '<td style="'+_td+';padding-left:4px;padding-right:4px;text-align:right;white-space:nowrap">'
+              + (_isAdmin && po ? '<span onclick="_schedQtyStepPO(\''+uid+'\',-'+multiple+')" style="cursor:pointer;font-size:11px;color:var(--muted);padding:2px 3px;user-select:none" title="-'+n_id(multiple)+'">▼</span>' : '')
+              + '<input type="text" id="'+uid+'" class="sched-qty-po" value="' + n_id(qVal) + '" style="width:70px;background:var(--bg4);border:1px solid var(--border2);color:var(--text);border-radius:3px;padding:2px 4px;font-size:11px;font-family:var(--mono);text-align:right" '
+              + 'data-po-key-canon="' + pkCanon + '" data-max="' + oq + '" data-doi-now="' + doiNow + '" data-daily-usg="' + dailyUsg.toFixed(4) + '" data-multiple="' + multiple + '" '
+              + 'onchange="saveSchedQtyPO(this)" onfocus="this.value=this.value.replace(/\\./g,\'\')" onblur="_schedQtyBlur(this)" title="Qty · multiple: '+n_id(multiple)+'"' + ((_isAdmin && po)?'':' disabled') + '>'
+              + (_isAdmin && po ? '<span onclick="_schedQtyStepPO(\''+uid+'\','+multiple+')" style="cursor:pointer;font-size:11px;color:var(--muted);padding:2px 3px;user-select:none" title="+'+n_id(multiple)+'">▲</span>' : '')
+              + (oq > 0 ? '<div style="font-size:9px;color:var(--muted);padding-right:18px">max: '+n_id(oq)+'</div>' : '')
+            + '</td>'
+            + '<td style="'+_td+';white-space:nowrap;font-family:var(--mono);font-size:11px">'
+              + '<span style="color:'+doiColor+';font-weight:600">'+doiNow+'</span>'
+              + ' → <span id="doi-after-'+uid+'" style="color:'+doiAfterColor+';font-weight:600">'+doiAfter+'</span>'
+            + '</td>';
+          if(entryFirst){
+            html += '<td rowspan="'+nPos+'" style="'+_tdE+';text-align:right;font-family:var(--mono);font-size:11px;vertical-align:top">' + (stockNow > 0 ? n_id(Math.round(stockNow*100)/100) : '—') + '</td>'
+              + '<td rowspan="'+nPos+'" style="'+_tdE+';text-align:right;font-family:var(--mono);font-size:11px;vertical-align:top">' + (mrpThisMo > 0 ? n_id(Math.round(mrpThisMo)) : '—') + '</td>'
+              + '<td rowspan="'+nPos+'" style="'+_tdE+';text-align:right;font-family:var(--mono);font-size:11px;vertical-align:top"><span style="color:'+useCol+';font-weight:600">' + (usePct==null ? '—' : n_id(Math.round(usePct))+'%') + '</span></td>';
+          }
+          html += '<td style="'+_td+'">'
+              + '<input type="date" class="sched-row-date" value="' + rowDateISO + '" data-po-key-canon="' + pkCanon + '" data-sched-idx="' + idx + '" onchange="saveSchedRowDate(this)" ' + ((_isAdmin && po)?'':' disabled ')
+              + 'style="background:var(--bg4);border:1px solid var(--border2);color:var(--text);border-radius:3px;padding:2px 5px;font-size:10.5px;font-family:var(--mono)">'
+            + '</td>'
+            + '<td style="'+_td+';text-align:center">'
+              + '<input type="checkbox" class="sched-conf-chk" ' + (isConf?'checked':'') + ' data-po-key-canon="' + pkCanon + '" data-sched-idx="' + idx + '" onchange="schedRowConfirm(this)"' + ((_isAdmin && po)?'':' disabled') + ' style="cursor:pointer">'
+            + '</td>'
+            + '<td style="'+_td+'">'
+              + '<input type="date" class="sched-conf-date" value="' + (cc.confDate||'') + '" data-po-key-canon="' + pkCanon + '" data-sched-idx="' + idx + '" onchange="schedRowConfDate(this)" ' + ((_isAdmin && po && isConf)?'':' disabled ')
+              + 'style="background:var(--bg4);border:1px solid ' + (isConf?'rgba(20,184,166,.5)':'var(--border2)') + ';color:' + (isConf?'var(--teal)':'var(--text)') + ';border-radius:3px;padding:2px 5px;font-size:10.5px;font-family:var(--mono)">'
+            + '</td>'
+            + (cardFirst ? lastCells : '')
+            + '</tr>';
+        });
       });
     });
     html += '</tbody></table></div></div>';
@@ -12614,6 +12637,121 @@ function _getEntryReqQty(en) {
     return s + qty;
   }, 0);
 }
+// ── Handler tabel flat per-PO (rombak 10/11/26) ───────────────────────────────
+function saveSchedQtyPO(input) {
+  if(!_requireAdmin('edit jadwal')) return;
+  var pk = input.getAttribute('data-po-key-canon'); if(!pk) return;
+  var maxQ = parseFloat(input.getAttribute('data-max')) || 0;
+  var v = parseFloat(String(input.value).replace(/\./g,'')) || 0;
+  if(maxQ > 0 && v > maxQ) { v = maxQ; toast('Qty dibatasi open PO: ' + n_id(maxQ), 'inf'); }
+  input.value = n_id(v);
+  if(!STATE.poOverrides[pk]) STATE.poOverrides[pk] = {};
+  STATE.poOverrides[pk].reqQtyOverride = v;
+  localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
+  cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
+  _updateSchedDOI(input);
+}
+function _schedQtyStepPO(uid, step) {
+  var el = document.getElementById(uid); if(!el) return;
+  var raw = parseFloat(String(el.value).replace(/\./g,'')) || 0;
+  var maxQ = parseFloat(el.getAttribute('data-max')) || 0;
+  raw = Math.max(0, raw + step);
+  if(maxQ > 0 && raw > maxQ) { raw = maxQ; toast('Qty dibatasi open PO: ' + n_id(maxQ), 'inf'); }
+  el.value = n_id(raw);
+  saveSchedQtyPO(el);
+}
+function saveSchedRowDate(input) {
+  if(!_requireAdmin('edit jadwal')) return;
+  var pk = input.getAttribute('data-po-key-canon');
+  if(!pk || !input.value) return;
+  if(!STATE.poOverrides[pk]) STATE.poOverrides[pk] = {};
+  STATE.poOverrides[pk].date     = input.value;
+  STATE.poOverrides[pk].isManual = true;   // tanggal per-baris = pilihan user → approve TIDAK menimpa
+  STATE.poOverrides[pk].isAuto   = false;
+  STATE.poOverrides[pk].dateUpd  = new Date().toISOString();
+  localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
+  cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
+  toast('Tgl kirim PO disimpan ✓', 'ok');
+}
+// Ceklis konfirmasi inline — tulis ke store yang SAMA dengan modal lama & List
+// Pengiriman PO (po_confirmations + po_overrides, double-layer, confUpd full-ISO).
+function schedRowConfirm(chk) {
+  if(!_requireAdmin('konfirmasi supplier')) { chk.checked = !chk.checked; return; }
+  var pk  = chk.getAttribute('data-po-key-canon');
+  var idx = parseInt(chk.getAttribute('data-sched-idx'));
+  if(!pk) return;
+  var row = chk.closest('tr');
+  var dateInp = row ? row.querySelector('.sched-conf-date') : null;
+  var shipInp = row ? row.querySelector('.sched-row-date') : null;
+  var qtyInp  = row ? row.querySelector('.sched-qty-po') : null;
+  var nowISO = new Date().toISOString();
+  if(!STATE.poOverrides[pk]) STATE.poOverrides[pk] = {};
+  if(!STATE.poConfirmations) STATE.poConfirmations = {};
+  if(!STATE.poConfirmations[pk]) STATE.poConfirmations[pk] = {};
+  if(chk.checked) {
+    // Default tgl konfirmasi = tgl kirim baris ini (bisa diedit setelahnya)
+    var d = (dateInp && dateInp.value) || (shipInp && shipInp.value) || new Date().toISOString().split('T')[0];
+    var q = qtyInp ? (parseFloat(String(qtyInp.value).replace(/\./g,'')) || 0) : 0;
+    STATE.poOverrides[pk].confQty = q; STATE.poOverrides[pk].confDate = d;
+    STATE.poOverrides[pk].confUpd = nowISO; STATE.poOverrides[pk].confSource = 'schedule';
+    STATE.poConfirmations[pk].confQty = q; STATE.poConfirmations[pk].confDate = d;
+    STATE.poConfirmations[pk].confUpd = nowISO; STATE.poConfirmations[pk].confSource = 'schedule';
+  } else {
+    STATE.poOverrides[pk].confQty = ''; STATE.poOverrides[pk].confDate = '';
+    STATE.poOverrides[pk].confUpd = nowISO; STATE.poOverrides[pk].confSource = '';
+    delete STATE.poConfirmations[pk].confDate;
+    delete STATE.poConfirmations[pk].confQty;
+    delete STATE.poConfirmations[pk].confSource;
+    STATE.poConfirmations[pk].confUpd = nowISO; // clearing harus menang saat merge
+  }
+  localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
+  cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
+  localStorage.setItem('po_confirmations', JSON.stringify(STATE.poConfirmations));
+  cloudSave('po_confirmations', JSON.stringify(STATE.poConfirmations));
+  var _ic = pk.slice(pk.lastIndexOf('_') + 1);
+  if(_ic && typeof _refreshProjectionIncoming === 'function') _refreshProjectionIncoming(_ic);
+  _schedUpdateCardStatus(idx); // status card + feedback + re-render
+}
+function schedRowConfDate(input) {
+  if(!_requireAdmin('konfirmasi supplier')) return;
+  var pk  = input.getAttribute('data-po-key-canon');
+  var idx = parseInt(input.getAttribute('data-sched-idx'));
+  if(!pk || !input.value) return;
+  var nowISO = new Date().toISOString();
+  if(!STATE.poOverrides[pk]) STATE.poOverrides[pk] = {};
+  if(!STATE.poConfirmations) STATE.poConfirmations = {};
+  if(!STATE.poConfirmations[pk]) STATE.poConfirmations[pk] = {};
+  STATE.poOverrides[pk].confDate = input.value;    STATE.poOverrides[pk].confUpd = nowISO;
+  STATE.poConfirmations[pk].confDate = input.value; STATE.poConfirmations[pk].confUpd = nowISO;
+  localStorage.setItem('po_overrides', JSON.stringify(STATE.poOverrides));
+  cloudSave('po_overrides', JSON.stringify(STATE.poOverrides));
+  localStorage.setItem('po_confirmations', JSON.stringify(STATE.poConfirmations));
+  cloudSave('po_confirmations', JSON.stringify(STATE.poConfirmations));
+  var _ic = pk.slice(pk.lastIndexOf('_') + 1);
+  if(_ic && typeof _refreshProjectionIncoming === 'function') _refreshProjectionIncoming(_ic);
+  _schedUpdateCardStatus(idx);
+}
+// Hitung ulang status card dari konfirmasi per-PO: semua ✓ → confirmed, sebagian → partial
+function _schedUpdateCardStatus(idx) {
+  var e = STATE.scheduleData[idx]; if(!e) return;
+  var tot = 0, done = 0, lastD = '';
+  (e.entries||[]).forEach(function(en){
+    (en.pos||[]).forEach(function(po){
+      tot++;
+      var cc = _poConfData(_poKey(po));
+      if(cc.confDate) { done++; if(cc.confDate > lastD) lastD = cc.confDate; }
+    });
+  });
+  if(done === tot && tot > 0) e.status = 'confirmed';
+  else if(done > 0) e.status = 'partial';
+  else if(e.status === 'confirmed' || e.status === 'partial') e.status = 'approved';
+  e.feedback = done > 0 ? ('KONFIRM ' + lastD + ' (' + done + '/' + tot + ' PO)') : '';
+  if(done > 0) e.confDate = lastD;
+  e._upd = Date.now();
+  localStorage.setItem('schedule', JSON.stringify(STATE.scheduleData));
+  _cloudSaveSchedule(JSON.stringify(STATE.scheduleData));
+  renderSchedule();
+}
 function toggleApprove(idx) {
   var e = STATE.scheduleData[idx];
   var wasApproved = ['approved','sent','confirmed'].indexOf(e.status) >= 0;
@@ -12630,10 +12768,13 @@ function toggleApprove(idx) {
         var key = _poKey(po); // key kanonik (lineNum-aware)
         if(!STATE.poOverrides[key]) STATE.poOverrides[key] = {};
         if(nowApproved) {
-          STATE.poOverrides[key].date    = iso;
-          STATE.poOverrides[key].isManual = false;
-          STATE.poOverrides[key].isAuto   = true;
-          STATE.poOverrides[key].dateUpd  = _approveNow; // ← fix: set dateUpd supaya merge bisa track
+          // Tanggal per-baris yang diset manual user TIDAK ditimpa tanggal card
+          if(!(STATE.poOverrides[key].isManual && STATE.poOverrides[key].date)) {
+            STATE.poOverrides[key].date    = iso;
+            STATE.poOverrides[key].isManual = false;
+            STATE.poOverrides[key].isAuto   = true;
+            STATE.poOverrides[key].dateUpd  = _approveNow; // ← fix: set dateUpd supaya merge bisa track
+          }
         } else {
           // Un-approve → hapus tanggal (kalau bukan manual user) di SEMUA kandidat key,
           // termasuk key lama yang mungkin masih menyimpan tanggal dari versi sebelumnya
@@ -12771,10 +12912,12 @@ function approveAll() {
         (en.pos||[]).forEach(function(po){
           var key = _poKey(po); // key kanonik (lineNum-aware)
           if(!STATE.poOverrides[key]) STATE.poOverrides[key] = {};
-          STATE.poOverrides[key].date    = iso;
-          STATE.poOverrides[key].isManual = false;
-          STATE.poOverrides[key].isAuto   = true;
-          STATE.poOverrides[key].dateUpd  = new Date().toISOString();
+          if(!(STATE.poOverrides[key].isManual && STATE.poOverrides[key].date)) {
+            STATE.poOverrides[key].date    = iso;
+            STATE.poOverrides[key].isManual = false;
+            STATE.poOverrides[key].isAuto   = true;
+            STATE.poOverrides[key].dateUpd  = new Date().toISOString();
+          }
         });
       });
     }
