@@ -355,7 +355,7 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
         <div>
           <div class="logo-text" style="font-size:12px;font-weight:700;color:#fff;line-height:1.2">Material Planner</div>
           <div class="logo-text" style="font-size:10px;color:rgba(255,255,255,.45);margin-top:1px">Eka Jaya Internasional</div>
-          <div class="logo-text" id="app-build-label" style="font-size:9px;color:rgba(255,255,255,.3);margin-top:1px;font-family:monospace">build 2026-11-09.5</div>
+          <div class="logo-text" id="app-build-label" style="font-size:9px;color:rgba(255,255,255,.3);margin-top:1px;font-family:monospace">build 2026-11-10.7</div>
         </div>
       </div>
     </div>
@@ -12277,27 +12277,77 @@ function _renderScheduleImpl() {
     var d = new Date(date.includes('/') ? date.split('/').reverse().join('-') : date);
     var dayName = ['Min','Sen','Sel','Rab','Kam','Jum','Sab'][d.getDay()] || '';
     html += '<div class="sday"><div class="sday-hdr">📅 ' + date + ' <span style="color:var(--muted);font-weight:400">' + dayName + '</span><span class="sday-pill">' + entries.length + ' supplier</span>' + (dailyQty > 0 ? '<span class="sday-pill" style="background:var(--accent-bg);color:var(--accent)">Total qty: ' + n_id(dailyQty) + '</span>' : '') + '</div>';
+    // ── ROMBAK 10/11/26: tabel flat ala List Pengiriman PO (bukan kartu) ──────
+    // Logika TIDAK berubah: semua handler lama dipakai ulang (toggleApprove,
+    // saveSchedQty/_schedQtyStep/_updateSchedDOI dgn id & data-attr yang sama,
+    // saveSchedDate, openFbModal, previewWA, removeSchedule, split/removeSchedItem).
+    var _thS='padding:6px 8px;text-align:left;font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);white-space:nowrap';
+    html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11.5px">'
+      + '<thead><tr style="background:var(--bg3)">'
+      + '<th style="'+_thS+';width:26px"></th>'
+      + '<th style="'+_thS+'">Supplier</th>'
+      + '<th style="'+_thS+'">Item</th>'
+      + '<th style="'+_thS+'">No. PO</th>'
+      + '<th style="'+_thS+';text-align:right">Qty Kirim</th>'
+      + '<th style="'+_thS+'">UoM</th>'
+      + '<th style="'+_thS+'">DOI → Setelah</th>'
+      + '<th style="'+_thS+';text-align:right">MRP Bln Ini</th>'
+      + '<th style="'+_thS+';text-align:right">Usage % Bln Ini</th>'
+      + '<th style="'+_thS+'">Tgl Kirim</th>'
+      + '<th style="'+_thS+'">Aksi</th>'
+      + '</tr></thead><tbody>';
     entries.forEach(function(e){
       var idx = STATE.scheduleData.indexOf(e);
       var isOn = ['approved','sent','confirmed'].indexOf(e.status) >= 0;
       var sb = {pending:'<span class="badge b-gray">Pending</span>',approved:'<span class="badge b-green">Approved</span>',sent:'<span class="badge b-blue">Terkirim</span>',confirmed:'<span class="badge b-teal">Konfirmasi</span>',partial:'<span class="badge b-amber">Partial</span>'}[e.status]||'';
-      // Type badges
       var types = {};
       (e.entries||[]).forEach(function(en){ if(en.item && en.item.itemType) types[en.item.itemType]=true; });
       var typeTags = Object.keys(types).map(function(t){ return t==='RM'?'<span class="badge b-blue" style="font-size:9px">RM</span>': t==='PM'?'<span class="badge b-purple" style="font-size:9px">PM</span>': '<span class="badge b-green" style="font-size:9px">FG</span>'; }).join('');
-      // Editable date: convert DD/MM/YYYY → ISO for input[type=date]
       var dateISO = e.date ? (e.date.includes('/') ? e.date.split('/').reverse().join('-') : e.date) : '';
-      // Build per-item editable qty rows
-      var itemEditRows = (e.entries||[]).map(function(en, enIdx){
-        if(!en.item) return '';
+      var supLive = (function(){
+        var _firstDocNum = e.entries && e.entries[0] && e.entries[0].pos && e.entries[0].pos[0]
+          ? String(e.entries[0].pos[0].docNum) : null;
+        return (_firstDocNum && _supByDocNum[_firstDocNum]) ? _supByDocNum[_firstDocNum] : (e.supName||'—');
+      })();
+      // enIdx handler (split/remove) HARUS index asli di e.entries — jangan pakai index hasil filter
+      var entsAll = e.entries||[];
+      var rendIdx = []; entsAll.forEach(function(en,i){ if(en.item) rendIdx.push(i); });
+      var nRows = Math.max(rendIdx.length, 1);
+      var rowBg = isOn ? 'rgba(34,197,94,.045)' : 'transparent';
+      var _tdF = 'padding:8px;vertical-align:top;border-bottom:1px solid var(--border);border-top:2px solid var(--border2)';
+      var firstCells =
+          '<td rowspan="'+nRows+'" style="'+_tdF+';padding-left:6px;padding-right:2px">'
+          + '<div class="chk ' + (isOn?'on':'') + '" onclick="' + (_isAdmin?'toggleApprove('+idx+')':'_requireAdmin(\'approve\')') + '">' + (isOn?'✓':'') + '</div></td>'
+        + '<td rowspan="'+nRows+'" style="'+_tdF+';max-width:170px">'
+          + '<div style="font-size:12px;font-weight:500">' + supLive + '</div>'
+          + '<div style="margin-top:3px;display:flex;gap:4px;flex-wrap:wrap">' + sb + typeTags + (e.isManual?'<span class="badge b-amber" style="font-size:9px">Manual</span>':'') + '</div>'
+          + (e.feedback ? '<div class="sinfo-fb">✓ ' + e.feedback + '</div>' : '')
+          + (e.coverageDate ? '<div style="font-size:9.5px;color:var(--muted);margin-top:2px">Coverage: ' + e.coverageDate + '</div>' : '')
+        + '</td>';
+      var lastCells =
+          '<td rowspan="'+nRows+'" style="'+_tdF+'">'
+          + '<input type="date" value="' + dateISO + '" data-sched-idx="' + idx + '" onchange="saveSchedDate(this)" ' + (_isAdmin?'':' disabled ')
+          + 'style="background:var(--bg4);border:1px solid var(--border2);color:var(--text);border-radius:3px;padding:2px 6px;font-size:11px;font-family:var(--mono)">'
+        + '</td>'
+        + '<td rowspan="'+nRows+'" style="'+_tdF+';white-space:nowrap">'
+          + '<button class="btn btn-sm" onclick="openFbModal(' + idx + ')" title="Form konfirmasi">📝</button> '
+          + '<button class="btn btn-sm btn-green" onclick="previewWA(' + idx + ')" title="Preview WA">📲</button> '
+          + '<button class="btn btn-sm btn-red" onclick="removeSchedule(' + idx + ')" title="Hapus jadwal">✕</button>'
+        + '</td>';
+      if(!rendIdx.length){
+        html += '<tr style="background:'+rowBg+'">' + firstCells
+          + '<td colspan="7" style="'+_tdF+';color:var(--muted)">— tidak ada item —</td>'
+          + lastCells + '</tr>';
+        return;
+      }
+      rendIdx.forEach(function(enIdx, rpos){
+        var en = entsAll[enIdx];
+        var first = (rpos === 0);
         var po = en.pos && en.pos[0];
         var poKey = po ? (po.docNum + '_' + po.itemCode) : '';
-        var ovr = po ? _poOvr(po) : {};
         var reqQty = en.pos ? en.pos.reduce(function(s,p){return s+(p.openQty||0);},0) : 0;
         var dispQty = _getEntryReqQty(en);
-        // DOI calculation: DOI max + (incoming / daily usage)
         var proj = STATE.projectionData.find(function(x){ return x.productCode === en.item.productCode; });
-        // Pakai doiAfterIncoming (sudah hitung confirmed PO) bukan doiFC (stock saja)
         var doiNow = proj ? Math.round(proj.doiAfterIncoming != null ? proj.doiAfterIncoming : (proj.doiFC||0)) : 0;
         var daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth()+1, 0).getDate();
         var dailyUsg = (proj && proj.actualMRP > 0) ? proj.actualMRP / daysInMonth : 0;
@@ -12305,66 +12355,57 @@ function _renderScheduleImpl() {
         var doiAfter = doiNow + addDays;
         var doiColor = doiNow < 7 ? 'var(--red)' : (doiNow < 14 ? 'var(--amber)' : 'var(--muted)');
         var doiAfterColor = doiAfter > doiNow ? 'var(--green)' : 'var(--muted)';
-        // Multiple from master data — konversi gram→kg kalau UOM gram
         var master = STATE.masterData && STATE.masterData[en.item.productCode];
         var multiple = master ? (master.multiple || 1) : 1;
         var masterUOM = master ? (master.uom||'').toUpperCase() : '';
         if(multiple > 0 && /^(G|GR|GRAM)$/.test(masterUOM)) multiple = multiple / 1000;
         if(multiple < 1) multiple = 1;
-        // Max available from all POs for this item+supplier
         var allItemPOs = STATE.poData.filter(function(x){
           return x.itemCode === en.item.productCode && (x.supplierName||'').toLowerCase() === (e.supName||'').toLowerCase();
         });
         var maxAvail = allItemPOs.reduce(function(s,x){ return s+(x.openQty||0); }, 0);
-        var multiItem = (e.entries||[]).length > 1;
+        var multiItem = rendIdx.length > 1;
         var uid = 'sq_' + idx + '_' + enIdx;
-        return '<div style="display:flex;align-items:center;gap:4px;margin-top:4px;padding:3px 0;border-bottom:0.5px solid var(--border)">' +
-          '<div style="flex:1;min-width:0;overflow:hidden">' +
-            '<div style="font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + _dispName(en.item) + (en.isManual ? ' <span style="font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(245,158,11,.15);color:var(--amber);font-weight:600">Manual</span>' : '') + '</div>' +
-            '<div style="font-size:9px;color:var(--muted);display:flex;gap:6px;margin-top:1px">' +
-              '<span>DOI: <span style="color:'+doiColor+';font-weight:500">'+doiNow+'</span></span>' +
-              '<span>→ <span id="doi-after-'+uid+'" style="color:'+doiAfterColor+';font-weight:500">'+doiAfter+'</span></span>' +
-              (maxAvail > 0 ? '<span>max: '+n_id(maxAvail)+'</span>' : '') +
-            '</div>' +
-          '</div>' +
-          '<div style="display:flex;align-items:center;gap:1px">' +
-            (_isAdmin ? '<span onclick="_schedQtyStep(\''+uid+'\',-'+multiple+')" style="cursor:pointer;font-size:11px;color:var(--muted);padding:2px 3px;user-select:none" title="-'+n_id(multiple)+'">▼</span>' : '') +
-            '<input type="text" id="'+uid+'" value="' + n_id(dispQty) + '" style="width:70px;background:var(--bg4);border:1px solid var(--border2);color:var(--text);border-radius:3px;padding:2px 4px;font-size:11px;font-family:var(--mono);text-align:right" ' +
-            'data-sched-idx="' + idx + '" data-po-key="' + poKey + '" data-default-qty="' + reqQty + '" data-doi-now="' + doiNow + '" data-daily-usg="' + dailyUsg.toFixed(4) + '" data-multiple="' + multiple + '" ' +
-            'onchange="saveSchedQty(this)" onfocus="this.value=this.value.replace(/\\./g,\'\')" onblur="_schedQtyBlur(this)" title="Qty · multiple: '+n_id(multiple)+'"' + (_isAdmin?'':' disabled') + '>' +
-            (_isAdmin ? '<span onclick="_schedQtyStep(\''+uid+'\','+multiple+')" style="cursor:pointer;font-size:11px;color:var(--muted);padding:2px 3px;user-select:none" title="+'+n_id(multiple)+'">▲</span>' : '') +
-          '</div>' +
-          '<span style="font-size:9px;color:var(--muted);width:22px">' + _enUOM(en) + '</span>' +
-          (_isAdmin && multiItem ? '<span onclick="splitSchedItem('+idx+','+enIdx+')" title="Pisahkan" style="cursor:pointer;font-size:10px;color:var(--accent);padding:1px 2px">↗</span>' : '') +
-          (_isAdmin ? '<span onclick="removeSchedItem('+idx+','+enIdx+')" title="Hapus item" style="cursor:pointer;font-size:10px;color:var(--red);padding:1px 2px">✕</span>' : '') +
-        '</div>';
-      }).join('');
-      html += '<div class="scard ' + e.status + '">' +
-        '<div class="chk ' + (isOn?'on':'') + '" onclick="' + (_isAdmin?'toggleApprove('+idx+')':'_requireAdmin(\'approve\')') + '">' + (isOn?'✓':'') + '</div>' +
-        '<div class="sinfo" style="min-width:0">' +
-          '<div class="sinfo-name">' + (function(){
-            // Ambil nama supplier dari live poData berdasarkan PO pertama di card
-            var _firstDocNum = e.entries && e.entries[0] && e.entries[0].pos && e.entries[0].pos[0]
-              ? String(e.entries[0].pos[0].docNum) : null;
-            return (_firstDocNum && _supByDocNum[_firstDocNum]) ? _supByDocNum[_firstDocNum] : e.supName;
-          })() + ' ' + sb + typeTags + (e.isManual?'<span class="badge b-amber" style="margin-left:5px">Manual</span>':'') + '</div>' +
-          '<div style="display:flex;align-items:center;gap:8px;margin-top:4px">' +
-            '<span style="font-size:10.5px;color:var(--muted)">Tgl kirim:</span>' +
-            '<input type="date" value="' + dateISO + '" data-sched-idx="' + idx + '" onchange="saveSchedDate(this)" ' + (_isAdmin?'':' disabled ') +
-            'style="background:var(--bg4);border:1px solid var(--border2);color:var(--text);border-radius:3px;padding:2px 6px;font-size:11px;font-family:var(--mono)">' +
-          '</div>' +
-          itemEditRows +
-          (e.feedback ? '<div class="sinfo-fb" style="margin-top:3px">✓ ' + e.feedback + '</div>' : '') +
-          (e.coverageDate ? '<div style="font-size:10px;color:var(--muted);margin-top:2px">Coverage tercepat: ' + e.coverageDate + '</div>' : '') +
-        '</div>' +
-        '<div class="sacts">' +
-          '<button class="btn btn-sm" onclick="openFbModal(' + idx + ')">📝</button>' +
-          '<button class="btn btn-sm btn-green" onclick="previewWA(' + idx + ')">📲</button>' +
-          '<button class="btn btn-sm btn-red" onclick="removeSchedule(' + idx + ')">✕</button>' +
-        '</div>' +
-      '</div>';
+        // MRP bulan ini & usage % bulan ini (matcom SAP + Obal WIP vs MRP bln ini)
+        var mrpThisMo = proj ? (proj.actualMRP||0) : 0;
+        var _mmU = (STATE.matcomMonthly||{})[en.item.productCode]||{};
+        var _fU = (/^(G|GR|GRAM)$/.test(masterUOM)) ? 0.001 : 1;
+        var usedMo = ((_mmU[new Date().getMonth()+1]||0) + (typeof _obalRmRaw==='function'?_obalRmRaw(en.item.productCode):0)) * _fU;
+        var usePct = mrpThisMo > 0 ? usedMo/mrpThisMo*100 : (usedMo > 0 ? 100 : null);
+        var useCol = usePct==null ? 'var(--muted)' : (usePct>=100 ? 'var(--red)' : (usePct>=80 ? 'var(--amber)' : 'var(--muted)'));
+        var bTop = first ? 'border-top:2px solid var(--border2);' : '';
+        var _td = 'padding:6px 8px;'+bTop+'border-bottom:1px solid var(--border)';
+        html += '<tr style="background:'+rowBg+'">'
+          + (first ? firstCells : '')
+          + '<td style="'+_td+';max-width:230px">'
+            + '<div style="font-size:9.5px;font-family:var(--mono);color:var(--muted)">' + en.item.productCode + '</div>'
+            + '<div style="font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + _dispName(en.item) + '">' + _dispName(en.item)
+              + (en.isManual ? ' <span class="badge b-amber" style="font-size:8.5px">Manual</span>' : '')
+              + (_isAdmin && multiItem ? ' <span onclick="splitSchedItem('+idx+','+enIdx+')" title="Pisahkan ke jadwal terpisah" style="cursor:pointer;font-size:10px;color:var(--accent)">↗</span>' : '')
+              + (_isAdmin ? ' <span onclick="removeSchedItem('+idx+','+enIdx+')" title="Hapus item" style="cursor:pointer;font-size:10px;color:var(--red)">✕</span>' : '')
+            + '</div>'
+          + '</td>'
+          + '<td style="'+_td+';font-family:var(--mono);font-size:10px;color:var(--muted)">' + ((en.pos&&en.pos.length) ? en.pos.map(function(p){return p.docNum;}).join('<br>') : '—') + '</td>'
+          + '<td style="'+_td+';padding-left:4px;padding-right:4px;text-align:right;white-space:nowrap">'
+            + (_isAdmin ? '<span onclick="_schedQtyStep(\''+uid+'\',-'+multiple+')" style="cursor:pointer;font-size:11px;color:var(--muted);padding:2px 3px;user-select:none" title="-'+n_id(multiple)+'">▼</span>' : '')
+            + '<input type="text" id="'+uid+'" value="' + n_id(dispQty) + '" style="width:70px;background:var(--bg4);border:1px solid var(--border2);color:var(--text);border-radius:3px;padding:2px 4px;font-size:11px;font-family:var(--mono);text-align:right" '
+            + 'data-sched-idx="' + idx + '" data-po-key="' + poKey + '" data-default-qty="' + reqQty + '" data-doi-now="' + doiNow + '" data-daily-usg="' + dailyUsg.toFixed(4) + '" data-multiple="' + multiple + '" '
+            + 'onchange="saveSchedQty(this)" onfocus="this.value=this.value.replace(/\\./g,\'\')" onblur="_schedQtyBlur(this)" title="Qty · multiple: '+n_id(multiple)+'"' + (_isAdmin?'':' disabled') + '>'
+            + (_isAdmin ? '<span onclick="_schedQtyStep(\''+uid+'\','+multiple+')" style="cursor:pointer;font-size:11px;color:var(--muted);padding:2px 3px;user-select:none" title="+'+n_id(multiple)+'">▲</span>' : '')
+            + (maxAvail > 0 ? '<div style="font-size:9px;color:var(--muted);padding-right:18px">max: '+n_id(maxAvail)+'</div>' : '')
+          + '</td>'
+          + '<td style="'+_td+';font-size:10px;color:var(--muted)">' + _enUOM(en) + '</td>'
+          + '<td style="'+_td+';white-space:nowrap;font-family:var(--mono);font-size:11px">'
+            + '<span style="color:'+doiColor+';font-weight:600">'+doiNow+'</span>'
+            + ' → <span id="doi-after-'+uid+'" style="color:'+doiAfterColor+';font-weight:600">'+doiAfter+'</span>'
+          + '</td>'
+          + '<td style="'+_td+';text-align:right;font-family:var(--mono);font-size:11px">' + (mrpThisMo > 0 ? n_id(Math.round(mrpThisMo)) : '—') + '</td>'
+          + '<td style="'+_td+';text-align:right;font-family:var(--mono);font-size:11px"><span style="color:'+useCol+';font-weight:600">' + (usePct==null ? '—' : n_id(Math.round(usePct))+'%') + '</span></td>'
+          + (first ? lastCells : '')
+          + '</tr>';
+      });
     });
-    html += '</div>';
+    html += '</tbody></table></div></div>';
   });
   el.innerHTML = html;
 }
@@ -12955,9 +12996,12 @@ function openFbModal(idx) {
       var poKeyL2 = po.docNum && po.docNum !== '—' ? (po.docNum + '_' + itemCode) : null;
       var ovr = poKey && (STATE.poOverrides[poKey] || (poKeyL2 && STATE.poOverrides[poKeyL2])) || {};
       var origQty = po.openQty || 0;
-      // reqQtyOverride = 0 artinya PO ini di-nol/dihapus dari card ini secara eksplisit → skip baris
-      // Menampilkannya dengan qty SAP asli (origQty) menyesatkan — PO ini bukan bagian dari pengiriman ini
-      if(ovr.reqQtyOverride !== undefined && ovr.reqQtyOverride === 0) return;
+      // ⭐ Selaras dengan _getEntryReqQty (tampilan kartu): override 0 yang "nyangkut"
+      // DIABAIKAN selama open qty SAP masih > 0 — sisa dari kartu lama yang dihapus/
+      // di-generate ulang (ikut tersync antar laptop). Dulu modal men-skip barisnya
+      // → kartu menampilkan item tapi form konfirmasi KOSONG. Skip hanya kalau
+      // open qty memang sudah habis.
+      if(ovr.reqQtyOverride !== undefined && ovr.reqQtyOverride === 0 && !(origQty > 0)) return;
       // reqQtyOverride > 0: pakai override; undefined: pakai origQty dari SAP
       var reqQty = (ovr.reqQtyOverride !== undefined && ovr.reqQtyOverride > 0) ? ovr.reqQtyOverride : origQty;
       var _ccM = _poConfData(poKey);
