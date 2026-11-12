@@ -3321,7 +3321,7 @@ var CLOUD_KEYS = [
   'admin_user','admin_pass',
   'master_data','mrp_data','realname_data','pallet_pm','pallet_rm',
   'mps_compare_result',
-  'wh_capacity_rm','wh_capacity_pm','update_deldate_data',
+  'wh_capacity_rm','wh_capacity_pm','update_deldate_data','update_deldate_split',
   'fc_propose','fc_ospo_ovr','fc_ospr_ovr','fc_konf_ovr','fc_doi2','fc_doi2_suppliers','mrp_source',
   'fc_autopropose','fc_doi_item_month_ovr',
   'matcom_monthly','matcom_parent','matcom_data','matcom_count','last_matcom_sync',
@@ -3970,6 +3970,9 @@ function _applyRealtimeChanges(keys, vals, docTs) {
           try { STATE.projectionSnapshots = JSON.parse(val || '{}'); } catch(e) {} break;
         case 'update_deldate_data':
           try { STATE.updateDelDateData = JSON.parse(val || '{}'); if(document.getElementById('pg-po')&&document.getElementById('pg-po').classList.contains('active')) renderPO(); } catch(e) {}
+          break;
+        case 'update_deldate_split':
+          try { STATE.updateDelDateSplit = JSON.parse(val || '{}'); if(document.getElementById('pg-po')&&document.getElementById('pg-po').classList.contains('active')) renderPO(); } catch(e) {}
           break;
         case 'ai_model':
           if(val){_aiModel=val; var sel3=document.getElementById('cfg-ai-model'); if(sel3) sel3.value=val;
@@ -4721,7 +4724,10 @@ var STATE = {
   projComments: JSON.parse(localStorage.getItem('proj_comments') || '{}'),
   palletPM: JSON.parse(localStorage.getItem('pallet_pm') || 'null'),
   palletRM: JSON.parse(localStorage.getItem('pallet_rm') || 'null'),
-  updateDelDateData:  JSON.parse(localStorage.getItem('update_deldate_data')  || '{}')
+  updateDelDateData:  JSON.parse(localStorage.getItem('update_deldate_data')  || '{}'),
+  // Pecahan Update DelDate per PO line: { poKey: [{date:'YYYY-MM-DD'|'', qty, kind}] }
+  // kind: 'mrp' (dari forecast), 'manual' (Tgl Request Kirim), 'beyond' (di luar horizon), 'excess' (tidak dibutuhkan)
+  updateDelDateSplit: JSON.parse(localStorage.getItem('update_deldate_split') || '{}')
 };
 
 var _whCapacityRM = parseInt(localStorage.getItem('wh_capacity_rm') || '0') || 0;
@@ -8380,6 +8386,16 @@ function generateUpdateDelDate() {
   });
 
   var newUpdateDelDate={};
+  // Pecahan per PO line: 1 PO bisa menutup kebutuhan beberapa bulan (mis. Nov 500 + Des 500).
+  // Kolom Update DelDate tetap = tanggal porsi pertama (perilaku lama tidak berubah).
+  var newUddSplit={};
+  function _uddAddPortion(k, date, qty, kind){
+    if(!(qty > 0)) return;
+    var arr = newUddSplit[k] || (newUddSplit[k] = []);
+    var last = arr[arr.length-1];
+    if(last && last.date === date && last.kind === kind){ last.qty += qty; return; }
+    arr.push({date: date, qty: qty, kind: kind});
+  }
 
   Object.keys(byItem).forEach(function(code){
     var pos=byItem[code];
@@ -8404,6 +8420,22 @@ function generateUpdateDelDate() {
     });
 
     var pPtr = 0;
+
+    // Tanggal butuh untuk bucket bulan m (rumus sama dengan porsi pertama di bawah)
+    function _uddDateForBucket(m){
+      var mn = FC_MONTH_NUMS[m];
+      var _schStartNum = (FC_MONTH_NUMS && FC_MONTH_NUMS.length) ? FC_MONTH_NUMS[0] : (new Date().getMonth()+1);
+      var _mnYear = mn < _schStartNum ? curYear + 1 : curYear;
+      var days_m   = daysArr[m] || 30;
+      var req_m    = fcReq2[m]  || 0;
+      var dailyReq = req_m > 0 ? req_m / days_m : 0;
+      var startSt = m === 0 ? sohNow : (fcStock[m-1] || 0);
+      if(dailyReq <= 0) return _mnYear+'-'+String(mn).padStart(2,'0')+'-01';
+      var D = (startSt - dailyReq * targetDOI) / dailyReq;
+      var dayN = D <= 0 ? 1 : Math.min(Math.ceil(D), days_m);
+      var dt = new Date(_mnYear, mn-1, dayN);
+      return dt <= today ? todayISO : _mnYear+'-'+String(mn).padStart(2,'0')+'-'+String(dayN).padStart(2,'0');
+    }
 
     // Pre-compute outside-horizon state sekali per item (BUKAN per PO)
     // Bug lama: extReq & extStockPrev dideklarasi di dalam pos.forEach → reset setiap PO
@@ -8435,6 +8467,7 @@ function generateUpdateDelDate() {
       var _ovrUDD = STATE.poOverrides[key] || STATE.poOverrides[keyLegacy];
       if(_ovrUDD && _ovrUDD.date){
         newUpdateDelDate[key] = _ovrUDD.date;
+        _uddAddPortion(key, _ovrUDD.date, poQty, 'manual');
         // Drain poQty across buckets — sama seperti kasus non-manual
         var _drain0 = poQty;
         while(_drain0 > 0 && pPtr < placements.length) {
@@ -8488,20 +8521,27 @@ function generateUpdateDelDate() {
         }
 
         newUpdateDelDate[key] = assignedISO;
+        var _firstPortion = true;
         // Drain poQty ke multiple buckets — kalau PO qty > satu bulan, overflow dikurangi dari bulan berikutnya
         // Bug lama: hanya pl.remaining -= poQty → pPtr++ satu kali → overflow tidak dikurangi dari bucket berikut
         // → PO berikutnya masuk bulan yang sebenernya sudah di-cover oleh PO ini
         var _drain = poQty;
         while(_drain > 0 && pPtr < placements.length) {
+          var _bDate = _firstPortion ? assignedISO : _uddDateForBucket(placements[pPtr].idx);
+          _firstPortion = false;
           if(placements[pPtr].remaining > _drain) {
+            _uddAddPortion(key, _bDate, _drain, 'mrp');
             placements[pPtr].remaining -= _drain;
             _drain = 0;
           } else {
+            _uddAddPortion(key, _bDate, placements[pPtr].remaining, 'mrp');
             _drain -= placements[pPtr].remaining;
             placements[pPtr].remaining = 0;
             pPtr++;
           }
         }
+        // Sisa qty PO yang tidak dibutuhkan dalam horizon forecast
+        if(_drain > 0) _uddAddPortion(key, '', _drain, 'excess');
       } else {
         // PO di luar horizon forecast → distribusikan ke 2027 dengan state bersama antar PO
         // extReq, extStockPrev, extMonStart sudah dihitung di atas (per-item, bukan per-PO)
@@ -8536,6 +8576,7 @@ function generateUpdateDelDate() {
         }
 
         newUpdateDelDate[key] = foundISO || '2027-12-31';
+        _uddAddPortion(key, foundISO || '', poQty, foundISO ? 'beyond' : 'excess');
       }
     });
   });
@@ -8552,6 +8593,8 @@ function generateUpdateDelDate() {
       if(!d || d === '2027-01-01') { prevISO = d; return; }
       if(prevISO && d < prevISO) {
         newUpdateDelDate[key] = prevISO; // naikkan ke tanggal PO sebelumnya
+        // pecahan ikut dinaikkan supaya konsisten dengan kolom Update DelDate
+        (newUddSplit[key]||[]).forEach(function(pt){ if(pt.date && pt.date < prevISO) pt.date = prevISO; });
         d = prevISO;
       }
       prevISO = d;
@@ -8561,6 +8604,9 @@ function generateUpdateDelDate() {
   STATE.updateDelDateData=newUpdateDelDate;
   localStorage.setItem('update_deldate_data',JSON.stringify(newUpdateDelDate));
   cloudSave('update_deldate_data',JSON.stringify(newUpdateDelDate));
+  STATE.updateDelDateSplit=newUddSplit;
+  localStorage.setItem('update_deldate_split',JSON.stringify(newUddSplit));
+  cloudSave('update_deldate_split',JSON.stringify(newUddSplit));
   _saveGenTimestamp('gen_ts_update_deldate','po-udd-ts');
   renderPO();
   toast('Update DelDate di-generate: '+Object.keys(newUpdateDelDate).length+' PO ✓','ok');
@@ -8609,7 +8655,7 @@ function exportPOGSheet() {
     +'<input id="update-deldate-gs-url" type="text" value="'+url+'" placeholder="https://script.google.com/macros/s/..." style="width:100%;font-size:12px"></div>'
     +'<div class="fg"><label style="font-size:11px">Token</label>'
     +'<input id="update-deldate-gs-tok" type="text" value="'+token+'" placeholder="token" style="width:100%;font-size:12px"></div>'
-    +'<div style="font-size:11px;color:var(--muted);margin-bottom:12px">Script harus menerima POST dengan payload <code>{token, rows, headers}</code> dan menulis ke sheet "List PO Update DelDate".</div>'
+    +'<div style="font-size:11px;color:var(--muted);margin-bottom:12px">Script harus menerima POST dengan payload <code>{token, rows, headers, splits}</code>: rows → sheet "List PO Update DelDate", splits (pecahan per PO line) → sheet "MRP_Schedule".</div>'
     +'<div style="display:flex;gap:8px;justify-content:flex-end">'
     +'<button class="btn" onclick="this.closest(\'div[style*=fixed]\').remove()">Batal</button>'
     +'<button class="btn btn-primary" onclick="_doExportPOGSheet()">Export</button>'
@@ -8644,10 +8690,22 @@ function _doExportPOGSheet() {
     ];
   });
 
+  // Pecahan Update DelDate per PO line (untuk split jadwal kiriman di GSheet PO_Data)
+  var splits = [];
+  STATE.poData.forEach(function(p){
+    var key = _poKey(p); var keyL = p.docNum+'_'+p.itemCode;
+    var arr = (STATE.updateDelDateSplit && (STATE.updateDelDateSplit[key] || STATE.updateDelDateSplit[keyL])) || null;
+    if(!arr || !arr.length) return;
+    arr.forEach(function(pt, i){
+      splits.push({ docNum: String(p.docNum||''), lineNum: String(p.lineNum==null?'':p.lineNum), itemCode: String(p.itemCode||''),
+                    seq: i+1, date: pt.date||'', qty: pt.qty||0, kind: pt.kind||'mrp', openQty: p.openQty||0 });
+    });
+  });
+
   toast('Mengirim ke GSheet…', 'inf');
   fetch(url, {
     method: 'POST',
-    body: JSON.stringify({ token: token, headers: headers, rows: rows }),
+    body: JSON.stringify({ token: token, headers: headers, rows: rows, splits: splits, generatedAt: localStorage.getItem('gen_ts_update_deldate') || '' }),
     headers: { 'Content-Type': 'text/plain' }
   }).then(function(r){ return r.json(); })
     .then(function(d){
@@ -8733,6 +8791,11 @@ function renderPO() {
     var _uddHas = !!(STATE.updateDelDateData && (STATE.updateDelDateData[key]||STATE.updateDelDateData[keyL2]));
     var uddStyle = ovr.date ? 'color:var(--teal)' : (_uddHas ? 'color:var(--text)' : 'color:var(--hint)');
     var uddTitle = ovr.date ? 'Dari Tgl Request Kirim' : (_uddHas ? 'Generated dari forecast' : 'Belum di-generate');
+    var _uddSp = (STATE.updateDelDateSplit && (STATE.updateDelDateSplit[key]||STATE.updateDelDateSplit[keyL2])) || null;
+    if(_uddSp && _uddSp.length > 1){
+      uddTitle += ' | Pecahan: ' + _uddSp.map(function(pt){ return n_id(pt.qty) + ' @ ' + (pt.date ? pt.date.split('-').reverse().join('/') : 'tidak dibutuhkan'); }).join('; ');
+      uddDisp += ' (+' + (_uddSp.length-1) + ')';
+    }
     row += '<td class="mono update-deldate-cell" style="font-size:10.5px;text-align:center;' + uddStyle + '" title="' + uddTitle + '">' + uddDisp + '</td>';
     // Notes — editable
     row += '<td>'
@@ -14771,6 +14834,7 @@ function _appInit() {
   STATE.palletPM         = JSON.parse(localStorage.getItem('pallet_pm')       || 'null');
   STATE.palletRM         = JSON.parse(localStorage.getItem('pallet_rm')       || 'null');
   STATE.updateDelDateData= JSON.parse(localStorage.getItem('update_deldate_data') || '{}');
+  STATE.updateDelDateSplit= JSON.parse(localStorage.getItem('update_deldate_split') || '{}');
   // Build supplier cache untuk DOI per item (import vs domestik)
   // Tanpa ini, _fcGetDOIForItem salah kalau Forecast belum dibuka dulu
   if(STATE.masterData) {
