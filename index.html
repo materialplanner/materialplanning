@@ -698,6 +698,8 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
       <span id="po-udd-ts" style="font-size:10px;color:var(--muted)"></span>
       <button class="btn btn-sm" onclick="exportPOExcel()" style="background:#22c55e;color:#fff">⬇ Export XLSX</button>
       <button class="btn btn-sm" onclick="exportPOGSheet()" style="background:#4285f4;color:#fff">⬆ GSheet</button>
+      <button class="btn btn-sm" onclick="pullSupplierConfFromRMD()" style="background:#16a34a;color:#fff" title="Tarik konfirmasi supplier (Konfirmasi ETA EJI + Qty Konfirm) dari Raw Material Dashboard. Porsi yang sudah dikonfirmasi tidak diubah saat Generate Update DelDate.">⬇ Konfirmasi Supplier</button>
+      <span id="po-rmdconf-ts" style="font-size:10px;color:var(--muted)"></span>
       <button class="btn btn-sm btn-red" onclick="resetPOOverrides()">🗑 Reset Semua</button>
     </div>
   </div>
@@ -3321,7 +3323,7 @@ var CLOUD_KEYS = [
   'admin_user','admin_pass',
   'master_data','mrp_data','realname_data','pallet_pm','pallet_rm',
   'mps_compare_result',
-  'wh_capacity_rm','wh_capacity_pm','update_deldate_data','update_deldate_split',
+  'wh_capacity_rm','wh_capacity_pm','update_deldate_data','update_deldate_split','rmd_supplier_conf',
   'fc_propose','fc_ospo_ovr','fc_ospr_ovr','fc_konf_ovr','fc_doi2','fc_doi2_suppliers','mrp_source',
   'fc_autopropose','fc_doi_item_month_ovr',
   'matcom_monthly','matcom_parent','matcom_data','matcom_count','last_matcom_sync',
@@ -4726,7 +4728,8 @@ var STATE = {
   palletRM: JSON.parse(localStorage.getItem('pallet_rm') || 'null'),
   updateDelDateData:  JSON.parse(localStorage.getItem('update_deldate_data')  || '{}'),
   // Pecahan Update DelDate per PO line: { poKey: [{date:'YYYY-MM-DD'|'', qty, kind}] }
-  // kind: 'mrp' (dari forecast), 'manual' (Tgl Request Kirim), 'beyond' (di luar horizon), 'excess' (tidak dibutuhkan)
+  // kind: 'mrp' (dari forecast), 'manual' (Tgl Request Kirim), 'beyond' (di luar horizon), 'excess' (tidak dibutuhkan),
+  //       'confirmed' (sudah dikonfirmasi supplier di RMD — tanggal dikunci)
   updateDelDateSplit: JSON.parse(localStorage.getItem('update_deldate_split') || '{}')
 };
 
@@ -4783,7 +4786,7 @@ function showPage(name, el) {
     dashboard: function(){updateDashStats();setTimeout(_matchDashColumns,100)},
     projection: function(){setUrgentCutoff();renderProjection();},
     forecast: function(){_fcPopulateDatePicker();renderForecast();_loadGenTimestamp('gen_ts_propose_pr','fc-gen-ts');},
-    po: function(){if(!STATE.poData.length)loadPO();else renderPO();_loadGenTimestamp('gen_ts_update_deldate','po-udd-ts');},
+    po: function(){if(!STATE.poData.length)loadPO();else renderPO();_loadGenTimestamp('gen_ts_update_deldate','po-udd-ts');if(typeof _rmdConfRenderTs==='function')_rmdConfRenderTs();},
     schedule: renderSchedule,
     'daily-list': function(){initDailyList();renderDailyList()},
     'performance': function(){renderPerformance();},
@@ -8463,6 +8466,31 @@ function generateUpdateDelDate() {
       var keyLegacy = String(p.docNum)+'_'+p.itemCode;
       var poQty = p.openQty || 0;
 
+      // Priority 0 (13 Nov 2026): porsi yang SUDAH dikonfirmasi supplier (data dari RMD) → tanggal dikunci.
+      // Hanya sisa qty yang belum dikonfirmasi yang lanjut ke logika lama di bawah (manual / MRP / beyond).
+      // Kalau tidak ada data konfirmasi supplier, blok ini tidak melakukan apa-apa → perilaku lama tetap.
+      var _confPts = _rmdConfPortionsFor(p, poQty);
+      if(_confPts.length){
+        var _confQty = 0;
+        _confPts.forEach(function(cp){
+          _uddAddPortion(key, cp.date, cp.qty, 'confirmed');
+          _confQty += cp.qty;
+          // Qty terkonfirmasi hanya menutup kebutuhan MULAI bulan tanggal konfirmasinya
+          // (kiriman Januari tidak boleh dianggap menutup kebutuhan November → kekurangan Nov tetap terlihat)
+          var _cIdx = _rmdConfBucketIdx(cp.date, curYear);
+          if(_cIdx < 0) return; // tanggal konfirmasi di luar horizon forecast
+          var _dr = cp.qty;
+          for(var _pi = pPtr; _pi < placements.length && _dr > 0; _pi++){
+            if(placements[_pi].idx < _cIdx || placements[_pi].remaining <= 0) continue;
+            var _tk = Math.min(placements[_pi].remaining, _dr);
+            placements[_pi].remaining -= _tk;
+            _dr -= _tk;
+          }
+        });
+        poQty = poQty - _confQty;
+        if(poQty <= 1e-6){ newUpdateDelDate[key] = _confPts[0].date; return; }
+      }
+
       // Priority 1: sudah ada Tgl Request Kirim manual → pakai itu
       var _ovrUDD = STATE.poOverrides[key] || STATE.poOverrides[keyLegacy];
       if(_ovrUDD && _ovrUDD.date){
@@ -8590,11 +8618,17 @@ function generateUpdateDelDate() {
     pos.forEach(function(p){
       var key = _poKey(p);
       var d = newUpdateDelDate[key];
+      // Seluruh qty PO sudah dikonfirmasi supplier → tanggal dikunci, tidak dinaikkan
+      var _spK = newUddSplit[key] || [];
+      if(d && _spK.length && _spK.every(function(pt){ return pt.kind === 'confirmed'; })){
+        if(!prevISO || d > prevISO) prevISO = d;
+        return;
+      }
       if(!d || d === '2027-01-01') { prevISO = d; return; }
       if(prevISO && d < prevISO) {
         newUpdateDelDate[key] = prevISO; // naikkan ke tanggal PO sebelumnya
-        // pecahan ikut dinaikkan supaya konsisten dengan kolom Update DelDate
-        (newUddSplit[key]||[]).forEach(function(pt){ if(pt.date && pt.date < prevISO) pt.date = prevISO; });
+        // pecahan ikut dinaikkan supaya konsisten dengan kolom Update DelDate (kecuali porsi terkonfirmasi supplier)
+        (newUddSplit[key]||[]).forEach(function(pt){ if(pt.date && pt.date < prevISO && pt.kind !== 'confirmed') pt.date = prevISO; });
         d = prevISO;
       }
       prevISO = d;
@@ -8611,6 +8645,95 @@ function generateUpdateDelDate() {
   renderPO();
   toast('Update DelDate di-generate: '+Object.keys(newUpdateDelDate).length+' PO ✓','ok');
 }
+// ── Konfirmasi supplier dari Raw Material Dashboard (RMD) — 13 Nov 2026 ────────
+// Sumber: RMD PO_Data (supplier isi di file GSheet per supplier → ditarik ke RMD via menu RMD).
+// Disimpan di localStorage 'rmd_supplier_conf' (masuk CLOUD_KEYS → ikut sync ke laptop lain).
+// Format: {ts:'<ISO saat tarik>', rows:[{key,docNum,lineNum,itemCode,seq,date:'YYYY-MM-DD',qty,openQty,notes}]}
+// Dipakai HANYA oleh generateUpdateDelDate (porsi terkonfirmasi = tanggal dikunci) + tampilan ✅.
+var _rmdConfCache = {raw: undefined, map: null};
+function _rmdConfMap(){
+  var raw = null; try { raw = localStorage.getItem('rmd_supplier_conf'); } catch(e){}
+  if(raw === _rmdConfCache.raw && _rmdConfCache.map) return _rmdConfCache.map;
+  var map = {byLine: {}, byDocItem: {}, ts: '', n: 0};
+  try {
+    var o = raw ? JSON.parse(raw) : null;
+    if(o && Array.isArray(o.rows)){
+      map.ts = o.ts || '';
+      o.rows.forEach(function(r){
+        if(!r || !/^\d{4}-\d{2}-\d{2}$/.test(String(r.date||'')) || !(Number(r.qty) > 0)) return;
+        var pt = {date: String(r.date), qty: Number(r.qty), seq: Number(r.seq) || 0};
+        var k1 = String(r.docNum) + '_' + String(r.lineNum);
+        (map.byLine[k1] || (map.byLine[k1] = [])).push(pt);
+        var k2 = String(r.docNum) + '_' + String(r.itemCode);
+        (map.byDocItem[k2] || (map.byDocItem[k2] = [])).push(pt);
+        map.n++;
+      });
+    }
+  } catch(e){ console.warn('[rmd_supplier_conf] parse gagal:', e); }
+  _rmdConfCache = {raw: raw, map: map};
+  return map;
+}
+// Porsi terkonfirmasi supplier untuk 1 PO line: urut tanggal, total dipotong maksimal poQty
+function _rmdConfPortionsFor(p, poQty){
+  if(!p || !(poQty > 0)) return [];
+  var m = _rmdConfMap(); if(!m.n) return [];
+  var list = null;
+  if(p.lineNum != null) list = m.byLine[String(p.docNum) + '_' + String(p.lineNum)] || null;
+  else list = m.byDocItem[String(p.docNum) + '_' + String(p.itemCode)] || null;
+  if(!list || !list.length) return [];
+  var sorted = list.slice().sort(function(a, b){ return a.date === b.date ? a.seq - b.seq : (a.date < b.date ? -1 : 1); });
+  var out = [], left = poQty;
+  for(var i = 0; i < sorted.length && left > 1e-6; i++){
+    var q = Math.min(sorted[i].qty, left);
+    out.push({date: sorted[i].date, qty: q});
+    left -= q;
+  }
+  return out;
+}
+// Index bulan forecast (FC_MONTH_NUMS) untuk tanggal 'YYYY-MM-DD'. Sebelum horizon → 0, sesudah horizon → -1.
+// Aturan tahun sama dengan generateUpdateDelDate: bulan < bulan mulai forecast = tahun berikutnya.
+function _rmdConfBucketIdx(dateISO, curYear){
+  if(!FC_MONTH_NUMS || !FC_MONTH_NUMS.length) return -1;
+  var y = parseInt(String(dateISO).substring(0,4),10), mo = parseInt(String(dateISO).substring(5,7),10);
+  if(!(y > 0) || !(mo > 0)) return -1;
+  var start = FC_MONTH_NUMS[0], target = y*12 + mo, firstYM = null, lastYM = null;
+  for(var m = 0; m < FC_MONTH_NUMS.length; m++){
+    var mn = FC_MONTH_NUMS[m], yr = mn < start ? curYear + 1 : curYear, ym = yr*12 + mn;
+    if(firstYM === null) firstYM = ym;
+    lastYM = ym;
+    if(ym === target) return m;
+  }
+  if(firstYM !== null && target < firstYM) return 0;
+  return -1;
+}
+function _rmdConfRenderTs(){
+  var el = document.getElementById('po-rmdconf-ts'); if(!el) return;
+  var m = _rmdConfMap();
+  var t = '';
+  if(m.ts){ try { t = new Date(m.ts).toLocaleString('id-ID', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}); } catch(e){ t = m.ts; } }
+  el.textContent = m.ts ? ('konfirmasi supplier: ' + m.n + ' baris · ditarik ' + t) : '';
+}
+function pullSupplierConfFromRMD(){
+  var url   = (localStorage.getItem('update_deldate_gsheet_url')   || '').trim();
+  var token = (localStorage.getItem('update_deldate_gsheet_token') || '').trim();
+  if(!url){ toast('URL Apps Script RMD belum ada di laptop ini — klik ⬆ GSheet sekali untuk mengisi URL & token', 'err'); return; }
+  toast('Menarik konfirmasi supplier dari RMD…', 'inf');
+  fetch(url, { method: 'POST', body: JSON.stringify({token: token, action: 'getConf'}), headers: {'Content-Type': 'text/plain'} })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(!d || !d.ok || !Array.isArray(d.rows)){
+        toast('Gagal tarik konfirmasi: ' + ((d && d.msg) || 'respon tidak dikenal — pastikan web app RMD sudah versi terbaru'), 'err');
+        return;
+      }
+      localStorage.setItem('rmd_supplier_conf', JSON.stringify({ts: new Date().toISOString(), rows: d.rows})); // CLOUD_KEYS → otomatis cloudSave
+      _rmdConfRenderTs();
+      if(document.getElementById('pg-po') && document.getElementById('pg-po').classList.contains('active')) renderPO();
+      toast('Konfirmasi supplier ditarik: ' + d.rows.length + ' baris' + (d.invalid ? (' · ' + d.invalid + ' tanggal tidak terbaca') : '')
+        + '. Klik 📅 Generate Update DelDate untuk menerapkan.', 'ok');
+    })
+    .catch(function(e){ toast('Gagal tarik konfirmasi: ' + e.message, 'err'); });
+}
+
 function exportPOExcel() {
   if(typeof XLSX === 'undefined') { toast('XLSX library tidak tersedia', 'err'); return; }
   var headers = ['Doc Num','Supplier','Item Code','Item Name','Site','Open Qty','UOM',
@@ -8793,8 +8916,12 @@ function renderPO() {
     var uddTitle = ovr.date ? 'Dari Tgl Request Kirim' : (_uddHas ? 'Generated dari forecast' : 'Belum di-generate');
     var _uddSp = (STATE.updateDelDateSplit && (STATE.updateDelDateSplit[key]||STATE.updateDelDateSplit[keyL2])) || null;
     if(_uddSp && _uddSp.length > 1){
-      uddTitle += ' | Pecahan: ' + _uddSp.map(function(pt){ return n_id(pt.qty) + ' @ ' + (pt.date ? pt.date.split('-').reverse().join('/') : 'tidak dibutuhkan'); }).join('; ');
+      uddTitle += ' | Pecahan: ' + _uddSp.map(function(pt){ return n_id(pt.qty) + ' @ ' + (pt.date ? pt.date.split('-').reverse().join('/') : 'tidak dibutuhkan') + (pt.kind === 'confirmed' ? ' (konfirmasi supplier)' : ''); }).join('; ');
       uddDisp += ' (+' + (_uddSp.length-1) + ')';
+    }
+    if(_uddSp && _uddSp.some(function(pt){ return pt.kind === 'confirmed'; })){
+      uddDisp = '✅ ' + uddDisp;
+      uddTitle += ' | ✅ Ada porsi yang sudah dikonfirmasi supplier (RMD) — tanggalnya dikunci';
     }
     row += '<td class="mono update-deldate-cell" style="font-size:10.5px;text-align:center;' + uddStyle + '" title="' + uddTitle + '">' + uddDisp + '</td>';
     // Notes — editable
