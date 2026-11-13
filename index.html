@@ -703,6 +703,39 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
       <button class="btn btn-sm btn-red" onclick="resetPOOverrides()">🗑 Reset Semua</button>
     </div>
   </div>
+  <style>
+    #rmd-grid{overflow:auto;max-height:calc(100vh - 250px);border:1px solid #bdbdbd;background:#fff}
+    table.xl{border-collapse:separate;border-spacing:0;font:11px Arial,Helvetica,sans-serif;color:#202124}
+    table.xl th,table.xl td{border-right:1px solid #e0e0e0;border-bottom:1px solid #e0e0e0;padding:0 6px;height:20px;line-height:20px;white-space:nowrap;max-width:240px;overflow:hidden;text-overflow:ellipsis;background:#fff;text-align:left}
+    table.xl thead th{position:sticky;background:#f1f3f4;color:#3c4043;font-weight:600;z-index:2;border-bottom:1px solid #c0c0c0;text-transform:none;letter-spacing:normal;font-size:11px}
+    table.xl thead tr.l th{top:0;color:#80868b;font-weight:400;text-align:center;font-size:10px}
+    table.xl thead tr.h th{top:21px;cursor:pointer;user-select:none}
+    table.xl thead tr.f th{top:42px;padding:1px 2px}
+    table.xl thead tr.f input{width:100%;min-width:50px;height:17px;font-size:10px;border:1px solid #dadce0;border-radius:2px;padding:0 3px;background:#fff;color:#202124}
+    table.xl .rn{position:sticky;left:0;background:#f1f3f4;color:#80868b;text-align:center;z-index:1;min-width:36px;font-weight:400}
+    table.xl thead .rn{z-index:3}
+    table.xl tbody tr:hover td{background:#e8f0fe}
+    table.xl td.num{text-align:right;font-variant-numeric:tabular-nums}
+    table.xl th.sup{background:#d9ead3} table.xl td.sup{background:#f1f8ee}
+    table.xl td.fix{color:#b45309;font-weight:700} table.xl td.est{color:#6b7280;font-style:italic}
+    table.xl td.warn{color:#dc2626;font-weight:700}
+    table.xl tr.cl td{color:#9aa0a6}
+  </style>
+  <div style="display:flex;gap:6px;align-items:center;margin:2px 0 8px">
+    <button class="btn btn-sm" id="po-vbtn-rmd" onclick="poSetView('rmd')" title="Isi persis sama dengan sheet PO_Data di Raw Material Dashboard (read-only)">📋 Data RMD (Excel)</button>
+    <button class="btn btn-sm" id="po-vbtn-old" onclick="poSetView('old')" title="Tampilan lama dari SAP + input manual (cadangan selama transisi)">🗂 Tampilan lama (input manual)</button>
+  </div>
+  <div id="po-rmd-view" style="display:none">
+    <div class="fbar">
+      <button class="btn btn-sm" onclick="rmdMirrorLoad()">🔄 Muat ulang dari RMD</button>
+      <input type="text" id="rmd-srch" placeholder="Cari di semua kolom..." oninput="rmdMirrorSearch(this)" style="width:220px">
+      <label style="font-size:11px;display:flex;align-items:center;gap:4px"><input type="checkbox" id="rmd-only-open" onchange="rmdMirrorRender()"> Hanya Status Open</label>
+      <button class="btn btn-sm" onclick="rmdMirrorClearFilters()">✕ Hapus Filter</button>
+      <span id="rmd-info" style="font-size:11px;color:var(--muted)"></span>
+    </div>
+    <div id="rmd-grid"><div class="loading"><div class="spin"></div>Memuat…</div></div>
+  </div>
+  <div id="po-old-view">
   <div class="fbar">
     <input type="text" id="srch-po" placeholder="Cari Doc Num / item / supplier..." oninput="_poShowAll=false;_poDeb()" style="width:220px">
     <select id="f-po-type" onchange="_poShowAll=false;renderPO()" style="width:90px"><option value="">RM+PM+FG</option><option value="RM">RM</option><option value="PM">PM</option><option value="FG">FG</option></select>
@@ -712,6 +745,7 @@ body.light-mode .sidebar .logo-text + .logo-text{color:#64748b!important}
     <button class="btn btn-sm" onclick="_poColClearAll()" title="Hapus semua filter dropdown kolom (Doc Num, Supplier, dst)">✕ Hapus Filter Kolom</button>
   </div>
   <div id="po-table"><div class="loading"><div class="spin"></div>Klik Refresh SAP untuk memuat PO...</div></div>
+  </div>
 </div>
 </div>
 
@@ -3323,7 +3357,7 @@ var CLOUD_KEYS = [
   'admin_user','admin_pass',
   'master_data','mrp_data','realname_data','pallet_pm','pallet_rm',
   'mps_compare_result',
-  'wh_capacity_rm','wh_capacity_pm','update_deldate_data','update_deldate_split','rmd_supplier_conf',
+  'wh_capacity_rm','wh_capacity_pm','update_deldate_data','update_deldate_split','rmd_supplier_conf','rmd_conf_check',
   'fc_propose','fc_ospo_ovr','fc_ospr_ovr','fc_konf_ovr','fc_doi2','fc_doi2_suppliers','mrp_source',
   'fc_autopropose','fc_doi_item_month_ovr',
   'matcom_monthly','matcom_parent','matcom_data','matcom_count','last_matcom_sync',
@@ -4786,7 +4820,7 @@ function showPage(name, el) {
     dashboard: function(){updateDashStats();setTimeout(_matchDashColumns,100)},
     projection: function(){setUrgentCutoff();renderProjection();},
     forecast: function(){_fcPopulateDatePicker();renderForecast();_loadGenTimestamp('gen_ts_propose_pr','fc-gen-ts');},
-    po: function(){if(!STATE.poData.length)loadPO();else renderPO();_loadGenTimestamp('gen_ts_update_deldate','po-udd-ts');if(typeof _rmdConfRenderTs==='function')_rmdConfRenderTs();},
+    po: function(){if(!STATE.poData.length)loadPO();else renderPO();_loadGenTimestamp('gen_ts_update_deldate','po-udd-ts');if(typeof _rmdConfRenderTs==='function')_rmdConfRenderTs();if(typeof poSetView==='function')poSetView();},
     schedule: renderSchedule,
     'daily-list': function(){initDailyList();renderDailyList()},
     'performance': function(){renderPerformance();},
@@ -8392,6 +8426,7 @@ function generateUpdateDelDate() {
   // Pecahan per PO line: 1 PO bisa menutup kebutuhan beberapa bulan (mis. Nov 500 + Des 500).
   // Kolom Update DelDate tetap = tanggal porsi pertama (perilaku lama tidak berubah).
   var newUddSplit={};
+  var _rmdConfCheckOut = []; // 13 Nov 2026: status tiap konfirmasi supplier (dikirim ke RMD saat ⬆ GSheet)
   function _uddAddPortion(k, date, qty, kind){
     if(!(qty > 0)) return;
     var arr = newUddSplit[k] || (newUddSplit[k] = []);
@@ -8469,17 +8504,35 @@ function generateUpdateDelDate() {
       // Priority 0 (13 Nov 2026): porsi yang SUDAH dikonfirmasi supplier (data dari RMD) → tanggal dikunci.
       // Hanya sisa qty yang belum dikonfirmasi yang lanjut ke logika lama di bawah (manual / MRP / beyond).
       // Kalau tidak ada data konfirmasi supplier, blok ini tidak melakukan apa-apa → perilaku lama tetap.
-      var _confPts = _rmdConfPortionsFor(p, poQty);
-      if(_confPts.length){
-        var _confQty = 0;
-        _confPts.forEach(function(cp){
-          _uddAddPortion(key, cp.date, cp.qty, 'confirmed');
-          _confQty += cp.qty;
+      var _confEnt = _rmdConfEntriesFor(p, poQty); // urut Split Seq (sama dengan FIFO di RMD)
+      if(_confEnt.length){
+        // (a) Tanggal MRP "murni" untuk tiap porsi (seolah belum dikonfirmasi) → deteksi perubahan forecast
+        var _simRem = placements.map(function(pl){ return pl.remaining; });
+        var _sp = pPtr;
+        _confEnt.forEach(function(ce){
+          while(_sp < placements.length && _simRem[_sp] <= 0) _sp++;
+          ce.mrpDate = (_sp < placements.length) ? _uddDateForBucket(placements[_sp].idx) : '';
+          var _r = ce.qty;
+          while(_r > 0 && _sp < placements.length){
+            var _t = Math.min(_simRem[_sp], _r);
+            _simRem[_sp] -= _t; _r -= _t;
+            if(_simRem[_sp] <= 0) _sp++;
+          }
+          // FIX (Req. PPIC) selalu dikunci. Estimasi: dikunci selama MRP tidak bergeser > _RMD_STALE_DAYS hari.
+          ce.stale = !ce.fix && !!ce.baseline && _rmdConfIsStale(ce.baseline, ce.mrpDate, todayISO);
+          if(ce.key) _rmdConfCheckOut.push({key: ce.key, mrpDate: ce.mrpDate, stale: ce.stale, fix: !!ce.fix});
+        });
+        // (b) Porsi yang masih berlaku → tanggal dikunci (kind 'confirmed')
+        var _confQty = 0, _firstConf = '';
+        _confEnt.forEach(function(ce){
+          if(ce.stale) return; // forecast berubah → ikut MRP, supplier perlu konfirmasi ulang
+          _uddAddPortion(key, ce.date, ce.qty, 'confirmed');
+          _confQty += ce.qty;
+          if(!_firstConf || ce.date < _firstConf) _firstConf = ce.date;
           // Qty terkonfirmasi hanya menutup kebutuhan MULAI bulan tanggal konfirmasinya
-          // (kiriman Januari tidak boleh dianggap menutup kebutuhan November → kekurangan Nov tetap terlihat)
-          var _cIdx = _rmdConfBucketIdx(cp.date, curYear);
+          var _cIdx = _rmdConfBucketIdx(ce.date, curYear);
           if(_cIdx < 0) return; // tanggal konfirmasi di luar horizon forecast
-          var _dr = cp.qty;
+          var _dr = ce.qty;
           for(var _pi = pPtr; _pi < placements.length && _dr > 0; _pi++){
             if(placements[_pi].idx < _cIdx || placements[_pi].remaining <= 0) continue;
             var _tk = Math.min(placements[_pi].remaining, _dr);
@@ -8488,7 +8541,7 @@ function generateUpdateDelDate() {
           }
         });
         poQty = poQty - _confQty;
-        if(poQty <= 1e-6){ newUpdateDelDate[key] = _confPts[0].date; return; }
+        if(_confQty > 0 && poQty <= 1e-6){ newUpdateDelDate[key] = _firstConf; return; }
       }
 
       // Priority 1: sudah ada Tgl Request Kirim manual → pakai itu
@@ -8639,11 +8692,14 @@ function generateUpdateDelDate() {
   localStorage.setItem('update_deldate_data',JSON.stringify(newUpdateDelDate));
   cloudSave('update_deldate_data',JSON.stringify(newUpdateDelDate));
   STATE.updateDelDateSplit=newUddSplit;
+  try { localStorage.setItem('rmd_conf_check', JSON.stringify({ts: new Date().toISOString(), list: _rmdConfCheckOut})); } catch(e){}
   localStorage.setItem('update_deldate_split',JSON.stringify(newUddSplit));
   cloudSave('update_deldate_split',JSON.stringify(newUddSplit));
   _saveGenTimestamp('gen_ts_update_deldate','po-udd-ts');
   renderPO();
   toast('Update DelDate di-generate: '+Object.keys(newUpdateDelDate).length+' PO ✓','ok');
+  var _nStale = _rmdConfCheckOut.filter(function(c){ return c.stale; }).length;
+  if(_nStale) setTimeout(function(){ toast('⚠ ' + _nStale + ' konfirmasi supplier PERLU KONFIRMASI ULANG (forecast berubah) — klik ⬆ GSheet supaya status terkirim ke RMD & file supplier', 'err'); }, 1500);
 }
 // ── Konfirmasi supplier dari Raw Material Dashboard (RMD) — 13 Nov 2026 ────────
 // Sumber: RMD PO_Data (supplier isi di file GSheet per supplier → ditarik ke RMD via menu RMD).
@@ -8661,7 +8717,8 @@ function _rmdConfMap(){
       map.ts = o.ts || '';
       o.rows.forEach(function(r){
         if(!r || !/^\d{4}-\d{2}-\d{2}$/.test(String(r.date||'')) || !(Number(r.qty) > 0)) return;
-        var pt = {date: String(r.date), qty: Number(r.qty), seq: Number(r.seq) || 0};
+        var pt = {date: String(r.date), qty: Number(r.qty), seq: Number(r.seq) || 0,
+                  key: String(r.key || ''), baseline: /^\d{4}-\d{2}-\d{2}$/.test(String(r.baseline || '')) ? String(r.baseline) : '', fix: !!r.fix};
         var k1 = String(r.docNum) + '_' + String(r.lineNum);
         (map.byLine[k1] || (map.byLine[k1] = [])).push(pt);
         var k2 = String(r.docNum) + '_' + String(r.itemCode);
@@ -8706,6 +8763,176 @@ function _rmdConfBucketIdx(dateISO, curYear){
   if(firstYM !== null && target < firstYM) return 0;
   return -1;
 }
+// Entri konfirmasi untuk Generate: urut Split Seq (FIFO RMD), total dipotong maksimal poQty
+function _rmdConfEntriesFor(p, poQty){
+  if(!p || !(poQty > 0)) return [];
+  var m = _rmdConfMap(); if(!m.n) return [];
+  var list = (p.lineNum != null) ? (m.byLine[String(p.docNum) + '_' + String(p.lineNum)] || null)
+                                 : (m.byDocItem[String(p.docNum) + '_' + String(p.itemCode)] || null);
+  if(!list || !list.length) return [];
+  var sorted = list.slice().sort(function(a, b){ return a.seq !== b.seq ? a.seq - b.seq : (a.date < b.date ? -1 : (a.date > b.date ? 1 : 0)); });
+  var out = [], left = poQty;
+  for(var i = 0; i < sorted.length && left > 1e-6; i++){
+    var q = Math.min(sorted[i].qty, left);
+    out.push({date: sorted[i].date, qty: q, seq: sorted[i].seq, key: sorted[i].key, baseline: sorted[i].baseline, fix: sorted[i].fix});
+    left -= q;
+  }
+  return out;
+}
+// Konfirmasi estimasi dianggap usang kalau saran MRP sekarang bergeser > _RMD_STALE_DAYS hari dari saat konfirmasi
+// (atau kebutuhannya hilang dari horizon). Tanggal yang sudah lewat dianggap = hari ini (saran MRP juga begitu).
+var _RMD_STALE_DAYS = 7;
+function _rmdConfIsStale(baselineISO, mrpISO, todayISO){
+  if(!baselineISO) return false;
+  if(!mrpISO) return true;
+  var b = baselineISO < todayISO ? todayISO : baselineISO;
+  var mm = mrpISO < todayISO ? todayISO : mrpISO;
+  var d = Math.abs(new Date(mm + 'T00:00:00') - new Date(b + 'T00:00:00')) / 86400000;
+  return d > _RMD_STALE_DAYS;
+}
+
+// ── Cermin PO_Data RMD di List Pengiriman (read-only, tampilan Excel) — 13 Nov 2026 ──
+// Edit (Req. PPIC, notes, konfirmasi) dilakukan di RMD. Tampilan lama tetap ada sebagai cadangan.
+var _rmdMirror = {headers: [], rows: [], ts: '', loading: false, sortCol: -1, sortDir: 1, colFilter: {}, q: ''};
+function poSetView(v){
+  if(!v){ try { v = localStorage.getItem('po_view') || 'rmd'; } catch(e){ v = 'rmd'; } }
+  try { localStorage.setItem('po_view', v); } catch(e){}
+  var rm = document.getElementById('po-rmd-view'), old = document.getElementById('po-old-view');
+  if(rm) rm.style.display = v === 'rmd' ? '' : 'none';
+  if(old) old.style.display = v === 'old' ? '' : 'none';
+  var b1 = document.getElementById('po-vbtn-rmd'), b2 = document.getElementById('po-vbtn-old');
+  if(b1) b1.style.cssText = v === 'rmd' ? 'background:var(--teal);color:#fff' : '';
+  if(b2) b2.style.cssText = v === 'old' ? 'background:var(--teal);color:#fff' : '';
+  if(v === 'rmd' && !_rmdMirror.rows.length && !_rmdMirror.loading) rmdMirrorLoad();
+}
+function rmdMirrorLoad(){
+  var box = document.getElementById('rmd-grid');
+  var url   = (localStorage.getItem('update_deldate_gsheet_url')   || '').trim();
+  var token = (localStorage.getItem('update_deldate_gsheet_token') || '').trim();
+  if(!url){ if(box) box.innerHTML = '<div class="empty"><h3>URL Apps Script RMD belum ada di laptop ini</h3><p>Klik ⬆ GSheet sekali untuk mengisi URL & token, lalu klik 🔄 Muat ulang.</p></div>'; return; }
+  _rmdMirror.loading = true;
+  if(box && !_rmdMirror.rows.length) box.innerHTML = '<div class="loading"><div class="spin"></div>Memuat PO_Data dari Raw Material Dashboard…</div>';
+  var info = document.getElementById('rmd-info'); if(info) info.textContent = 'memuat…';
+  fetch(url, { method: 'POST', body: JSON.stringify({token: token, action: 'getPOList'}), headers: {'Content-Type': 'text/plain'} })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      _rmdMirror.loading = false;
+      if(!d || !d.ok || !Array.isArray(d.rows)){
+        if(box) box.innerHTML = '<div class="empty"><h3>Gagal memuat dari RMD</h3><p>' + ((d && d.msg) || 'respon tidak dikenal — pastikan web app RMD sudah versi terbaru') + '</p></div>';
+        if(info) info.textContent = '';
+        return;
+      }
+      _rmdMirror.headers = d.headers || []; _rmdMirror.rows = d.rows; _rmdMirror.ts = d.generatedAt || new Date().toISOString();
+      rmdMirrorRender();
+    })
+    .catch(function(e){
+      _rmdMirror.loading = false;
+      if(box) box.innerHTML = '<div class="empty"><h3>Gagal memuat dari RMD</h3><p>' + e.message + '</p></div>';
+      if(info) info.textContent = '';
+    });
+}
+function _rmdColLetter(i){ var s = ''; i = i + 1; while(i > 0){ var m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; }
+function _rmdEsc(s){ return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function _rmdSortVal(s){
+  s = String(s == null ? '' : s).trim();
+  var d = s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
+  if(d) return {n: 1, v: Number(d[3]) * 10000 + Number(d[2]) * 100 + Number(d[1])};
+  if(/^-?[\d.,]+$/.test(s) && /\d/.test(s)){
+    var t = /,\d{1,3}$/.test(s) && /\./.test(s) ? s.replace(/\./g,'').replace(',', '.') : s.replace(/,/g,'');
+    var x = parseFloat(t); if(!isNaN(x)) return {n: 1, v: x};
+  }
+  return {n: 0, v: s.toLowerCase()};
+}
+function rmdMirrorSort(ci){
+  if(_rmdMirror.sortCol === ci) _rmdMirror.sortDir = -_rmdMirror.sortDir; else { _rmdMirror.sortCol = ci; _rmdMirror.sortDir = 1; }
+  rmdMirrorRender();
+}
+var _rmdFilterTimer = null;
+function rmdMirrorFilter(ci, el){
+  _rmdMirror.colFilter[ci] = String(el.value || '').toLowerCase();
+  clearTimeout(_rmdFilterTimer);
+  _rmdFilterTimer = setTimeout(function(){ rmdMirrorRender('rmd-f-' + ci); }, 250);
+}
+function rmdMirrorSearch(el){
+  _rmdMirror.q = String(el.value || '').toLowerCase();
+  clearTimeout(_rmdFilterTimer);
+  _rmdFilterTimer = setTimeout(function(){ rmdMirrorRender(); }, 250);
+}
+function rmdMirrorClearFilters(){
+  _rmdMirror.colFilter = {}; _rmdMirror.q = ''; _rmdMirror.sortCol = -1;
+  var s = document.getElementById('rmd-srch'); if(s) s.value = '';
+  rmdMirrorRender();
+}
+function rmdMirrorRender(focusId){
+  var box = document.getElementById('rmd-grid'); if(!box) return;
+  var H = _rmdMirror.headers || [];
+  if(!H.length){ box.innerHTML = '<div class="empty"><h3>Belum ada data</h3><p>Klik 🔄 Muat ulang dari RMD.</p></div>'; return; }
+  var hide = {};
+  if(!(typeof _isAdmin !== 'undefined' && _isAdmin)){ var ir = H.indexOf('Real Name'); if(ir >= 0) hide[ir] = true; } // Real Name hanya admin (aturan lama)
+  var cols = []; H.forEach(function(h, i){ if(!hide[i]) cols.push(i); });
+  var iStatus = H.indexOf('Status'), iKonf = H.indexOf('Status Konfirmasi'), iReq = H.indexOf('Req. PPIC'), iSug = H.indexOf('Suggest MRP date');
+  var supCols = {}; ['Konfirmasi ETA EJI','Qty Konfirm','Notes From Supplier'].forEach(function(n){ var k = H.indexOf(n); if(k >= 0) supCols[k] = true; });
+  var onlyOpenEl = document.getElementById('rmd-only-open'); var onlyOpen = onlyOpenEl && onlyOpenEl.checked;
+  var q = _rmdMirror.q, cf = _rmdMirror.colFilter;
+  var idx = [];
+  for(var r = 0; r < _rmdMirror.rows.length; r++){
+    var row = _rmdMirror.rows[r], ok = true;
+    if(onlyOpen && iStatus >= 0 && row[iStatus] !== 'Open') continue;
+    for(var c in cf){ if(cf[c] && String(row[c] == null ? '' : row[c]).toLowerCase().indexOf(cf[c]) < 0){ ok = false; break; } }
+    if(!ok) continue;
+    if(q){ var hit = false; for(var k2 = 0; k2 < cols.length; k2++){ if(String(row[cols[k2]] == null ? '' : row[cols[k2]]).toLowerCase().indexOf(q) >= 0){ hit = true; break; } } if(!hit) continue; }
+    idx.push(r);
+  }
+  if(_rmdMirror.sortCol >= 0){
+    var sc = _rmdMirror.sortCol, sd = _rmdMirror.sortDir;
+    idx.sort(function(a, b){
+      var va = _rmdSortVal(_rmdMirror.rows[a][sc]), vb = _rmdSortVal(_rmdMirror.rows[b][sc]);
+      if(va.n !== vb.n) return (vb.n - va.n) * sd;
+      return (va.v < vb.v ? -1 : (va.v > vb.v ? 1 : (a - b))) * sd;
+    });
+  }
+  var h = [];
+  h.push('<table class="xl"><thead><tr class="l"><th class="rn"></th>');
+  cols.forEach(function(ci){ h.push('<th>' + _rmdColLetter(ci) + '</th>'); });
+  h.push('</tr><tr class="h"><th class="rn">#</th>');
+  cols.forEach(function(ci){
+    var arrow = _rmdMirror.sortCol === ci ? (_rmdMirror.sortDir > 0 ? ' ▲' : ' ▼') : '';
+    h.push('<th onclick="rmdMirrorSort(' + ci + ')" title="Klik untuk urutkan"' + (supCols[ci] ? ' class="sup"' : '') + '>' + _rmdEsc(H[ci]) + arrow + '</th>');
+  });
+  h.push('</tr><tr class="f"><th class="rn">⚲</th>');
+  cols.forEach(function(ci){
+    h.push('<th><input id="rmd-f-' + ci + '" value="' + _rmdEsc(cf[ci] || '') + '" oninput="rmdMirrorFilter(' + ci + ',this)" placeholder="filter"></th>');
+  });
+  h.push('</tr></thead><tbody>');
+  var LIMIT = 3000;
+  for(var j = 0; j < idx.length && j < LIMIT; j++){
+    var ri = idx[j], rw = _rmdMirror.rows[ri];
+    var closed = iStatus >= 0 && rw[iStatus] === 'Close';
+    h.push('<tr' + (closed ? ' class="cl"' : '') + '><td class="rn">' + (ri + 2) + '</td>');
+    for(var k3 = 0; k3 < cols.length; k3++){
+      var ci2 = cols[k3], val = rw[ci2] == null ? '' : String(rw[ci2]);
+      var cls = [];
+      if(/^-?[\d.,]+$/.test(val) && /\d/.test(val)) cls.push('num');
+      if(supCols[ci2]) cls.push('sup');
+      if(ci2 === iKonf && val.indexOf('PERLU') === 0) cls.push('warn');
+      if(ci2 === iReq && val) cls.push('fix');
+      if(ci2 === iSug) cls.push('est');
+      h.push('<td' + (cls.length ? ' class="' + cls.join(' ') + '"' : '') + ' title="' + _rmdEsc(val) + '">' + _rmdEsc(val) + '</td>');
+    }
+    h.push('</tr>');
+  }
+  h.push('</tbody></table>');
+  var sx = box.scrollLeft, sy = box.scrollTop;
+  box.innerHTML = h.join('');
+  box.scrollLeft = sx; box.scrollTop = sy;
+  var info = document.getElementById('rmd-info');
+  if(info){
+    var t = ''; try { t = new Date(_rmdMirror.ts).toLocaleString('id-ID', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}); } catch(e){}
+    info.textContent = idx.length + ' dari ' + _rmdMirror.rows.length + ' baris' + (idx.length > LIMIT ? ' (tampil ' + LIMIT + ' pertama)' : '') + ' · dimuat ' + t + ' · read-only, edit di RMD';
+  }
+  if(focusId){ var fe = document.getElementById(focusId); if(fe){ fe.focus(); var L = fe.value.length; try { fe.setSelectionRange(L, L); } catch(e){} } }
+}
+
 function _rmdConfRenderTs(){
   var el = document.getElementById('po-rmdconf-ts'); if(!el) return;
   var m = _rmdConfMap();
@@ -8828,7 +9055,8 @@ function _doExportPOGSheet() {
   toast('Mengirim ke GSheet…', 'inf');
   fetch(url, {
     method: 'POST',
-    body: JSON.stringify({ token: token, headers: headers, rows: rows, splits: splits, generatedAt: localStorage.getItem('gen_ts_update_deldate') || '' }),
+    body: JSON.stringify({ token: token, headers: headers, rows: rows, splits: splits, generatedAt: localStorage.getItem('gen_ts_update_deldate') || '',
+                           confCheck: (function(){ try { return (JSON.parse(localStorage.getItem('rmd_conf_check') || '{}').list) || []; } catch(e){ return []; } })() }),
     headers: { 'Content-Type': 'text/plain' }
   }).then(function(r){ return r.json(); })
     .then(function(d){
@@ -15848,6 +16076,17 @@ function _fcKonfAuto(code) {
   var baseYear = new Date().getFullYear();
   STATE.poData.forEach(function(po){
     if(po.itemCode !== code) return;
+    // 13 Nov 2026: sumber utama = konfirmasi supplier dari RMD (per tanggal). PO tanpa data RMD → data lama di bawah.
+    var _rp = (typeof _rmdConfPortionsFor === 'function') ? _rmdConfPortionsFor(po, po.openQty || 0) : [];
+    if(_rp.length){
+      _rp.forEach(function(rp){
+        var pp = String(rp.date).split('-'); var ry = parseInt(pp[0],10), rmn = parseInt(pp[1],10);
+        var rmi = nums.indexOf(rmn); if(rmi < 0) return;
+        var rexpY = (rmn < nums[0]) ? baseYear + 1 : baseYear; if(ry !== rexpY) return;
+        arr[rmi] += rp.qty;
+      });
+      return;
+    }
     var cc = {};
     try { cc = _poResolveConf(po) || {}; } catch(e){ return; }
     var cd = cc.confDate; if(!cd) return;             // hanya yang SUDAH dikonfirmasi supplier
