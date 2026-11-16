@@ -9090,11 +9090,15 @@ function _doExportPOGSheet() {
   }).then(function(r){ return r.json(); })
     .then(function(d){
       if(d.ok){
-        toast('GSheet diupdate: ' + (d.updated||rows.length) + ' baris ✓', 'ok');
+        toast('GSheet diupdate: ' + (d.updated||rows.length) + ' baris ✓' + (d.suggest && d.suggest.rows ? (' · Update Delivery Date ' + d.suggest.rows + ' baris') : ''), 'ok');
         // 16 Nov 2026: tampilan Data RMD (Excel) ikut dimuat ulang otomatis supaya langsung sama dengan RMD
         if(typeof rmdMirrorLoad === 'function' && !_rmdMirror.loading) setTimeout(rmdMirrorLoad, 500);
       }
-      else toast('GSheet gagal: ' + (d.msg||'error'), 'err');
+      else {
+        // 16 Nov 2026: gagal dibuat mencolok (dulu toast saja → mudah terlewat, Update Delivery Date diam-diam tidak berubah)
+        toast('GSheet gagal: ' + (d.msg||'error'), 'err');
+        try { alert('⬆ GSheet GAGAL — Update Delivery Date di RMD belum berubah.\n\n' + (d.msg||'error') + '\n\nKirim screenshot pesan ini ke admin dashboard.'); } catch(_e){}
+      }
     }).catch(function(e){ toast('GSheet gagal: ' + e.message, 'err'); });
 }
 
