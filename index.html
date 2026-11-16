@@ -8394,6 +8394,7 @@ function _loadGenTimestamp(lsKey, spanId) {
   if(el && ts) el.textContent = 'Last: ' + ts;
 }
 
+var _UDD_USE_MANUAL_DATE = false; // true = tanggal manual dashboard (Tgl Request Kirim tampilan lama / Jadwal) ikut mengunci Generate
 function generateUpdateDelDate() {
   if(window._mrpLoadFailed){toast('Requirement belum termuat (tarik data cloud gagal) — klik 🔄 Coba lagi di banner merah dulu','err');return;}
   if(!STATE.poData||!STATE.poData.length){toast('Load PO dulu','err');return;}
@@ -8545,7 +8546,9 @@ function generateUpdateDelDate() {
       }
 
       // Priority 1: sudah ada Tgl Request Kirim manual → pakai itu
-      var _ovrUDD = STATE.poOverrides[key] || STATE.poOverrides[keyLegacy];
+      // 16 Nov 2026: tanggal manual dashboard TIDAK dipakai lagi (keputusan user) — tanggal request
+      // hanya dari RMD (Tanggal Request Kirim) / konfirmasi supplier (Priority 0 di atas).
+      var _ovrUDD = _UDD_USE_MANUAL_DATE ? (STATE.poOverrides[key] || STATE.poOverrides[keyLegacy]) : null;
       if(_ovrUDD && _ovrUDD.date){
         newUpdateDelDate[key] = _ovrUDD.date;
         _uddAddPortion(key, _ovrUDD.date, poQty, 'manual');
@@ -9032,6 +9035,13 @@ function exportPOGSheet() {
 }
 
 function _doExportPOGSheet() {
+  // 16 Nov 2026: tolak kirim kalau hasil Generate yang tersimpan masih berisi tanggal manual dashboard
+  // (artinya belum di-Generate ulang dengan versi ini) — supaya data lama tidak terkirim ke RMD.
+  if(!_UDD_USE_MANUAL_DATE){
+    var _spAll = STATE.updateDelDateSplit || {}, _nMan = 0;
+    Object.keys(_spAll).forEach(function(k){ (_spAll[k]||[]).forEach(function(pt){ if(pt && pt.kind === 'manual') _nMan++; }); });
+    if(_nMan){ toast('⬆ GSheet DIBATALKAN: hasil Generate masih versi lama (' + _nMan + ' porsi tanggal manual). Klik 📅 Generate Update DelDate dulu, lalu ⬆ GSheet lagi.', 'err'); return; }
+  }
   if(window._mrpLoadFailed){toast('Requirement belum termuat (tarik data cloud gagal) — ⬆ GSheet dikunci supaya angka 0 tidak terkirim ke RMD','err');return;}
   var url   = (document.getElementById('update-deldate-gs-url')||{}).value || '';
   var token = (document.getElementById('update-deldate-gs-tok')||{}).value || '';
