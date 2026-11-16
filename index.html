@@ -8806,7 +8806,9 @@ function poSetView(v){
   var b1 = document.getElementById('po-vbtn-rmd'), b2 = document.getElementById('po-vbtn-old');
   if(b1) b1.style.cssText = v === 'rmd' ? 'background:var(--teal);color:#fff' : '';
   if(b2) b2.style.cssText = v === 'old' ? 'background:var(--teal);color:#fff' : '';
-  if(v === 'rmd' && !_rmdMirror.rows.length && !_rmdMirror.loading) rmdMirrorLoad();
+  // 16 Nov 2026: muat ulang otomatis kalau data tampilan sudah > 2 menit (dulu hanya sekali saat pertama dibuka)
+  var _age = _rmdMirror.ts ? (Date.now() - new Date(_rmdMirror.ts).getTime()) : Infinity;
+  if(v === 'rmd' && !_rmdMirror.loading && (!_rmdMirror.rows.length || !(_age < 120000))) rmdMirrorLoad();
 }
 function rmdMirrorLoad(){
   var box = document.getElementById('rmd-grid');
@@ -9077,7 +9079,11 @@ function _doExportPOGSheet() {
     headers: { 'Content-Type': 'text/plain' }
   }).then(function(r){ return r.json(); })
     .then(function(d){
-      if(d.ok) toast('GSheet diupdate: ' + (d.updated||rows.length) + ' baris ✓', 'ok');
+      if(d.ok){
+        toast('GSheet diupdate: ' + (d.updated||rows.length) + ' baris ✓', 'ok');
+        // 16 Nov 2026: tampilan Data RMD (Excel) ikut dimuat ulang otomatis supaya langsung sama dengan RMD
+        if(typeof rmdMirrorLoad === 'function' && !_rmdMirror.loading) setTimeout(rmdMirrorLoad, 500);
+      }
       else toast('GSheet gagal: ' + (d.msg||'error'), 'err');
     }).catch(function(e){ toast('GSheet gagal: ' + e.message, 'err'); });
 }
