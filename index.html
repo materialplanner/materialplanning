@@ -3357,7 +3357,7 @@ var CLOUD_KEYS = [
   'admin_user','admin_pass',
   'master_data','mrp_data','realname_data','pallet_pm','pallet_rm',
   'mps_compare_result',
-  'wh_capacity_rm','wh_capacity_pm','update_deldate_data','update_deldate_split','rmd_supplier_conf','rmd_conf_check',
+  'wh_capacity_rm','wh_capacity_pm','update_deldate_data','update_deldate_split','rmd_supplier_conf','rmd_conf_check','update_deldate_gsheet_url','update_deldate_gsheet_token',
   'fc_propose','fc_ospo_ovr','fc_ospr_ovr','fc_konf_ovr','fc_doi2','fc_doi2_suppliers','mrp_source',
   'fc_autopropose','fc_doi_item_month_ovr',
   'matcom_monthly','matcom_parent','matcom_data','matcom_count','last_matcom_sync',
@@ -9005,6 +9005,7 @@ function exportPOGSheet() {
     +'<input id="update-deldate-gs-url" type="text" value="'+url+'" placeholder="https://script.google.com/macros/s/..." style="width:100%;font-size:12px"></div>'
     +'<div class="fg"><label style="font-size:11px">Token</label>'
     +'<input id="update-deldate-gs-tok" type="text" value="'+token+'" placeholder="token" style="width:100%;font-size:12px"></div>'
+    +'<div style="font-size:11px;color:var(--green,#15803d);margin-bottom:8px">Cukup isi sekali — URL & token tersimpan otomatis ke cloud, ikut ke semua laptop.</div>'
     +'<div style="font-size:11px;color:var(--muted);margin-bottom:12px">Script harus menerima POST dengan payload <code>{token, rows, headers, splits}</code>: rows → sheet "List PO Update DelDate", splits (pecahan per PO line) → sheet "MRP_Schedule".</div>'
     +'<div style="display:flex;gap:8px;justify-content:flex-end">'
     +'<button class="btn" onclick="this.closest(\'div[style*=fixed]\').remove()">Batal</button>'
