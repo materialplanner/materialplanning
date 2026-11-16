@@ -8519,14 +8519,14 @@ function generateUpdateDelDate() {
             if(_simRem[_sp] <= 0) _sp++;
           }
           // FIX (Req. PPIC) selalu dikunci. Estimasi: dikunci selama MRP tidak bergeser > _RMD_STALE_DAYS hari.
-          ce.stale = !ce.fix && !!ce.baseline && _rmdConfIsStale(ce.baseline, ce.mrpDate, todayISO);
-          if(ce.key) _rmdConfCheckOut.push({key: ce.key, mrpDate: ce.mrpDate, stale: ce.stale, fix: !!ce.fix});
+          ce.stale = !ce.fix && !ce.req && !!ce.baseline && _rmdConfIsStale(ce.baseline, ce.mrpDate, todayISO);
+          if(ce.key && !ce.req) _rmdConfCheckOut.push({key: ce.key, mrpDate: ce.mrpDate, stale: ce.stale, fix: !!ce.fix});
         });
         // (b) Porsi yang masih berlaku → tanggal dikunci (kind 'confirmed')
         var _confQty = 0, _firstConf = '';
         _confEnt.forEach(function(ce){
           if(ce.stale) return; // forecast berubah → ikut MRP, supplier perlu konfirmasi ulang
-          _uddAddPortion(key, ce.date, ce.qty, 'confirmed');
+          _uddAddPortion(key, ce.date, ce.qty, ce.req ? 'request' : 'confirmed'); // request = Tanggal Request Kirim (FIX) di RMD
           _confQty += ce.qty;
           if(!_firstConf || ce.date < _firstConf) _firstConf = ce.date;
           // Qty terkonfirmasi hanya menutup kebutuhan MULAI bulan tanggal konfirmasinya
@@ -8673,7 +8673,7 @@ function generateUpdateDelDate() {
       var d = newUpdateDelDate[key];
       // Seluruh qty PO sudah dikonfirmasi supplier → tanggal dikunci, tidak dinaikkan
       var _spK = newUddSplit[key] || [];
-      if(d && _spK.length && _spK.every(function(pt){ return pt.kind === 'confirmed'; })){
+      if(d && _spK.length && _spK.every(function(pt){ return pt.kind === 'confirmed' || pt.kind === 'request'; })){
         if(!prevISO || d > prevISO) prevISO = d;
         return;
       }
@@ -8681,7 +8681,7 @@ function generateUpdateDelDate() {
       if(prevISO && d < prevISO) {
         newUpdateDelDate[key] = prevISO; // naikkan ke tanggal PO sebelumnya
         // pecahan ikut dinaikkan supaya konsisten dengan kolom Update DelDate (kecuali porsi terkonfirmasi supplier)
-        (newUddSplit[key]||[]).forEach(function(pt){ if(pt.date && pt.date < prevISO && pt.kind !== 'confirmed') pt.date = prevISO; });
+        (newUddSplit[key]||[]).forEach(function(pt){ if(pt.date && pt.date < prevISO && pt.kind !== 'confirmed' && pt.kind !== 'request') pt.date = prevISO; });
         d = prevISO;
       }
       prevISO = d;
@@ -8718,12 +8718,14 @@ function _rmdConfMap(){
       o.rows.forEach(function(r){
         if(!r || !/^\d{4}-\d{2}-\d{2}$/.test(String(r.date||'')) || !(Number(r.qty) > 0)) return;
         var pt = {date: String(r.date), qty: Number(r.qty), seq: Number(r.seq) || 0,
-                  key: String(r.key || ''), baseline: /^\d{4}-\d{2}-\d{2}$/.test(String(r.baseline || '')) ? String(r.baseline) : '', fix: !!r.fix};
+                  key: String(r.key || ''), baseline: /^\d{4}-\d{2}-\d{2}$/.test(String(r.baseline || '')) ? String(r.baseline) : '', fix: !!r.fix,
+                  req: !!r.req}; // 16 Nov 2026: req = belum dikonfirmasi, tapi ada Tanggal Request Kirim (FIX) di RMD
         var k1 = String(r.docNum) + '_' + String(r.lineNum);
         (map.byLine[k1] || (map.byLine[k1] = [])).push(pt);
         var k2 = String(r.docNum) + '_' + String(r.itemCode);
         (map.byDocItem[k2] || (map.byDocItem[k2] = [])).push(pt);
         map.n++;
+        if(pt.req) map.nReq = (map.nReq || 0) + 1; else map.nConf = (map.nConf || 0) + 1;
       });
     }
   } catch(e){ console.warn('[rmd_supplier_conf] parse gagal:', e); }
@@ -8737,6 +8739,7 @@ function _rmdConfPortionsFor(p, poQty){
   var list = null;
   if(p.lineNum != null) list = m.byLine[String(p.docNum) + '_' + String(p.lineNum)] || null;
   else list = m.byDocItem[String(p.docNum) + '_' + String(p.itemCode)] || null;
+  if(list) list = list.filter(function(x){ return !x.req; }); // request FIX bukan konfirmasi supplier
   if(!list || !list.length) return [];
   var sorted = list.slice().sort(function(a, b){ return a.date === b.date ? a.seq - b.seq : (a.date < b.date ? -1 : 1); });
   var out = [], left = poQty;
@@ -8774,7 +8777,7 @@ function _rmdConfEntriesFor(p, poQty){
   var out = [], left = poQty;
   for(var i = 0; i < sorted.length && left > 1e-6; i++){
     var q = Math.min(sorted[i].qty, left);
-    out.push({date: sorted[i].date, qty: q, seq: sorted[i].seq, key: sorted[i].key, baseline: sorted[i].baseline, fix: sorted[i].fix});
+    out.push({date: sorted[i].date, qty: q, seq: sorted[i].seq, key: sorted[i].key, baseline: sorted[i].baseline, fix: sorted[i].fix, req: !!sorted[i].req});
     left -= q;
   }
   return out;
@@ -8870,7 +8873,8 @@ function rmdMirrorRender(focusId){
   var hide = {};
   if(!(typeof _isAdmin !== 'undefined' && _isAdmin)){ var ir = H.indexOf('Real Name'); if(ir >= 0) hide[ir] = true; } // Real Name hanya admin (aturan lama)
   var cols = []; H.forEach(function(h, i){ if(!hide[i]) cols.push(i); });
-  var iStatus = H.indexOf('Status'), iKonf = H.indexOf('Status Konfirmasi'), iReq = H.indexOf('Req. PPIC'), iSug = H.indexOf('Suggest MRP date');
+  var iStatus = H.indexOf('Status'), iKonf = H.indexOf('Status Konfirmasi'), iReq = H.indexOf('Tanggal Request Kirim'), iSug = H.indexOf('Update Delivery Date');
+  if(iReq < 0) iReq = H.indexOf('Req. PPIC'); if(iSug < 0) iSug = H.indexOf('Suggest MRP date'); // nama header lama
   var supCols = {}; ['Konfirmasi ETA EJI','Qty Konfirm','Notes From Supplier'].forEach(function(n){ var k = H.indexOf(n); if(k >= 0) supCols[k] = true; });
   var onlyOpenEl = document.getElementById('rmd-only-open'); var onlyOpen = onlyOpenEl && onlyOpenEl.checked;
   var q = _rmdMirror.q, cf = _rmdMirror.colFilter;
@@ -8938,7 +8942,7 @@ function _rmdConfRenderTs(){
   var m = _rmdConfMap();
   var t = '';
   if(m.ts){ try { t = new Date(m.ts).toLocaleString('id-ID', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}); } catch(e){ t = m.ts; } }
-  el.textContent = m.ts ? ('konfirmasi supplier: ' + m.n + ' baris · ditarik ' + t) : '';
+  el.textContent = m.ts ? ('konfirmasi supplier: ' + (m.nConf || 0) + ' baris' + (m.nReq ? ' + ' + m.nReq + ' request FIX' : '') + ' · ditarik ' + t) : '';
 }
 function pullSupplierConfFromRMD(){
   var url   = (localStorage.getItem('update_deldate_gsheet_url')   || '').trim();
@@ -8955,8 +8959,17 @@ function pullSupplierConfFromRMD(){
       localStorage.setItem('rmd_supplier_conf', JSON.stringify({ts: new Date().toISOString(), rows: d.rows})); // CLOUD_KEYS → otomatis cloudSave
       _rmdConfRenderTs();
       if(document.getElementById('pg-po') && document.getElementById('pg-po').classList.contains('active')) renderPO();
-      toast('Konfirmasi supplier ditarik: ' + d.rows.length + ' baris' + (d.invalid ? (' · ' + d.invalid + ' tanggal tidak terbaca') : '')
-        + '. Klik 📅 Generate Update DelDate untuk menerapkan.', 'ok');
+      var _nReqR = d.rows.filter(function(x){ return x && x.req; }).length;
+      var _msgConf = 'Konfirmasi supplier ditarik: ' + (d.rows.length - _nReqR) + ' baris' + (_nReqR ? (' + ' + _nReqR + ' Tanggal Request Kirim (FIX)') : '') + (d.invalid ? (' · ' + d.invalid + ' tanggal tidak terbaca') : '');
+      // 16 Nov 2026: langsung terapkan (Generate Update DelDate otomatis) kalau syaratnya lengkap
+      var _canGen = !window._mrpLoadFailed && STATE.poData && STATE.poData.length && STATE.mrpData &&
+                    Object.keys(STATE.mrpData).length && typeof FC_MONTHS !== 'undefined' && FC_MONTHS && FC_MONTHS.length;
+      if(_canGen){
+        toast(_msgConf + ' · menerapkan ke Update DelDate…', 'ok');
+        setTimeout(function(){ try { generateUpdateDelDate(); } catch(e){ toast('Generate otomatis gagal: ' + e.message + ' — klik 📅 Generate Update DelDate manual', 'err'); } }, 300);
+      } else {
+        toast(_msgConf + '. Data PO / MRP / Forecast belum lengkap di laptop ini — buka halaman Forecast lalu klik 📅 Generate Update DelDate.', 'ok');
+      }
     })
     .catch(function(e){ toast('Gagal tarik konfirmasi: ' + e.message, 'err'); });
 }
@@ -8997,7 +9010,9 @@ function exportPOGSheet() {
   var url = localStorage.getItem('update_deldate_gsheet_url') || '';
   var token = localStorage.getItem('update_deldate_gsheet_token') || '';
   // Tampilkan input modal
+  var _oldM = document.getElementById('udd-gs-modal'); if(_oldM) _oldM.remove();
   var modal = document.createElement('div');
+  modal.id = 'udd-gs-modal'; // 16 Nov 2026: ditutup lewat id (selector style lama tidak pernah cocok → pop-up tidak tertutup)
   modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center';
   modal.innerHTML='<div style="background:var(--bg2);border-radius:10px;padding:24px;width:420px;max-width:94vw;box-shadow:0 8px 32px rgba(0,0,0,.3)">'
     +'<h3 style="margin:0 0 16px;font-size:15px">Export ke Google Sheets</h3>'
@@ -9021,7 +9036,7 @@ function _doExportPOGSheet() {
   if(!url) { toast('Masukkan Apps Script URL', 'err'); return; }
   localStorage.setItem('update_deldate_gsheet_url',   url.trim());
   localStorage.setItem('update_deldate_gsheet_token', token.trim());
-  document.querySelector('div[style*="position:fixed"][style*="z-index:9999"]')?.remove();
+  var _gsM = document.getElementById('udd-gs-modal'); if(_gsM) _gsM.remove();
 
   var headers = ['Doc Num','Supplier','Item Code','Item Name','Site','Open Qty','UOM',
                  'PR Req Date','Tgl Request Kirim','Qty Konfirm','Tgl Konfirmasi','Notes','Update DelDate'];
@@ -9146,7 +9161,7 @@ function renderPO() {
     var uddTitle = ovr.date ? 'Dari Tgl Request Kirim' : (_uddHas ? 'Generated dari forecast' : 'Belum di-generate');
     var _uddSp = (STATE.updateDelDateSplit && (STATE.updateDelDateSplit[key]||STATE.updateDelDateSplit[keyL2])) || null;
     if(_uddSp && _uddSp.length > 1){
-      uddTitle += ' | Pecahan: ' + _uddSp.map(function(pt){ return n_id(pt.qty) + ' @ ' + (pt.date ? pt.date.split('-').reverse().join('/') : 'tidak dibutuhkan') + (pt.kind === 'confirmed' ? ' (konfirmasi supplier)' : ''); }).join('; ');
+      uddTitle += ' | Pecahan: ' + _uddSp.map(function(pt){ return n_id(pt.qty) + ' @ ' + (pt.date ? pt.date.split('-').reverse().join('/') : 'tidak dibutuhkan') + (pt.kind === 'confirmed' ? ' (konfirmasi supplier)' : (pt.kind === 'request' ? ' (Tanggal Request Kirim FIX)' : '')); }).join('; ');
       uddDisp += ' (+' + (_uddSp.length-1) + ')';
     }
     if(_uddSp && _uddSp.some(function(pt){ return pt.kind === 'confirmed'; })){
