@@ -3501,7 +3501,7 @@ function cloudLoad(callback) {
       .catch(function(e){
         console.warn('Cloud load failed (attempt '+_attempt+'/3):', e.message);
         if(_attempt < 3) setTimeout(_go, 1500 * _attempt);
-        else callback({});
+        else { window._cloudLoadFailed = true; callback({}); } // 16 Nov 2026: gagal tarik → requirement di-0-kan
       });
   })();
 }
@@ -3907,6 +3907,7 @@ function _applyRealtimeChanges(keys, vals, docTs) {
               break;
             }
             STATE.mrpData = JSON.parse(val || 'null');
+            if(window._mrpLoadFailed){ window._mrpLoadFailed = false; try { _mrpFailBanner(false); } catch(_e){} }
             // Baru di sini ditulis ke localStorage (loop di atas sengaja tidak menulis
             // mrp_data buta — mencegah data lama menimpa lokal walau handler skip).
             try { _origSetItem.call(localStorage, 'mrp_data', val || ''); } catch(e){}
@@ -4266,7 +4267,7 @@ function appStart() {
       if((!_mpsData || !Object.keys(_mpsData).length) && typeof _autoLoadMpsFromSheet === 'function') _autoLoadMpsFromSheet();
     }, 2500);
   }); }
-  else { setTimeout(function(){ afterLoad({}); setTimeout(cloudStartRealtime, 500); }, 50); }
+  else { window._cloudLoadFailed = true; setTimeout(function(){ afterLoad({}); setTimeout(cloudStartRealtime, 500); }, 50); }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -4542,8 +4543,7 @@ function loadSheetData(type, isAuto) {
         // Cap waktu NAIK: ini perubahan data sah → laptop lain harus menganggapnya
         // lebih baru (ts ditanam di dokumen cloud oleh cloudSave).
         var _mTs1 = Date.now(); window._mrpDataTs = _mTs1;
-        localStorage.setItem('mrp_data_ts', String(_mTs1));
-        localStorage.setItem('mrp_data', JSON.stringify(merged));
+        _mrpPersistLocal(JSON.stringify(merged), _mTs1);
         localStorage.setItem('mrp_upload_ts', ts);
         var cnt = Object.keys(merged).length;
         if(infoEl) infoEl.textContent = cnt+' item — max3MRP diperbarui dari GSheet, months dari MPS→MRP';
@@ -4553,8 +4553,7 @@ function loadSheetData(type, isAuto) {
       } else {
         STATE.mrpData = processMRP(rows, headers);
         var _mTs2 = Date.now(); window._mrpDataTs = _mTs2;
-        localStorage.setItem('mrp_data_ts', String(_mTs2));
-        localStorage.setItem('mrp_data', JSON.stringify(STATE.mrpData));
+        _mrpPersistLocal(JSON.stringify(STATE.mrpData), _mTs2);
         localStorage.setItem('mrp_upload_ts', ts);
         var cnt = Object.keys(STATE.mrpData).length;
         if(infoEl) infoEl.textContent = cnt+' item dimuat ✓';
@@ -8396,6 +8395,7 @@ function _loadGenTimestamp(lsKey, spanId) {
 }
 
 function generateUpdateDelDate() {
+  if(window._mrpLoadFailed){toast('Requirement belum termuat (tarik data cloud gagal) — klik 🔄 Coba lagi di banner merah dulu','err');return;}
   if(!STATE.poData||!STATE.poData.length){toast('Load PO dulu','err');return;}
   if(!STATE.mrpData){toast('Load MRP/Master Data dulu','err');return;}
   if(!FC_MONTHS||!FC_MONTHS.length){toast('Buka halaman Forecast dulu','err');return;}
@@ -9015,6 +9015,7 @@ function exportPOGSheet() {
 }
 
 function _doExportPOGSheet() {
+  if(window._mrpLoadFailed){toast('Requirement belum termuat (tarik data cloud gagal) — ⬆ GSheet dikunci supaya angka 0 tidak terkirim ke RMD','err');return;}
   var url   = (document.getElementById('update-deldate-gs-url')||{}).value || '';
   var token = (document.getElementById('update-deldate-gs-tok')||{}).value || '';
   if(!url) { toast('Masukkan Apps Script URL', 'err'); return; }
@@ -9936,8 +9937,7 @@ function processFile(file, type) {
         STATE.mrpData = processMRP(json, headers);
         // Cap waktu naik supaya laptop lain menganggap upload file ini lebih baru
         var _mTsU = Date.now(); window._mrpDataTs = _mTsU;
-        localStorage.setItem('mrp_data_ts', String(_mTsU));
-        localStorage.setItem('mrp_data', JSON.stringify(STATE.mrpData));
+        _mrpPersistLocal(JSON.stringify(STATE.mrpData), _mTsU);
         document.getElementById('mrp-fname').textContent = file.name;
         document.getElementById('mrp-status').className = 'dot';
         var cnt = Object.keys(STATE.mrpData).length;
@@ -10631,7 +10631,7 @@ function _doBuildProjection() {
       return { code:p.code, name:p.name||p.code, doi:p.doiFCNum||0, type:p.itemType||'' };
     });
     var emailData = { date:todayISO2, urgent:urgentItems, under:underItems, over:overItems, totalItems:projection.length, urgentCount:urgentCount };
-    cloudSave('email_daily_data', JSON.stringify(emailData));
+    if(!window._mrpLoadFailed) cloudSave('email_daily_data', JSON.stringify(emailData));
   } catch(e) { console.warn('[build] email_daily_data save fail:', e.message); }
 
   // ── Simpan fc_result ke Firebase untuk WA Bot ────────────────────────────
@@ -10665,7 +10665,7 @@ function _doBuildProjection() {
         over:   projection.filter(function(p){return p.category==='OVER';}).length
       }
     };
-    cloudSave('fc_result', JSON.stringify(fcResultPayload));
+    if(!window._mrpLoadFailed) cloudSave('fc_result', JSON.stringify(fcResultPayload));
     console.log('[build] fc_result saved:', fcResultItems.length, 'items');
   } catch(e) { console.warn('[build] fc_result save fail:', e.message); }
 
@@ -15106,6 +15106,34 @@ function td(content, col, extraStyle) {
 }
 
 // ─── INIT ────────────────────────────────────────────────────────────────────
+// ── 16 Nov 2026: simpan mrp_data lokal dengan VERIFIKASI ──────────────────────
+// Dulu ts ditulis dulu lalu data; kalau localStorage penuh, ts BARU tersimpan tapi
+// data tetap LAMA → setelah refresh angka balik ke angka lama. Sekarang data ditulis
+// dan dicek dulu; gagal → data lokal dibuang & ts lokal 0 (cloud/IndexedDB yang dipakai).
+function _mrpPersistLocal(json, ts){
+  var ok = false;
+  try { localStorage.setItem('mrp_data', json); ok = (localStorage.getItem('mrp_data') === json); } catch(e){ ok = false; }
+  if(ok){ try { localStorage.setItem('mrp_data_ts', String(ts)); } catch(e){} }
+  else {
+    try { localStorage.removeItem('mrp_data'); } catch(e){}
+    try { _origSetItem.call(localStorage, 'mrp_data_ts', '0'); } catch(e){}
+    try { toast('⚠ Penyimpanan lokal laptop ini penuh — hasil MRP tetap disimpan ke cloud & IndexedDB', 'err'); } catch(e){}
+    console.warn('[mrp_data] localStorage penuh — data lokal dibuang supaya angka lama tidak muncul lagi');
+  }
+  if(window._mrpLoadFailed){ window._mrpLoadFailed = false; try { _mrpFailBanner(false); } catch(e){} }
+  return ok;
+}
+function _mrpFailBanner(show){
+  var el = document.getElementById('mrp-fail-banner');
+  if(!show){ if(el) el.remove(); return; }
+  if(el) return;
+  el = document.createElement('div');
+  el.id = 'mrp-fail-banner';
+  el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#dc2626;color:#fff;padding:8px 14px;font-size:13px;display:flex;gap:12px;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.25)';
+  el.innerHTML = '<span>⚠ <b>Gagal tarik data dari cloud.</b> Requirement (MRP) ditampilkan <b>0</b> supaya tidak tercampur angka lama. Generate Update DelDate &amp; ⬆ GSheet dikunci.</span>'
+    + '<button onclick="location.reload()" style="background:#fff;color:#dc2626;border:0;border-radius:6px;padding:4px 10px;font-weight:600;cursor:pointer">🔄 Coba lagi</button>';
+  document.body.appendChild(el);
+}
 function _appInit() {
   console.log('[_appInit] START');
   // Restore sidebar collapsed state
@@ -15121,19 +15149,35 @@ function _appInit() {
   // Hasil "Terapkan MRP" dulu bisa hilang setelah refresh kalau localStorage beku
   // (kuota penuh) atau cloudSave sempat gagal — user harus Terapkan ulang terus.
   (function(){
+    // 16 Nov 2026: tarik data cloud GAGAL → JANGAN pakai angka lama dari laptop ini.
+    // Requirement di-0-kan + banner merah + Generate/⬆ GSheet dikunci (aturan user: lebih baik 0 daripada ambigu).
+    if(window._cloudLoadFailed){
+      STATE.mrpData = {};
+      window._mrpDataTs = 0;
+      window._mrpLoadFailed = true;
+      console.warn('[boot] mrp_data: tarik cloud GAGAL → requirement di-0-kan (angka lama lokal tidak dipakai)');
+      setTimeout(function(){ _mrpFailBanner(true); }, 300);
+      return;
+    }
     var _cbdM   = window._bootCloudData || {};
     var _cldTsM = parseInt(_cbdM['mrp_data_ts']||'0',10)||0;
     // Ts yang TERTANAM di dokumen mrp_data (atomik — selalu seumur dengan datanya)
     // lebih dipercaya daripada dokumen mrp_data_ts yang bisa "lari sendiri" kalau
     // salah satu write gagal.
-    try { var _embTs = parseInt((window._cloudKvTs||{})['mrp_data']||'0',10)||0; if(_embTs > 0) _cldTsM = _embTs; } catch(e){}
+    var _embTs = 0;
+    try { _embTs = parseInt((window._cloudKvTs||{})['mrp_data']||'0',10)||0; if(_embTs > 0) _cldTsM = _embTs; } catch(e){}
     var _locTsM = window._bootMrpLocalTs || 0;
     var _locM   = (window._bootMrpLocalData != null) ? window._bootMrpLocalData
                 : (function(){ try{ return localStorage.getItem('mrp_data'); }catch(e){ return null; } })();
     // ⭐ '>' bukan '>=': seri waktu → LOKAL menang. Dulu seri dimenangkan cloud —
     // kalau write data ke cloud sempat gagal (ts naik, data tidak), boot memilih
     // data LAMA dari cloud padahal ts-nya sama → angka balik lama setelah refresh.
-    var _pickCloud = _cbdM['mrp_data'] != null && _cldTsM > _locTsM;
+    // 16 Nov 2026: SERI waktu tapi isi beda + ts cloud tertanam (atomik) → CLOUD menang.
+    // Ts tertanam selalu seumur datanya, jadi isi lokal yang beda pada ts yang sama
+    // = tulisan lokal yang gagal (localStorage penuh: ts baru tersimpan, data tidak)
+    // → dulu lokal (angka LAMA) menang lalu malah "menyembuhkan" cloud dengan angka lama.
+    var _pickCloud = _cbdM['mrp_data'] != null &&
+      (_cldTsM > _locTsM || (_embTs > 0 && _cldTsM === _locTsM && _locM != null && _cbdM['mrp_data'] !== _locM));
     var _srcM = _pickCloud ? _cbdM['mrp_data'] : (_locM != null ? _locM : (_cbdM['mrp_data'] || null));
     try { STATE.mrpData = _srcM ? JSON.parse(_srcM) : null; } catch(e){ STATE.mrpData = null; }
     window._mrpDataTs = Math.max(_cldTsM, _locTsM);
@@ -15142,7 +15186,7 @@ function _appInit() {
       try { _origSetItem.call(localStorage, 'mrp_data', _locM); _origSetItem.call(localStorage, 'mrp_data_ts', String(_locTsM)); } catch(e){}
       // Sembuhkan cloud hanya kalau isinya memang beda (ts lokal lebih baru, ATAU
       // ts seri tapi data cloud beda = sisa write yang dulu gagal separuh).
-      if(_locTsM > _cldTsM || (_cbdM['mrp_data'] != null && _cbdM['mrp_data'] !== _locM)){
+      if(_locTsM > _cldTsM){ // hanya kalau lokal BENAR-BENAR lebih baru
         try { cloudSave('mrp_data', _locM); cloudSave('mrp_data_ts', String(_locTsM)); } catch(e){}
         console.log('[boot] mrp_data LOKAL dipakai (ts '+_locTsM+' vs cloud '+_cldTsM+') → cloud disembuhkan');
       } else {
@@ -15157,6 +15201,7 @@ function _appInit() {
   try {
     if(typeof _stateIdbLoad === 'function') _stateIdbLoad('mrp_applied', function(rec){
       if(!rec || !rec.ts || !rec.data) return;
+      if(window._mrpLoadFailed) return; // gagal tarik cloud → tetap 0, jangan isi angka lokal
       var _cur = window._mrpDataTs || 0;
       if(rec.ts <= _cur) return;
       try {
@@ -21357,8 +21402,7 @@ function _mrpApplyToState(result) {
   window._mrpDataTs = _mrpTs;
   var _mrpJson = JSON.stringify(mrpData);
   // ts DULU baru data — cloudSave menanam ts dari localStorage ke dokumen mrp_data
-  localStorage.setItem('mrp_data_ts', String(_mrpTs));
-  localStorage.setItem('mrp_data', _mrpJson);
+  _mrpPersistLocal(_mrpJson, _mrpTs);
   // Auto-sync ke Firebase supaya laptop lain langsung update
   cloudSave('mrp_data', _mrpJson);
   cloudSave('mrp_data_ts', String(_mrpTs));
