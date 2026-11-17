@@ -4798,6 +4798,7 @@ var renderProjectionDebounced = debounce(function(){ renderProjection(); }, 180)
 
 // ─── NAVIGATION ──────────────────────────────────────────────────────────────
 function showPage(name, el) {
+  if((name === 'forecast' || name === 'projection') && typeof _rmdConfAutoPull === 'function') setTimeout(_rmdConfAutoPull, 800); // 17 Nov 2026
   // Gate protected pages
   if((name === 'settings' || name === 'upload' || name === 'where-used' || name === 'npd' || name === 'cek-fg') && !_isAdmin) {
     toast('Login dulu untuk akses halaman ini', 'err');
@@ -9260,6 +9261,91 @@ function _initColResize(tableId) {
   });
 }
 
+// ══ 17 Nov 2026: KONFIRMASI EFEKTIF (kiriman yang sudah datang tidak dihitung lagi) ══════════
+// Sumber: (1) konfirmasi supplier dari RMD (hanya baris Open, qty ≤ OpenQty baris) → dipakai kalau ada;
+//         (2) kalau tidak ada → konfirmasi lama dashboard, DIKURANGI GRPO yang masuk SETELAH konfirmasi
+//             itu dicatat (confUpd). Dihitung saat tampil — data tersimpan tidak diubah, jadi tidak ada
+//             pengurangan berulang (bug lama _reduceConfQtyByGRPO).
+var _CONF_REDUCE_MUTATE = false; // true = pakai lagi pengurang lama yang mengubah data tersimpan
+var _grIdxCache = {sig: null, map: {}};
+function _grAfterIndex(){
+  var a = STATE.grpoHistori || [], b = STATE.grpoData || [];
+  var sig = a.length + '|' + b.length + '|' + (b[0] && b[0].grpoDocNum || '');
+  if(_grIdxCache.sig === sig) return _grIdxCache.map;
+  var map = {}, seen = {};
+  a.concat(b).forEach(function(g){
+    var ref = String(g && g.baseRef || ''); if(!ref || !g.itemCode) return;
+    var d = String(g.grpoDate || ''), iso = d.indexOf('/') > 0 ? d.split('/').reverse().join('-') : d.slice(0, 10);
+    var q = parseFloat(g.qty) || 0; if(!(q > 0)) return;
+    var sk = (g.grpoDocNum || '') + '|' + g.itemCode + '|' + q + '|' + iso + '|' + ref;
+    if(seen[sk]) return; seen[sk] = 1;
+    var k = ref + '_' + g.itemCode;
+    (map[k] || (map[k] = [])).push({date: iso, qty: q});
+  });
+  _grIdxCache = {sig: sig, map: map};
+  return map;
+}
+// Konfirmasi lama dashboard setelah dikurangi GRPO sesudah dicatat → {date, qty} atau null
+function _poConfNetOld(po){
+  var cc = _poResolveConf(po) || {};
+  if(!cc.confDate) return null;
+  var qty = parseFloat(cc.confQty) || po.openQty || 0;
+  var since = String(cc.confUpd || '').slice(0, 10);
+  var grs = _grAfterIndex()[String(po.docNum) + '_' + po.itemCode] || [];
+  var pool = 0;
+  grs.forEach(function(g){ if(!since || g.date >= since) pool += g.qty; });
+  if(pool > 0){
+    // GRPO tidak bawa nomor line → dibagi FIFO ke line lain (lineNum lebih kecil) yang juga punya konfirmasi
+    (STATE.poData || []).filter(function(l){ return String(l.docNum) === String(po.docNum) && l.itemCode === po.itemCode && (l.lineNum || 0) < (po.lineNum || 0); })
+      .sort(function(x, y){ return (x.lineNum || 0) - (y.lineNum || 0); })
+      .forEach(function(l){
+        var c2 = _poResolveConf(l) || {}; if(!c2.confDate || pool <= 0) return;
+        pool -= Math.min(pool, parseFloat(c2.confQty) || l.openQty || 0);
+      });
+  }
+  var net = Math.min(qty - pool, po.openQty || 0);
+  if(!(net > 0.009)) return null;
+  return {date: cc.confDate, qty: net};
+}
+// Kiriman terkonfirmasi untuk 1 PO line → {src:'rmd'|'old'|'', list:[{date ISO, qty}]}
+function _poIncomingFor(po){
+  var rp = (typeof _rmdConfPortionsFor === 'function') ? _rmdConfPortionsFor(po, po.openQty || 0) : [];
+  if(rp.length) return {src: 'rmd', list: rp.map(function(x){ return {date: x.date, qty: x.qty}; })};
+  var n = _poConfNetOld(po);
+  return n ? {src: 'old', list: [n]} : {src: '', list: []};
+}
+// Bentuk sama dengan _poResolveConf (tanggal paling awal + total qty) — untuk tampilan ringkas
+function _poResolveConfNet(po){
+  var inc = _poIncomingFor(po);
+  if(!inc.list.length) return {confDate: '', confQty: '', confUpd: '', confSource: ''};
+  var d = inc.list.map(function(x){ return x.date; }).sort()[0];
+  var q = inc.list.reduce(function(t, x){ return t + x.qty; }, 0);
+  return {confDate: d, confQty: q, confUpd: '', confSource: inc.src};
+}
+// Konfirmasi RMD ditarik ulang otomatis (tanpa Generate) kalau data tersimpan > 1 jam
+function _rmdConfAutoPull(){
+  if(window._rmdConfPulling) return;
+  var url = '', token = '';
+  try { url = (localStorage.getItem('update_deldate_gsheet_url') || '').trim(); token = (localStorage.getItem('update_deldate_gsheet_token') || '').trim(); } catch(e){}
+  if(!url) return;
+  var m = (typeof _rmdConfMap === 'function') ? _rmdConfMap() : {};
+  var age = m.ts ? (Date.now() - new Date(m.ts).getTime()) : Infinity;
+  if(age < 3600000) return;
+  window._rmdConfPulling = true;
+  fetch(url, { method: 'POST', body: JSON.stringify({token: token, action: 'getConf'}), headers: {'Content-Type': 'text/plain'} })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      window._rmdConfPulling = false;
+      if(!d || !d.ok || !Array.isArray(d.rows)) return;
+      localStorage.setItem('rmd_supplier_conf', JSON.stringify({ts: new Date().toISOString(), rows: d.rows}));
+      try { _rmdConfRenderTs(); } catch(e){}
+      if(document.getElementById('fc-table') && typeof renderForecast === 'function') { try { renderForecast(); } catch(e){} }
+      if(STATE.projectionData && STATE.projectionData.length) STATE.projectionData.forEach(function(p){ _refreshProjectionIncoming(p.productCode); });
+      console.log('[rmd conf] ditarik ulang otomatis:', d.rows.length, 'baris');
+    })
+    .catch(function(e){ window._rmdConfPulling = false; console.warn('[rmd conf] auto pull gagal:', e.message); });
+}
+
 function _refreshProjectionIncoming(itemCode) {
   var proj = STATE.projectionData && STATE.projectionData.find(function(p){ return p.productCode === itemCode; });
   if(!proj) return;
@@ -9270,13 +9356,12 @@ function _refreshProjectionIncoming(itemCode) {
   // dipakai renderPO — mencegah data yang sama kelihatan beda antara List Pengiriman PO
   // dan Projection Stock.
   (STATE.poData||[]).filter(function(p){ return p.itemCode === itemCode; }).forEach(function(po){
-    var cc = _poResolveConf(po);
-    var cd = cc.confDate || null;
-    var cq = cc.confQty  || null;
-    if(cd && cdList.indexOf(cd) < 0) cdList.push(cd);
-    if(cd && (parseFloat(cq)||0) > 0) cqTotal += (parseFloat(cq)||0);
-    // DOI+INCOMING hanya dari konfirmasi supplier
-    if(cd) { opqTotal += (parseFloat(cq) || po.openQty || 0); }
+    // 17 Nov 2026: konfirmasi efektif (RMD dulu, lalu konfirmasi lama dikurangi GRPO yang sudah datang)
+    _poIncomingFor(po).list.forEach(function(x){
+      if(cdList.indexOf(x.date) < 0) cdList.push(x.date);
+      cqTotal += x.qty;
+      opqTotal += x.qty; // DOI+INCOMING hanya dari konfirmasi supplier
+    });
   });
   proj.tglIncoming   = cdList.length
     ? cdList.map(function(d){ var p=d.split('-'); return p.length===3&&p[0].length===4?p[2]+'-'+p[1]+'-'+p[0]:d; }).join(', ')
@@ -10470,13 +10555,8 @@ function _doBuildProjection() {
       // Resolve ke konfirmasi kanonik (timestamp terbaru menang, key lama/baru) —
       // sama dengan _refreshProjectionIncoming, supaya incoming konsisten & tidak 0
       // gara-gara key format lama (docNum_itemCode).
-      var cc = _poResolveConf(po);
-      var _cd = cc.confDate || null;
-      var _cq = cc.confQty  || null;
-      if(_cd) {
-        // DOI+INCOMING hanya dari confDate (konfirmasi supplier)
-        totalOpenPOQty += (parseFloat(_cq) || po.openQty || 0);
-      }
+      // 17 Nov 2026: konfirmasi efektif (yang sudah diterima GRPO tidak dihitung lagi)
+      _poIncomingFor(po).list.forEach(function(x){ totalOpenPOQty += x.qty; });
     });
 
     // DOI Max = stock / (MRP Max / days) — basis coverage & kategori
@@ -10549,11 +10629,10 @@ function _doBuildProjection() {
     // paling baru menang). Konsisten dengan renderPO — mencegah data yang sama kelihatan
     // beda antara List Pengiriman PO dan Projection Stock (bug Suncat MTA 3000070015 Jul 2026).
     (poDataByItem[code] || []).forEach(function(po){
-      var cc = _poResolveConf(po);
-      var useDate = cc.confDate || null;
-      var useQty  = useDate ? (parseFloat(cc.confQty) || 0) : 0;
-      if(useDate && confDateList.indexOf(useDate) < 0) confDateList.push(useDate);
-      if(useDate && useQty > 0) confQtyTotal += useQty;
+      _poIncomingFor(po).list.forEach(function(x){ // 17 Nov 2026: konfirmasi efektif
+        if(confDateList.indexOf(x.date) < 0) confDateList.push(x.date);
+        confQtyTotal += x.qty;
+      });
     });
     // Auto-generated date+qty → separate fields, NOT comment
     var tglIncoming = confDateList.length
@@ -11900,7 +11979,7 @@ function _getNearestDelivery(code) {
     // Bug lama: widget ITEM KRITIS di dashboard cuma baca key lama, jadi jadwal/konfirmasi
     // yang tersimpan di key baru (lineNum-aware) tidak kebaca → "belum dijadwal" palsu.
     var ovr  = _poOvr(po);
-    var cc   = _poResolveConf(po);
+    var cc   = _poResolveConfNet(po); // 17 Nov 2026: konfirmasi efektif
     var confDate = cc.confDate || null;
     var confQty  = cc.confQty  || null;
     if(!ovr.date && !confDate) return;
@@ -14790,6 +14869,9 @@ function _pollGRPONow() {
 
 function _reduceConfQtyByGRPO() {
   // Kurangi confQty berdasarkan GRPO yang sudah datang (match by baseRef = PO docNum + itemCode)
+  // 17 Nov 2026: DIMATIKAN — tiap muat GRPO mengurangi total sebulan LAGI (pengurangan berulang).
+  // Pengganti: _poConfNetOld (dihitung saat tampil, data tersimpan tidak diubah).
+  if(!_CONF_REDUCE_MUTATE) return;
   if(!STATE.grpoData || !STATE.grpoData.length) return;
 
   // Akumulasi GRPO qty per docNum+itemCode
@@ -16169,7 +16251,8 @@ function _fcKonfAuto(code) {
       return;
     }
     var cc = {};
-    try { cc = _poResolveConf(po) || {}; } catch(e){ return; }
+    // 17 Nov 2026: konfirmasi lama dikurangi GRPO yang masuk setelah konfirmasi dicatat
+    try { var _nt = _poConfNetOld(po); if(!_nt) return; cc = {confDate: _nt.date, confQty: _nt.qty}; } catch(e){ return; }
     var cd = cc.confDate; if(!cd) return;             // hanya yang SUDAH dikonfirmasi supplier
     var p = String(cd).split('-'); if(p.length < 2) return;
     var y = parseInt(p[0],10), mn = parseInt(p[1],10);
