@@ -3758,7 +3758,7 @@ function _applyRealtimeChanges(keys, vals, docTs) {
         case 'sap_cache_grpo':
           var rawG2 = JSON.parse(val || '[]');
           STATE.grpoData = rawG2.map(function(g){
-            if(g.d !== undefined) return {grpoDate:fmtSAPDate(g.d),itemCode:g.i,itemName:g.n,supplierName:g.s,qty:g.q,uom:g.u,site:g.t};
+            if(g.d !== undefined) return {grpoDate:fmtSAPDate(g.d),itemCode:g.i,itemName:g.n,supplierName:g.s,qty:g.q,uom:g.u,site:g.t,baseRef:g.b||'',grpoDocNum:g.x||''};
             return g;
           });
           renderFlags.dash = true;
@@ -8230,7 +8230,7 @@ async function syncAll() {
       var sPO = JSON.stringify(compPO);
       // Compress GRPO
       var compGRPO = (STATE.grpoData||[]).map(function(g){
-        return {d:g.grpoDate,i:g.itemCode,n:g.itemName,s:g.supplierName,q:g.qty,u:g.uom,t:g.site};
+        return {d:g.grpoDate,i:g.itemCode,n:g.itemName,s:g.supplierName,q:g.qty,u:g.uom,t:g.site,b:g.baseRef||'',x:g.grpoDocNum||''};
       });
       var sGRPO = JSON.stringify(compGRPO);
       var sOSPR = JSON.stringify((STATE.osprData||[]).map(function(o){
@@ -9282,30 +9282,64 @@ function _grAfterIndex(){
     var k = ref + '_' + g.itemCode;
     (map[k] || (map[k] = [])).push({date: iso, qty: q});
   });
-  _grIdxCache = {sig: sig, map: map};
+  _grIdxCache = {sig: sig, map: map, byItem: null};
   return map;
 }
-// Konfirmasi lama dashboard setelah dikurangi GRPO sesudah dicatat → {date, qty} atau null
-function _poConfNetOld(po){
-  var cc = _poResolveConf(po) || {};
-  if(!cc.confDate) return null;
-  var qty = parseFloat(cc.confQty) || po.openQty || 0;
-  var since = String(cc.confUpd || '').slice(0, 10);
-  var grs = _grAfterIndex()[String(po.docNum) + '_' + po.itemCode] || [];
-  var pool = 0;
-  grs.forEach(function(g){ if(!since || g.date >= since) pool += g.qty; });
-  if(pool > 0){
-    // GRPO tidak bawa nomor line → dibagi FIFO ke line lain (lineNum lebih kecil) yang juga punya konfirmasi
-    (STATE.poData || []).filter(function(l){ return String(l.docNum) === String(po.docNum) && l.itemCode === po.itemCode && (l.lineNum || 0) < (po.lineNum || 0); })
-      .sort(function(x, y){ return (x.lineNum || 0) - (y.lineNum || 0); })
-      .forEach(function(l){
-        var c2 = _poResolveConf(l) || {}; if(!c2.confDate || pool <= 0) return;
-        pool -= Math.min(pool, parseFloat(c2.confQty) || l.openQty || 0);
-      });
+// Konfirmasi lama dashboard setelah dikurangi GRPO → {date, qty} atau null.
+// 17 Nov 2026 (rev): dicocokkan per ITEM, bukan hanya per nomor PO — supplier sering mengirim
+// dengan nomor PO lain (contoh Ecocerol: konfirmasi di PO …414, barang datang di PO …413 & …482).
+// Aturan: GRPO item yang sama, masuk SETELAH konfirmasi dicatat dan paling cepat 14 hari sebelum
+// tanggal konfirmasi, mengurangi konfirmasi — PO yang sama didahulukan, lalu tanggal konfirmasi terawal.
+var _CONF_EARLY_DAYS = 14;
+function _grItemIndex(){
+  // Langsung dari data GRPO — TIDAK wajib ada nomor PO (cache GRPO bulan berjalan sering tanpa baseRef).
+  // Data bulan berjalan dipakai semua; histori hanya ditambah kalau (tgl, item, qty) belum ada di data bulan berjalan.
+  var a = STATE.grpoHistori || [], b = STATE.grpoData || [];
+  var sig = a.length + '|' + b.length + '|' + (b[0] && (b[0].grpoDate + b[0].itemCode + b[0].qty) || '');
+  if(_grIdxCache.itemSig === sig && _grIdxCache.byItem) return _grIdxCache.byItem;
+  var m = {}, seen = {};
+  function iso(d){ d = String(d || ''); return d.indexOf('/') > 0 ? d.split('/').reverse().join('-') : d.slice(0, 10); }
+  b.forEach(function(g){
+    var q = parseFloat(g && g.qty) || 0; if(!(q > 0) || !g.itemCode) return;
+    var e = {date: iso(g.grpoDate), qty: q, ref: String(g.baseRef || '')};
+    seen[e.date + '|' + g.itemCode + '|' + q] = 1;
+    (m[g.itemCode] || (m[g.itemCode] = [])).push(e);
+  });
+  a.forEach(function(g){
+    var q = parseFloat(g && g.qty) || 0; if(!(q > 0) || !g.itemCode) return;
+    var e = {date: iso(g.grpoDate), qty: q, ref: String(g.baseRef || '')};
+    if(seen[e.date + '|' + g.itemCode + '|' + q]) return;
+    (m[g.itemCode] || (m[g.itemCode] = [])).push(e);
+  });
+  Object.keys(m).forEach(function(c){ m[c].sort(function(x, y){ return x.date < y.date ? -1 : (x.date > y.date ? 1 : 0); }); });
+  _grIdxCache.byItem = m; _grIdxCache.itemSig = sig;
+  return m;
+}
+function _isoAddDays(iso, n){ var d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() + n); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function _itemConfNetMap(code){
+  var confs = [];
+  (STATE.poData || []).forEach(function(l){
+    if(l.itemCode !== code) return;
+    var cc = _poResolveConf(l) || {}; if(!cc.confDate) return;
+    var cd = String(cc.confDate).indexOf('/') > 0 ? String(cc.confDate).split('/').reverse().join('-') : String(cc.confDate).slice(0, 10);
+    confs.push({po: l, key: _poKey(l), date: cc.confDate, cd: cd, since: String(cc.confUpd || '').slice(0, 10),
+                left: parseFloat(cc.confQty) || l.openQty || 0});
+  });
+  confs.sort(function(x, y){ return x.cd < y.cd ? -1 : (x.cd > y.cd ? 1 : 0); });
+  if(confs.length){
+    (_grItemIndex()[code] || []).forEach(function(g){
+      var q = g.qty;
+      var cand = confs.filter(function(c){ return c.left > 0.009 && (!c.since || g.date >= c.since) && g.date >= _isoAddDays(c.cd, -_CONF_EARLY_DAYS); });
+      cand.sort(function(x, y){ var sx = String(x.po.docNum) === g.ref ? 0 : 1, sy = String(y.po.docNum) === g.ref ? 0 : 1; return sx - sy || (x.cd < y.cd ? -1 : (x.cd > y.cd ? 1 : 0)); });
+      cand.forEach(function(c){ if(q <= 0) return; var t = Math.min(q, c.left); c.left -= t; q -= t; });
+    });
   }
-  var net = Math.min(qty - pool, po.openQty || 0);
-  if(!(net > 0.009)) return null;
-  return {date: cc.confDate, qty: net};
+  var out = {};
+  confs.forEach(function(c){ var n = Math.min(c.left, c.po.openQty || 0); if(n > 0.009) out[c.key] = {date: c.date, qty: n}; });
+  return out;
+}
+function _poConfNetOld(po){
+  return _itemConfNetMap(po.itemCode)[_poKey(po)] || null;
 }
 // Kiriman terkonfirmasi untuk 1 PO line → {src:'rmd'|'old'|'', list:[{date ISO, qty}]}
 function _poIncomingFor(po){
@@ -15026,7 +15060,7 @@ function _doGRPOPoll() {
       }
 
       // Save GRPO cache to Firebase
-      var compGRPO = STATE.grpoData.map(function(g){ return {d:g.grpoDate,i:g.itemCode,n:g.itemName,s:g.supplierName,q:g.qty,u:g.uom,t:g.site}; });
+      var compGRPO = STATE.grpoData.map(function(g){ return {d:g.grpoDate,i:g.itemCode,n:g.itemName,s:g.supplierName,q:g.qty,u:g.uom,t:g.site,b:g.baseRef||'',x:g.grpoDocNum||''}; });
       var sGRPO = JSON.stringify(compGRPO);
       localStorage.setItem('sap_cache_grpo', sGRPO);
       cloudSave('sap_cache_grpo', sGRPO);
@@ -15054,7 +15088,7 @@ function _doGRPOPoll() {
             var rawG = JSON.parse(cached);
             STATE.grpoData = rawG.map(function(g){
               return g.d !== undefined
-                ? {grpoDate:g.d,itemCode:g.i,itemName:g.n,supplierName:g.s,qty:g.q,uom:g.u,site:g.t}
+                ? {grpoDate:g.d,itemCode:g.i,itemName:g.n,supplierName:g.s,qty:g.q,uom:g.u,site:g.t,baseRef:g.b||'',grpoDocNum:g.x||''}
                 : g;
             });
             updateDashStats();
@@ -15434,7 +15468,7 @@ function _appInit() {
       if(cachedGRPO) {
         var rawG = JSON.parse(cachedGRPO);
         STATE.grpoData = rawG.map(function(g){
-          if(g.d !== undefined) return {grpoDate:fmtSAPDate(g.d),itemCode:g.i,itemName:g.n,supplierName:g.s,qty:g.q,uom:g.u,site:g.t};
+          if(g.d !== undefined) return {grpoDate:fmtSAPDate(g.d),itemCode:g.i,itemName:g.n,supplierName:g.s,qty:g.q,uom:g.u,site:g.t,baseRef:g.b||'',grpoDocNum:g.x||''};
           return g;
         });
       }
