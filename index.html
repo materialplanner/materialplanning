@@ -8704,6 +8704,13 @@ function generateUpdateDelDate() {
   toast('Update DelDate di-generate: '+Object.keys(newUpdateDelDate).length+' PO ✓','ok');
   var _nStale = _rmdConfCheckOut.filter(function(c){ return c.stale; }).length;
   if(_nStale) setTimeout(function(){ toast('⚠ ' + _nStale + ' konfirmasi supplier PERLU KONFIRMASI ULANG (forecast berubah) — klik ⬆ GSheet supaya status terkirim ke RMD & file supplier', 'err'); }, 1500);
+  // 20 Nov 2026: hasil Generate baru tersimpan di dashboard — RMD baru berubah setelah ⬆ GSheet.
+  // Dulu sering lupa (RMD tidak terupdate berhari-hari) → tawarkan langsung kirim.
+  setTimeout(function(){
+    try {
+      if(confirm('Update DelDate sudah dihitung ulang di dashboard.\n\nKirim ke RMD sekarang (⬆ GSheet)?\nKalau tidak dikirim, Update Delivery Date di RMD & file supplier BELUM berubah.')) _doExportPOGSheet();
+    } catch(e){}
+  }, 800);
 }
 // ── Konfirmasi supplier dari Raw Material Dashboard (RMD) — 13 Nov 2026 ────────
 // Sumber: RMD PO_Data (supplier isi di file GSheet per supplier → ditarik ke RMD via menu RMD).
@@ -9044,9 +9051,11 @@ function _doExportPOGSheet() {
     if(_nMan){ toast('⬆ GSheet DIBATALKAN: hasil Generate masih versi lama (' + _nMan + ' porsi tanggal manual). Klik 📅 Generate Update DelDate dulu, lalu ⬆ GSheet lagi.', 'err'); return; }
   }
   if(window._mrpLoadFailed){toast('Requirement belum termuat (tarik data cloud gagal) — ⬆ GSheet dikunci supaya angka 0 tidak terkirim ke RMD','err');return;}
-  var url   = (document.getElementById('update-deldate-gs-url')||{}).value || '';
-  var token = (document.getElementById('update-deldate-gs-tok')||{}).value || '';
-  if(!url) { toast('Masukkan Apps Script URL', 'err'); return; }
+  var _gsUrlEl = document.getElementById('update-deldate-gs-url');
+  // 20 Nov 2026: bisa dipanggil tanpa pop-up (setelah Generate) → pakai URL & token tersimpan
+  var url   = _gsUrlEl ? (_gsUrlEl.value || '') : (localStorage.getItem('update_deldate_gsheet_url') || '');
+  var token = _gsUrlEl ? ((document.getElementById('update-deldate-gs-tok')||{}).value || '') : (localStorage.getItem('update_deldate_gsheet_token') || '');
+  if(!url) { toast('Masukkan Apps Script URL', 'err'); if(!_gsUrlEl) exportPOGSheet(); return; }
   localStorage.setItem('update_deldate_gsheet_url',   url.trim());
   localStorage.setItem('update_deldate_gsheet_token', token.trim());
   var _gsM = document.getElementById('udd-gs-modal'); if(_gsM) _gsM.remove();
@@ -22535,6 +22544,8 @@ function _fcResetOspoOspr(code) {
     _fcOspoOverride = {};
     _fcOsprOverride = {};
     try { localStorage.removeItem('fc_ospo_ovr'); localStorage.removeItem('fc_ospr_ovr'); } catch(e){}
+    // v15: hapus juga di cloud — tanpa ini edit manual muncul lagi setelah reload (cloud menimpa localStorage)
+    try { cloudSave('fc_ospo_ovr', '{}'); cloudSave('fc_ospr_ovr', '{}'); } catch(e){}
     renderForecast();
     toast('Semua OSPO & OSPR dikembalikan ke data SAP ✓', 'ok');
   }
@@ -22544,6 +22555,8 @@ function _fcResetPropose() {
   _fcPropose = {};
   _fcAutoPropose = false;
   try { localStorage.removeItem('fc_propose'); localStorage.removeItem('fc_autopropose'); } catch(e){}
+  // v15: hapus juga di cloud supaya tidak kembali setelah reload
+  try { cloudSave('fc_propose', '{}'); cloudSave('fc_autopropose', '0'); } catch(e){}
   renderForecast();
   toast('Propose PR dikosongkan ✓', 'ok');
 }
