@@ -4259,7 +4259,7 @@ function appStart() {
       } else if(_haveLocal && !window._mpsCloudBundle && _fbReady && _db) {
         // Device utama punya MPS lokal tapi cloud belum ada → seed sekali (tanpa upload ulang)
         try {
-          var _seed = JSON.stringify({ data:_mpsData, months:_mpsActiveMonths, fgDescs:_fgDescFromMps||{}, fgFc:_mpsFgFc||{}, ts:new Date().toISOString() });
+          var _seed = JSON.stringify({ data:_mpsData, months:_mpsActiveMonths, ym:_mpsMonthYM||{}, fgDescs:_fgDescFromMps||{}, fgFc:_mpsFgFc||{}, ts:new Date().toISOString() });
           if(_seed.length <= 950000) { cloudSave('mps_data_full', _seed); window._mpsCloudBundle = _seed; }
         } catch(e){}
       }
@@ -20734,8 +20734,32 @@ function _mpsFingerprint(mps, months) {
   return codes.length + '_' + str.length + '_' + (h>>>0).toString(36);
 }
 
+// v16: tahun-bulan SEBENARNYA tiap kunci bulan MPS, mis. {Nov:'2026-11', Jan:'2027-01', Okt..}.
+// Diisi parser dari header bersuffix (_1 = tahun depan). Kosong = perilaku lama (tebak dari nama).
+var _mpsMonthYM = (function(){ try{ return JSON.parse(localStorage.getItem('mps_month_ym')||'{}')||{}; }catch(e){ return {}; } })();
+function _mpsSetMonthYM(ym){
+  _mpsMonthYM = (ym && typeof ym === 'object') ? ym : {};
+  try { localStorage.setItem('mps_month_ym', JSON.stringify(_mpsMonthYM)); } catch(e){}
+}
+// Offset (bulan) dari bulan berjalan untuk kunci bulan yang tahunnya diketahui; null kalau tidak diketahui.
+function _mpsYMOffset(name){
+  var ym = _mpsMonthYM && _mpsMonthYM[name]; if(!ym) return null;
+  var p = String(ym).split('-'); var y = parseInt(p[0],10), m = parseInt(p[1],10);
+  if(!y || !m) return null;
+  var now = new Date();
+  return (y*12 + m) - (now.getFullYear()*12 + now.getMonth() + 1);
+}
 function _mpsSortChrono(names) {
   var cur = new Date().getMonth() + 1; // 1-12
+  // v16: kalau tahun tiap bulan diketahui (header MPS bersuffix _1), pakai itu → horizon
+  // bisa penuh 12 bulan (bulan ini + 11 ke depan) dan bulan lampau dibuang dengan pasti.
+  var _hasYM = names.length && names.every(function(n){ return _mpsYMOffset(n) != null; });
+  if(_hasYM) {
+    return names.map(function(n){ return { name:n, off:_mpsYMOffset(n) }; })
+      .filter(function(x){ return x.off >= 0 && x.off <= 11; })
+      .sort(function(a,b){ return a.off - b.off; })
+      .map(function(x){ return x.name; });
+  }
   // offset 0 = bulan ini; 1..N = ke depan. Bulan lampau dibuang.
   // Ambang: bulan dianggap "ke depan" jika offset <= 11 (dalam 1 tahun). Bulan lampau
   // paling dekat (bulan lalu) punya offset 11 → itu yang harus dibuang. Kita batasi
@@ -20850,6 +20874,48 @@ function _mpsParseRows(rows, source, originLabel) {
         planIdxs[m] = idx;
       });
 
+      // ── v16: header lintas tahun ("Plan Nov", "Plan Des", "Plan Jan_1" … "Plan Nov_1") ──
+      // Nama bulan Indonesia + suffix _1 (= tahun depan) sebelumnya tidak terbaca untuk
+      // Mei/Agu/Okt (dicari 'may'/'aug'/'oct') → kolomnya dianggap 0 dan horizon putus.
+      // Kalau ADA header bersuffix angka, pilih kolom per bulan berdasarkan TAHUN-BULAN
+      // sebenarnya: hanya bulan berjalan s/d +11 bulan (12 kunci bulan unik). Kolom
+      // bulan lampau / lebih dari 12 bulan ke depan (mis. Plan Nov_1 saat ini Nov) dilewati.
+      var _MON_TOK = { jan:'Jan', feb:'Feb', peb:'Feb', mar:'Mar', apr:'Apr', mei:'May', may:'May', jun:'Jun', jul:'Jul', agu:'Aug', agt:'Aug', ags:'Aug', aug:'Aug', sep:'Sep', okt:'Oct', oct:'Oct', nov:'Nov', nop:'Nov', des:'Dec', dec:'Dec' };
+      var _nowAbs = new Date().getFullYear()*12 + new Date().getMonth() + 1;
+      function _yrCols(re){
+        var cols = [];
+        headers.forEach(function(h, hi){
+          var mm = re.exec(String(h).trim()); if(!mm) return;
+          var en = _MON_TOK[mm[1].toLowerCase().slice(0,3)]; if(!en) return;
+          cols.push({ hi:hi, m:en, yo: mm[2] ? parseInt(mm[2],10) : 0, suf: !!mm[2] });
+        });
+        return cols;
+      }
+      // Tahun dasar (kolom tanpa suffix) = tahun yang membuat kolom pertama paling dekat dgn bulan ini
+      function _yrPick(cols){
+        if(!cols.length || !cols.some(function(c){ return c.suf; })) return null;
+        var c0 = cols[0], cy = new Date().getFullYear(), best = null;
+        [cy-1, cy, cy+1].forEach(function(B){
+          var d = Math.abs(((B + c0.yo)*12 + _MRP_MONTH_NUM[c0.m]) - _nowAbs);
+          if(best === null || d < best.d) best = { B:B, d:d };
+        });
+        var pick = {}, ym = {};
+        cols.forEach(function(c){
+          var y = best.B + c.yo, abs = y*12 + _MRP_MONTH_NUM[c.m], off = abs - _nowAbs;
+          if(off < 0 || off > 11) return;               // bulan lampau / di luar 12 bulan
+          if(pick[c.m] !== undefined) return;            // kunci sudah terisi (tak mungkin dlm 12 bln)
+          pick[c.m] = c.hi; ym[c.m] = y + '-' + ('0' + _MRP_MONTH_NUM[c.m]).slice(-2);
+        });
+        return { idx:pick, ym:ym };
+      }
+      var _planYr = _yrPick(_yrCols(/^plan[\s_]+([A-Za-z]{3,})\.?(?:[\s_]*(\d+))?$/i));
+      if(_planYr) {
+        MRP_MONTHS.forEach(function(m){ planIdxs[m] = (_planYr.idx[m] !== undefined) ? _planYr.idx[m] : -1; });
+        _mpsSetMonthYM(_planYr.ym);
+      } else {
+        _mpsSetMonthYM({}); // format lama tanpa suffix → perilaku lama
+      }
+
       // Kolom FC (forecast FG) — KHUSUS item kode 11/12: Requirement diambil LANGSUNG
       // dari kolom ini (bukan plan×BOM). Header: "FC Okt", "FC Nov", "FC Des",
       // "FC Jan_1", "FC Feb_1", ... (suffix _1 = tahun berikutnya; cukup nama bulannya).
@@ -20861,6 +20927,10 @@ function _mpsParseRows(rows, source, originLabel) {
         var en = _FC_MON_TOK[mFc[1].toLowerCase().slice(0,3)];
         if(en && fcIdxs[en] === undefined) fcIdxs[en] = _hi; // horizon ≤ 12 bln → kolom pertama menang
       });
+      // v16: kalau header FC bersuffix tahun, pilih per tahun-bulan (mis. "FC Nov_1" = Nov tahun
+      // depan TIDAK boleh mengisi slot Nov bulan ini).
+      var _fcYr = _yrPick(_yrCols(/^FC[\s_]+([A-Za-z]{3,4})\.?(?:[\s_]*(\d+))?$/i));
+      if(_fcYr) fcIdxs = _fcYr.idx;
 
       // Bulan yang punya KOLOM Plan (belum tentu ada angkanya — dicek setelah parse data)
       var _colMonths = MRP_MONTHS.filter(function(m) { return planIdxs[m] >= 0; });
@@ -21795,13 +21865,13 @@ function _mrpIdbSaveMps(data, months) {
   _mrpIdbOpen(function(db) {
     if(!db) return;
     var tx = db.transaction('mps', 'readwrite');
-    tx.objectStore('mps').put({ id:'mps_data', data: data, months: months, fgDescs: _fgDescFromMps||{}, fgFc: _mpsFgFc||{}, ts: new Date().toISOString() });
+    tx.objectStore('mps').put({ id:'mps_data', data: data, months: months, ym: _mpsMonthYM||{}, fgDescs: _fgDescFromMps||{}, fgFc: _mpsFgFc||{}, ts: new Date().toISOString() });
   });
   // Sync ke cloud (Firestore) supaya device lain bisa buka rincian FG tanpa upload ulang.
   // Hanya cloud/IndexedDB — TIDAK menyentuh localStorage (hindari kuota).
   try {
     if(typeof cloudSave === 'function') {
-      var _mpsBundle = JSON.stringify({ data: data, months: months, fgDescs: _fgDescFromMps || {}, fgFc: _mpsFgFc || {}, ts: new Date().toISOString() });
+      var _mpsBundle = JSON.stringify({ data: data, months: months, ym: _mpsMonthYM || {}, fgDescs: _fgDescFromMps || {}, fgFc: _mpsFgFc || {}, ts: new Date().toISOString() });
       // Firestore batas 1 dokumen ~1MB. Kalau MPS terlalu besar, lewati (device lain
       // tetap bisa upload manual). Ambang aman 950 KB.
       if(_mpsBundle.length <= 950000) {
@@ -21822,6 +21892,7 @@ function _mpsApplyBundle(str) {
     _mpsData = b.data;
     if(b.fgDescs) _fgDescFromMps = b.fgDescs;
     if(b.fgFc) _mpsFgFc = b.fgFc;
+    _mpsSetMonthYM(b.ym || {}); // v16: tahun-bulan tiap kunci (kosong = bundle lama)
     if(b.months && typeof _mpsRecomputeActiveMonths === 'function') {
       _mpsActiveMonths = _mpsRecomputeActiveMonths(b.months);
       if(typeof _syncFcMonthsToMps === 'function') _syncFcMonthsToMps();
@@ -21831,7 +21902,7 @@ function _mpsApplyBundle(str) {
       // panggil versi IDB-only tanpa re-cloudSave: tulis langsung
       _mrpIdbOpen(function(db){
         if(!db) return;
-        try { db.transaction('mps','readwrite').objectStore('mps').put({ id:'mps_data', data:_mpsData, months:(b.months||_mpsActiveMonths), fgDescs:_fgDescFromMps||{}, fgFc:_mpsFgFc||{}, ts:new Date().toISOString() }); } catch(e){}
+        try { db.transaction('mps','readwrite').objectStore('mps').put({ id:'mps_data', data:_mpsData, months:(b.months||_mpsActiveMonths), ym:_mpsMonthYM||{}, fgDescs:_fgDescFromMps||{}, fgFc:_mpsFgFc||{}, ts:new Date().toISOString() }); } catch(e){}
       });
     }
     var el3 = document.getElementById('mps-status');
@@ -22026,6 +22097,7 @@ function _mrpIdbLoad() {
           _mpsData = e3.target.result.data;
           if(e3.target.result.fgDescs)  _fgDescFromMps   = e3.target.result.fgDescs;
           if(e3.target.result.fgFc)     _mpsFgFc        = e3.target.result.fgFc;
+          _mpsSetMonthYM(e3.target.result.ym || {}); // v16
           // Hitung ulang bulan aktif dari isi data (buang bulan berkolom-nol seperti Mar/Apr),
           // pakai months tersimpan sebagai kandidat awal. Tidak perlu upload MPS ulang.
           _mpsActiveMonths = _mpsRecomputeActiveMonths(e3.target.result.months);
